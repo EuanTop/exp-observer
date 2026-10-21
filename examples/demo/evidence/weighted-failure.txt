@@ -1,0 +1,5 @@
+MOCK RESEARCH FIXTURE
+BM25 score range: 0..22
+Dense similarity range: 0..1
+Direct score sum overweights BM25.
+Conclusion: evaluate ranking fusion rather than adding raw scores.

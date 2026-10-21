@@ -1,0 +1,5 @@
+method,latency_ms,recall_at_5
+linear,42.8,0.78
+bm25,8.6,0.81
+dense,38.2,0.86
+rrf,14.2,0.89

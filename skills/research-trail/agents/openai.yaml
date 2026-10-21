@@ -1,0 +1,3 @@
+interface:
+  display_name: "研迹 · Research Trail"
+  short_description: "Maintain a local graph of experiments, evidence, and decisions"

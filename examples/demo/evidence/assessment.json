@@ -1,0 +1,9 @@
+{
+  "origin": "mock",
+  "rubric": "retrieval-v1",
+  "qualityGate": {
+    "metric": "recall_at_5",
+    "minimum": 0.8
+  },
+  "revision": "Preparation cost added; original run reused."
+}

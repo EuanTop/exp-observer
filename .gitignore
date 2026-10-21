@@ -1,0 +1,13 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.gtrack/
+.gtrack-runs/
+*.tsbuildinfo
+work/
+outputs/
+.DS_Store
+examples/real-study/*.json
+examples/real-study/*.csv
+examples/recorded-workspace/
