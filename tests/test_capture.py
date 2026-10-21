@@ -187,7 +187,7 @@ class CaptureTests(unittest.TestCase):
         self.invoke(*arguments)
         path = next(path for path in (self.root / '.exp-observer-runs/outbox').glob('*.json')
                     if not path.name.startswith('project-'))
-        task = json.loads(path.read_text())
+        task = json.loads(path.read_text(encoding='utf-8'))
         for key in ('after', 'relation', 'independent'):
             task['intent'].pop(key)
         cli.save_task(path, task)
@@ -195,7 +195,7 @@ class CaptureTests(unittest.TestCase):
         self.invoke(*arguments)
         self.assertEqual((self.root / 'once.txt').read_text(), '1')
         self.assertEqual(self.store.get_project('study'), before)
-        self.assertEqual(json.loads(path.read_text())['operations'], task['operations'])
+        self.assertEqual(json.loads(path.read_text(encoding='utf-8'))['operations'], task['operations'])
 
     def test_record_wraps_json_root_values_without_rewriting_result_files(self):
         metrics_path = self.root / 'metrics.json'
