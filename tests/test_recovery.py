@@ -159,6 +159,9 @@ class RecoveryTests(unittest.TestCase):
         with patch('subprocess.Popen', side_effect=AssertionError('Recovery attempted to execute an experiment')):
             self.start()
             self.wait_for(lambda: len(self.store.get_project('execution')['artifacts']) == 2)
+            # HTTP persistence can precede the worker's local receipt and unlock.
+            # Finish that recovery before testing a subsequent command retry.
+            self.server.recovery.stop()
             code, repeated = self.invoke(*arguments)
         self.assertEqual(code, 0)
         self.assertFalse(repeated['pending'])
