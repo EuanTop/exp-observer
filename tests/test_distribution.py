@@ -99,7 +99,8 @@ class DistributionSmokeTests(unittest.TestCase):
             data = temporary / '研究 records'
             empty_path = temporary / 'no external executables'
             empty_path.mkdir()
-            environment = dict(os.environ, PATH=str(empty_path), PYTHONIOENCODING='utf-8', PYTHONNOUSERSITE='1')
+            environment = dict(os.environ, PATH=str(empty_path), PYTHONIOENCODING='utf-8', PYTHONNOUSERSITE='1',
+                               PYTHONPROFILEIMPORTTIME='1')
             process = subprocess.Popen(
                 [sys.executable, '-u', str(root / 'start.py'), '--no-browser', '--port', '0',
                  '--data-dir', str(data), '--no-demo'], cwd=temporary,
@@ -127,7 +128,7 @@ class DistributionSmokeTests(unittest.TestCase):
                     match = re.search(r'http://127\.0\.0\.1:(\d+)', line)
                     if match and int(match.group(1)):
                         url = match.group(0)
-                self.assertIsNotNone(url, 'Packaged launcher did not start:\n' + ''.join(output))
+                self.assertIsNotNone(url, f'Packaged launcher did not start (exit={process.poll()}):\n' + ''.join(output))
                 with urlopen(url + '/api/health', timeout=10) as response:
                     self.assertTrue(json.load(response)['ok'])
                 with urlopen(url, timeout=10) as response:
