@@ -209,13 +209,13 @@ def task_lock(path):
             try:
                 msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
             except OSError as exc:
-                raise ClientError('This local record is already being processed.') from exc
+                raise ClientError('This local record is already being processed.', code='busy') from exc
         else:
             import fcntl
             try:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError as exc:
-                raise ClientError('This local record is already being processed.') from exc
+                raise ClientError('This local record is already being processed.', code='busy') from exc
         try:
             yield
         finally:
@@ -340,6 +340,21 @@ def sync_project(client, path, plan):
     return result
 
 
+def pending_project_receipt(project_id, plan=None):
+    result = {'id': project_id, 'projectId': project_id, 'pending': plan is not None,
+              'availability': 'pending' if plan is not None else 'unavailable'}
+    warnings = []
+    if plan is not None:
+        result.update({key: plan['project'][key] for key in ('name', 'description') if key in plan['project']})
+        if isinstance(plan.get('preparedAt'), str):
+            result['preparedAt'] = plan['preparedAt']
+        warnings.extend(plan.get('recordingWarnings', []))
+    warnings.append('Project initialization is already being processed.' if plan is not None else
+                    'Project initialization is already being processed, but a durable project plan could not be confirmed.')
+    result['recordingWarnings'] = warnings
+    return result
+
+
 def init(client, args):
     if not args.name.strip():
         raise ClientError('Experiment name is required.')
@@ -347,11 +362,32 @@ def init(client, args):
         [client.url, str(Path.cwd().resolve()), args.name.strip()], ensure_ascii=False).encode('utf-8')).hexdigest()[:24]
     metadata = {'id': project_id, 'name': args.name.strip(), 'description': args.description,
                 'sourceRoots': [str(Path(root).expanduser().resolve()) for root in args.source_root]}
-    path, plan = prepare_project(Path.cwd() / '.exp-observer-runs' / 'outbox', client.url, metadata)
-    with task_lock(path):
-        plan = json.loads(path.read_text(encoding='utf-8'))
-        result = sync_project(client, path, plan)
-    if plan['project'] != metadata:
+    outbox = Path.cwd() / '.exp-observer-runs' / 'outbox'
+    path, plan = project_plan_path(outbox, client.url, project_id), None
+    try:
+        path, plan = prepare_project(outbox, client.url, metadata)
+        with task_lock(path):
+            plan = json.loads(path.read_text(encoding='utf-8'))
+            result = sync_project(client, path, plan)
+    except ClientError as exc:
+        if exc.code != 'busy':
+            raise
+        if plan is None:
+            # A readable atomic snapshot can confirm frozen metadata. Windows may
+            # refuse this read during replacement; then report only the known ID.
+            try:
+                candidate = read_queue_task(path)
+                if (candidate.get('kind') == 'project' and candidate['url'] == client.url
+                        and candidate['projectId'] == project_id and isinstance(candidate.get('project'), dict)
+                        and candidate['project'].get('id') == project_id
+                        and isinstance(candidate['project'].get('name'), str) and isinstance(candidate.get('preparedAt'), str)):
+                    plan = candidate
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        # When preparation already returned a plan, use that snapshot directly:
+        # no further reads, writes or HTTP requests while recovery owns its lock.
+        result = pending_project_receipt(project_id, plan)
+    if plan is not None and plan['project'] != metadata:
         result.setdefault('recordingWarnings', []).append('Creation metadata was already prepared; the original plan is retained.')
     emit(result)
     return 0

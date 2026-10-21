@@ -1,5 +1,6 @@
 """Offline onboarding and application recovery use isolated user state and research data."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -15,6 +16,24 @@ from backend.recovery import Recovery
 from backend.server import Server
 from backend.store import Store, StoreError
 from tests.test_capture import cli, working_directory
+
+
+@contextmanager
+def held_project_lock(path):
+    held, release = threading.Event(), threading.Event()
+    def hold():
+        with cli.task_lock(path):
+            held.set()
+            release.wait(5)
+    thread = threading.Thread(target=hold, daemon=True)
+    thread.start()
+    try:
+        if not held.wait(2):
+            raise AssertionError('The competing project lock was not acquired')
+        yield
+    finally:
+        release.set()
+        thread.join(timeout=2)
 
 
 class RecoveryTests(unittest.TestCase):
@@ -364,6 +383,88 @@ class RecoveryTests(unittest.TestCase):
         project = self.store.get_project('interrupted')
         self.assertEqual((project['nodes'][0]['status'], project['nodes'][0]['pauseReason']), ('paused', 'Command interrupted'))
         self.assertEqual((project['runs'][0]['status'], project['runs'][0]['metrics']['exitCode']), ('cancelled', 130))
+
+    def test_init_reacquire_busy_returns_frozen_pending_without_more_io(self):
+        outbox = self.root / '.exp-observer-runs' / 'outbox'
+        metadata = {'id': 'busy-gap', 'name': 'Frozen name', 'description': 'Frozen description', 'sourceRoots': []}
+        path, plan = cli.prepare_project(outbox, self.url, metadata)
+        original_bytes = path.read_bytes()
+        prepare, read_text = cli.prepare_project, Path.read_text
+        gap_started = False
+        with ExitStack() as held:
+            def compete_after_preparation(*args, **kwargs):
+                nonlocal gap_started
+                result = prepare(*args, **kwargs)
+                held.enter_context(held_project_lock(result[0]))
+                gap_started = True
+                return result
+            def reject_gap_read(file, *args, **kwargs):
+                if gap_started:
+                    raise AssertionError('Init reread a file after recovery acquired the plan lock')
+                return read_text(file, *args, **kwargs)
+            with patch.object(cli, 'prepare_project', side_effect=compete_after_preparation), \
+                    patch.object(Path, 'read_text', reject_gap_read), \
+                    patch.object(cli, 'save_task') as write, \
+                    patch.object(self.client, 'request') as request:
+                code, result = self.invoke('init', '--id', 'busy-gap', '--name', 'New proposal', '--description', 'New description')
+                write.assert_not_called()
+                request.assert_not_called()
+        self.assertEqual(code, 0)
+        self.assertEqual((result['pending'], result['availability']), (True, 'pending'))
+        self.assertEqual((result['name'], result['description'], result['preparedAt']),
+                         ('Frozen name', 'Frozen description', plan['preparedAt']))
+        self.assertEqual(path.read_bytes(), original_bytes)
+
+    def test_init_prepare_busy_preserves_readable_frozen_metadata(self):
+        outbox = self.root / '.exp-observer-runs' / 'outbox'
+        metadata = {'id': 'busy-prepare', 'name': 'Frozen', 'description': 'Original', 'sourceRoots': []}
+        path, plan = cli.prepare_project(outbox, self.url, metadata)
+        original_bytes = path.read_bytes()
+        with held_project_lock(path), patch.object(cli, 'save_task') as write, patch.object(self.client, 'request') as request:
+            code, result = self.invoke('init', '--id', 'busy-prepare', '--name', 'Changed')
+            write.assert_not_called()
+            request.assert_not_called()
+        self.assertEqual(code, 0)
+        self.assertEqual((result['id'], result['pending'], result['availability']), ('busy-prepare', True, 'pending'))
+        self.assertEqual((result['name'], result['description'], result['preparedAt']), ('Frozen', 'Original', plan['preparedAt']))
+        self.assertEqual(path.read_bytes(), original_bytes)
+
+    def test_init_prepare_busy_windows_read_denied_does_not_claim_unconfirmed_queue(self):
+        outbox = self.root / '.exp-observer-runs' / 'outbox'
+        path, _ = cli.prepare_project(outbox, self.url,
+            {'id': 'busy-windows', 'name': 'Frozen', 'description': 'Original', 'sourceRoots': []})
+        original_bytes, read_text = path.read_bytes(), Path.read_text
+        def denied_read(file, *args, **kwargs):
+            if file == path:
+                raise PermissionError('Windows replacement is in progress')
+            return read_text(file, *args, **kwargs)
+        with held_project_lock(path), patch.object(Path, 'read_text', denied_read), \
+                patch.object(cli, 'save_task') as write, patch.object(self.client, 'request') as request:
+            code, result = self.invoke('init', '--id', 'busy-windows', '--name', 'Unconfirmed proposal')
+            write.assert_not_called()
+            request.assert_not_called()
+        self.assertEqual(code, 0)
+        self.assertEqual((result['id'], result['pending'], result['availability']), ('busy-windows', False, 'unavailable'))
+        for unknown in ('name', 'description', 'preparedAt'):
+            self.assertNotIn(unknown, result)
+        self.assertIn('could not be confirmed', result['recordingWarnings'][0])
+        self.assertEqual(path.read_bytes(), original_bytes)
+
+    def test_init_prepare_busy_without_valid_plan_does_not_claim_durable_queue(self):
+        outbox = self.root / '.exp-observer-runs' / 'outbox'
+        path = cli.project_plan_path(outbox, self.url, 'not-prepared')
+        for content in (None, '[]'):
+            with self.subTest(content=content), held_project_lock(path):
+                if content is not None:
+                    path.write_text(content, encoding='utf-8')
+                with patch.object(cli, 'save_task') as write, patch.object(self.client, 'request') as request:
+                    code, result = self.invoke('init', '--id', 'not-prepared', '--name', 'Not yet frozen')
+                    write.assert_not_called()
+                    request.assert_not_called()
+                self.assertEqual(code, 0)
+                self.assertEqual((result['pending'], result['availability']), (False, 'unavailable'))
+                self.assertNotIn('preparedAt', result)
+                self.assertNotIn('name', result)
 
 
 if __name__ == '__main__':
