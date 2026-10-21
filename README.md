@@ -2,13 +2,13 @@
 
 [简体中文](README.zh-CN.md)
 
-**A local research graph maintained by you and your agents.**
+**A local workspace for observing experiments and research.**
 
-Explore alternatives, keep evidence, and follow how an experiment changes direction. Any node can contain a graph: group a few algorithm ideas, expand their experiments, then trace the results into a decision. Agents maintain the same experiment across conversations through a portable Skill and small JSON updates.
+Explore alternatives, keep evidence, and follow how an experiment changes direction. Agents record findings and existing results through a portable Skill; the interface updates from those records. Expand nested alternatives, compare results, and trace the evidence behind a decision across conversations.
 
-![Research graph with nested algorithm branches, experiment states and linked findings](docs/screenshots/research.png)
+![Current research graph with a nested candidate group, horizontal connections and separate reciprocal links](docs/screenshots/research.png)
 
-*Research graph: explore nested alternatives and trace evidence into decisions.*
+*Current interface with synthetic demonstration data: nested candidates, evidence links, and a two-way review loop. Active indicators rotate and connections show directional flow in the app.*
 
 ## Quick start
 
@@ -40,9 +40,9 @@ Node state distinguishes **not started** (`proposed`), **active**, **paused**, *
 
 `N` adds a node, `⌘/Ctrl K` opens search, `⌘/Ctrl G` groups selected nodes, and `F` fits the graph. Drag a node by its header. Shift-drag selects nodes; a trackpad or middle/right mouse button pans the canvas. Double-click a container to focus it.
 
-![Measured results and assessments for Python inverted-index and SQLite FTS5 runs](docs/screenshots/comparison.png)
+![Current comparison view preserving nested JSON metrics from two synthetic example runs](docs/screenshots/comparison.png)
 
-*Compare measured results and assessments side by side. Shown here: the [exact-search study](examples/real-study/report.md).*
+*Compare configuration, nested metrics and assessments side by side. This screenshot uses synthetic demonstration data. For a measured example, see the [exact-search study](examples/real-study/report.md).*
 
 ## Give your agent the Skill
 
