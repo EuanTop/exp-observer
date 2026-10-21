@@ -1,0 +1,73 @@
+name: Release ExpObserver
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: python scripts/package_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exp-observer-release
+          path: |
+            .context/release/exp-observer.zip
+            .context/release/SHA256SUMS
+          include-hidden-files: true
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: actions/download-artifact@v4
+        with:
+          name: exp-observer-release
+          path: .context/release
+      - run: python -m unittest discover -s tests -p test_distribution.py -v
+        env:
+          EXP_OBSERVER_RELEASE_ZIP: .context/release/exp-observer.zip
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: exp-observer-release
+          path: .context/release
+      - name: Publish the tested archive and checksum
+        run: gh release create "$GITHUB_REF_NAME" .context/release/exp-observer.zip .context/release/SHA256SUMS --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

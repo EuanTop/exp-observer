@@ -77,7 +77,7 @@ python3 skills/exp-observer/scripts/exp_observer.py observe finish --project ID 
 `start` returns `observationId`, the project revision and observation fields. With a request ID, the CLI derives a stable observation ID from it; use the same request ID only to retry the same operation. Finish uses a distinct request ID and the returned observation ID. Finish also returns the resulting fields, including actual elapsed time and the known/unknown counters. Either input or output count can be supplied independently when only one is available. Both commands use the same `EXP_OBSERVER_URL` / global `--url` configuration as other CLI operations. No additional model call is used to start, finish or aggregate observations.
 
 HTTP, local loopback only:
-- GET `/api/health` -> `{ok:true,version:'0.1.0'}`
+- GET `/api/health` -> `{ok:true,version:'0.1.1'}`
 - GET `/api/agent-setup` -> `{skillPath,clientPath,pythonPath,shell,url}` using the running server's absolute bundled Skill/client/interpreter paths and actual loopback port; `shell` is `powershell` on Windows and `posix` elsewhere. The UI uses literal quoting and the PowerShell call operator where required, so copied client commands work with spaces, apostrophes and shell metacharacters in installation paths.
 - GET `/api/projects` -> `{projects:[{id,name,description,revision,nodeCount,updatedAt}]}`
 - POST `/api/projects` `{id?,name,description?}` -> Project

@@ -87,6 +87,12 @@ class PortabilityTests(unittest.TestCase):
                         self.assertEqual(response.headers.get_content_type(), expected)
                         self.assertEqual(response.read(), b'fixture')
 
+    def test_local_server_startup_does_not_require_reverse_dns(self):
+        with patch('socket.getfqdn', side_effect=AssertionError('Reverse DNS is unavailable')):
+            with Server(('127.0.0.1', 0), self.store, dist=self.dist) as server:
+                self.assertEqual(server.server_name, 'localhost')
+                self.assertGreater(server.server_port, 0)
+
     def test_execute_project_ids_with_windows_path_aliases(self):
         captures = set()
         for project_id in ('CON', 'study.', 'a' * 127 + '.', 'Case', 'case'):
@@ -114,10 +120,8 @@ class WindowsLauncherTests(unittest.TestCase):
             shutil.copyfile(ROOT / 'start.bat', root / 'start.bat')
             (root / 'dist').mkdir()
             (root / 'dist' / 'index.html').write_bytes(b'fixture')
-            (root / 'backend').mkdir()
-            (root / 'backend' / '__init__.py').write_bytes(b'')
             # A tiny entrypoint verifies launcher dispatch without starting a persistent server.
-            (root / 'backend' / 'server.py').write_text(
+            (root / 'start.py').write_text(
                 'import json, os, sys\n'
                 "print(json.dumps({'cwd': os.getcwd(), 'argv': sys.argv[1:]}))\n"
                 'sys.exit(7)\n', encoding='utf-8')
@@ -127,7 +131,7 @@ class WindowsLauncherTests(unittest.TestCase):
             self.assertEqual(result.returncode, 7, result.stderr)
             captured = json.loads(result.stdout.decode('utf-8'))
             self.assertEqual(Path(captured['cwd']), root)
-            self.assertEqual(captured['argv'], ['--port', '4317', '--no-demo', '--data-dir', 'data folder'])
+            self.assertEqual(captured['argv'], ['--no-demo', '--data-dir', 'data folder'])
 
 
 if __name__ == '__main__':
