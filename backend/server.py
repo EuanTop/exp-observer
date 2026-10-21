@@ -6,6 +6,7 @@ import mimetypes
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 import sys
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -31,6 +32,13 @@ class Server(ThreadingHTTPServer):
         self.store = store
         self.dist = Path(dist or Path(__file__).resolve().parents[1] / 'dist').resolve()
         super().__init__(address, Handler)
+
+    def server_bind(self):
+        # The service is local: HTTPServer's reverse DNS lookup can stall startup
+        # on macOS when the machine's resolver is unavailable.
+        TCPServer.server_bind(self)
+        self.server_name = 'localhost'
+        self.server_port = self.server_address[1]
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -99,8 +99,7 @@ class DistributionSmokeTests(unittest.TestCase):
             data = temporary / '研究 records'
             empty_path = temporary / 'no external executables'
             empty_path.mkdir()
-            environment = dict(os.environ, PATH=str(empty_path), PYTHONIOENCODING='utf-8', PYTHONNOUSERSITE='1',
-                               PYTHONPROFILEIMPORTTIME='1')
+            environment = dict(os.environ, PATH=str(empty_path), PYTHONIOENCODING='utf-8', PYTHONNOUSERSITE='1')
             process = subprocess.Popen(
                 [sys.executable, '-u', str(root / 'start.py'), '--no-browser', '--port', '0',
                  '--data-dir', str(data), '--no-demo'], cwd=temporary,

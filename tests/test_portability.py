@@ -87,6 +87,12 @@ class PortabilityTests(unittest.TestCase):
                         self.assertEqual(response.headers.get_content_type(), expected)
                         self.assertEqual(response.read(), b'fixture')
 
+    def test_local_server_startup_does_not_require_reverse_dns(self):
+        with patch('socket.getfqdn', side_effect=AssertionError('Reverse DNS is unavailable')):
+            with Server(('127.0.0.1', 0), self.store, dist=self.dist) as server:
+                self.assertEqual(server.server_name, 'localhost')
+                self.assertGreater(server.server_port, 0)
+
     def test_execute_project_ids_with_windows_path_aliases(self):
         captures = set()
         for project_id in ('CON', 'study.', 'a' * 127 + '.', 'Case', 'case'):
