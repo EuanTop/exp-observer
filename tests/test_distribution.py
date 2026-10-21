@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import socket
 import stat
 import subprocess
 import sys
@@ -99,9 +100,35 @@ class DistributionSmokeTests(unittest.TestCase):
             data = temporary / '研究 records'
             empty_path = temporary / 'no external executables'
             empty_path.mkdir()
-            environment = dict(os.environ, PATH=str(empty_path), PYTHONIOENCODING='utf-8', PYTHONNOUSERSITE='1')
+            environment = dict(os.environ, PATH=str(empty_path), PYTHONIOENCODING='utf-8', PYTHONNOUSERSITE='1',
+                               EXP_OBSERVER_STATE_DIR=str(temporary / 'recovery-state'))
+            # Prepare work with only the extracted portable Skill, before the app exists.
+            with socket.socket() as reserved:
+                reserved.bind(('127.0.0.1', 0))
+                port = reserved.getsockname()[1]
+            pending_url = f'http://127.0.0.1:{port}'
+            packaged_client = root / 'skills/exp-observer/scripts/exp_observer.py'
+
+            def invoke(*arguments):
+                result = subprocess.run([sys.executable, str(packaged_client), '--url', pending_url, *arguments],
+                                        cwd=temporary, capture_output=True, timeout=20, env=environment)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return json.loads(result.stdout)
+
+            prepared = invoke('init', '--id', 'release-offline', '--name', '离线发行验证')
+            self.assertTrue(prepared['pending'], prepared)
+            unavailable = invoke('context', '--project', 'release-offline')
+            self.assertIn('unavailable', json.dumps(unavailable))
+            metrics = {'measured': {'values': [1, None, True]}}
+            evidence = temporary / '原始结果.json'
+            original = json.dumps(metrics).encode('utf-8')
+            evidence.write_bytes(original)
+            pending = invoke('record', '--project', 'release-offline', '--title', '已有离线结果',
+                             '--metrics-file', str(evidence), '--artifact', str(evidence))
+            self.assertTrue(pending['pending'], pending)
+            evidence.write_bytes(b'{"changed":true}')
             process = subprocess.Popen(
-                [sys.executable, '-u', str(root / 'start.py'), '--no-browser', '--port', '0',
+                [sys.executable, '-u', str(root / 'start.py'), '--no-browser', '--port', str(port),
                  '--data-dir', str(data), '--no-demo'], cwd=temporary,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding='utf-8', errors='replace',
@@ -145,6 +172,24 @@ class DistributionSmokeTests(unittest.TestCase):
                 self.assertEqual(Path(setup['skillPath']), root / 'skills/exp-observer/SKILL.md')
                 self.assertEqual(Path(setup['clientPath']), root / 'skills/exp-observer/scripts/exp_observer.py')
                 self.assertTrue(Path(setup['skillPath']).is_file())
+                # Startup recovery must ingest the original staged bytes without a sync call.
+                recovered = None
+                recovery_deadline = time.monotonic() + 15
+                while time.monotonic() < recovery_deadline:
+                    try:
+                        with urlopen(url + '/api/projects/release-offline', timeout=3) as response:
+                            recovered = json.load(response)
+                        if len(recovered['artifacts']) == 1:
+                            break
+                    except OSError:
+                        pass
+                    time.sleep(0.1)
+                self.assertIsNotNone(recovered)
+                self.assertEqual(recovered['name'], '离线发行验证')
+                self.assertEqual(len(recovered['nodes']), 1)
+                self.assertEqual(recovered['runs'][0]['metrics'], metrics)
+                self.assertEqual(len(recovered['artifacts']), 1)
+                self.assertEqual(Path(recovered['artifacts'][0]['path']).read_bytes(), original)
                 client = subprocess.run(
                     [sys.executable, setup['clientPath'], '--url', url, 'init', '--id', 'release-check', '--name', '发行验证'],
                     cwd=temporary, capture_output=True, timeout=20, env=environment)

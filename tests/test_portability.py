@@ -24,6 +24,9 @@ class PortabilityTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / '研究 with spaces'
         self.root.mkdir()
+        environment = patch.dict(os.environ, {'EXP_OBSERVER_STATE_DIR': str(self.root / 'state')})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.store = Store(self.root / 'data')
         self.store.create_project({'id': 'study', 'name': '研究项目'})
         self.store.batch('study', {'operations': [{'op': 'node.add', 'data': {'id': 'a'}}]})

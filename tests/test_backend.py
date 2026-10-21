@@ -350,6 +350,9 @@ class HTTPAndCLITests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        environment = patch.dict(os.environ, {'EXP_OBSERVER_STATE_DIR': str(self.root / 'state')})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.store = Store(self.root / 'data')
         self.store.create_project({'id': 'study', 'name': 'Study'})
         self.store.batch('study', {'operations': [{'op': 'node.add', 'data': {'id': 'a'}}]})

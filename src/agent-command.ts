@@ -1,7 +1,7 @@
 import type { AgentSetup } from "./api";
 
 export function agentPrompt(setup: AgentSetup, projectId?: string): string {
-  return `请读取 Skill：${setup.skillPath}\n服务：${setup.url}${projectId ? `\n实验：${projectId}\n读取该实验的 context，再执行我的研究任务。` : "\n执行我的研究任务。"}`;
+  return `请读取 Skill：${setup.skillPath}\n服务：${setup.url}${projectId ? `\n实验 ID：${projectId}\n按我的研究任务推进，参考可用的实验 context。` : "\n按我的研究任务推进。"}`;
 }
 
 export function agentCommand(setup: AgentSetup, projectId?: string): string {

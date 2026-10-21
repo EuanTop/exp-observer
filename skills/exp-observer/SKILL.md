@@ -5,44 +5,50 @@ description: Observe research in a local ExpObserver experiment with brief updat
 
 # ExpObserver
 
-Work on the user's research task with their objective, methods, budget and deliverables. ExpObserver records that work. Choose research directions from the task and evidence; the platform adds no experimental phases, required measurements or scientific review steps.
+Follow the user's research objective, budget and deliverables. Choose methods and next steps from the task and evidence. ExpObserver retains findings and existing results without prescribing research steps.
 
 Use `scripts/exp_observer.py` relative to this Skill with Python 3.10+. Examples use `python3`; on Windows use `py -3` or the installed interpreter. The default address is `http://127.0.0.1:4317`; `EXP_OBSERVER_URL` or global `--url URL` selects another server.
 
-## Read just enough to resume
+## Join or begin an experiment
 
-Use `context --project ID` once when joining an experiment, or `context --project ID --node NODE` for a particular branch. Use `projects` if its ID is unknown. Experiments persist across conversations; each operation names its project explicitly.
+With an experiment ID, use `context --project ID` once. If unavailable, continue from research files and any dated cache; missing context does not mean an empty experiment. Keep the supplied ID.
+
+For a new experiment without an ID, prepare it once:
+
+```sh
+python3 <skill>/scripts/exp_observer.py init --name "Research task"
+```
+
+Keep the returned ID across conversations. This works offline; `record --project ID` can also prepare a missing project without `init`.
 
 ## Record at natural boundaries
 
-When the research already produces a result, changes direction or reaches a decision, leave a brief data update. Reuse the relevant record when convenient. Take its title and optional summary from facts already established. Recording is optional for routine intermediate steps.
+When the work establishes a finding, changes a judgment or reaches a decision, briefly record the facts already established. Reuse existing results and wording. Routine intermediate steps need no separate record.
 
 ```sh
-python3 <skill>/scripts/exp_observer.py record --project ID --title "Observed result" --summary "Evidence and implication" --metrics-file results.json --artifact results.json
+python3 <skill>/scripts/exp_observer.py record --project ID --title "Observed finding" --summary "Evidence and implication"
 ```
 
-`record` supplies IDs and run/evidence references. `--node NODE` updates an existing record; `--after NODE` records an actual research continuation; `--parent NODE` groups related records. Omit options you do not need. Use `--status completed` when that work is complete. The client handles retry bookkeeping.
+`record` supplies IDs and references. Keep a distinct finding separately; use `--node NODE` to revise the same finding. A batch comparison may remain one record. `--after NODE` optionally retains an actual continuation. Use `--status completed` when that work is complete. Record count is not a target; retain only supported relationships and chronology.
 
-Pass original JSON results, including nested objects, arrays, nulls and booleans. Object roots are stored directly; other roots are stored under `result`. Experimental output files remain unchanged.
+For an existing JSON result, add `--metrics-file results.json --artifact results.json`. Nested objects, arrays and nulls are accepted; non-object roots use `result`. Source files stay unchanged.
 
 For an existing command you want captured:
 
 ```sh
-python3 <skill>/scripts/exp_observer.py execute --project ID --node NODE --title "Actual command" --artifact results.json -- python3 experiment.py
+python3 <skill>/scripts/exp_observer.py execute --project ID --title "Actual command" -- python3 experiment.py
 ```
 
-This captures command timing, exit code, stdout/stderr and requested files without extra model calls. Select commands from the research task. Optional step timers and actual host token counters are available in the reference when useful; measuring them is not a condition for continuing research.
+This supplies a record ID and captures timing, exit code and stdout/stderr. Add `--artifact PATH` for result files, or `--node NODE` to attach an existing record.
 
 ## Let recording recover separately
 
-`record` and `execute` preserve pending records and staged evidence under `.exp-observer-runs/outbox` when registration fails. The command's exit status describes the experiment; `recordingWarnings` and `pending` describe recording. At a convenient boundary, use:
+Call the client even when offline: saving result files alone does not queue a record. `init`, `record` and `execute` save pending work locally; the application automatically retries registered queues when running. A pending receipt means saved locally, awaiting registration. Continue research without polling.
 
-```sh
-python3 <skill>/scripts/exp_observer.py sync
-```
+The command's exit status describes the experiment; `pending` and `recordingWarnings` describe recording. If the host blocks client execution or local saving fails, continue and report recording unavailable; do not claim it was queued.
 
-Sync retries registration with stable identities and captured bytes; it never reruns the experiment. Continue the research while a recording issue is pending and mention it briefly when relevant. Avoid reformatting experimental outputs, repeating experiments or diagnosing the observation platform merely to complete a record.
+Recovery never reruns experiments or rereads changed source evidence. Do not reformat outputs, repeat experiments or diagnose the platform merely to complete a record. Manual `sync` is optional recovery.
 
-Keep observations factual. Attach existing evidence when available, label synthetic data honestly, and leave unavailable usage counters unknown. Follow the user's requested deliverables.
+Label synthetic data honestly and leave unavailable usage counters unknown.
 
-The [record reference](references/records.md) covers optional low-level edits, assessment revisions, timers and evidence reads. Use it only when those operations are needed.
+The [record reference](references/records.md) covers optional edits, assessments, timing and evidence reads.

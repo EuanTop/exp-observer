@@ -5,10 +5,27 @@ For routine recording, prefer the high-level client:
 ```sh
 python3 <skill>/scripts/exp_observer.py record --project ID --title "Result already reached" --metrics-file result.json --artifact result.json
 python3 <skill>/scripts/exp_observer.py record --project ID --node NODE --title "Updated finding" --summary "New evidence and implication"
-python3 <skill>/scripts/exp_observer.py sync
 ```
 
 IDs, run/evidence references and idempotent retries are handled by the client. `--after NODE` records a continuation relationship; `--parent NODE` groups related records. Metrics retain their original JSON object structure, including nested objects, arrays, empty containers and nulls. Non-object roots are stored under `result` while the original file is preserved.
+
+## Availability and recovery
+
+`init --name NAME [--id ID]` saves a project plan before contacting the service. Keep the returned ID, including when the receipt is pending. An explicit project passed to `record` can also prepare a missing project. Recovery creates the project only if absent; it never replaces an existing project's metadata.
+
+`context` returns an explicitly unavailable response when the service cannot be reached, together with any dated remote cache and a summary of local pending work. An unavailable response is not an empty remote experiment. Continue from research files when context is unavailable; preserve the supplied experiment ID.
+
+The client registers its outbox directory in the local user's recovery registry. The running application retries only these registered directories for its own loopback HTTP address, including after startup. It does not search research folders or execute experimental commands. Queue contents, captured timestamps and staged evidence are frozen before submission; retries reuse their stable identities. Local registration and file-access failures appear in recording warnings. A command blocked before execution cannot leave a durable record.
+
+Manual recovery remains available from the original working directory:
+
+```sh
+python3 <skill>/scripts/exp_observer.py sync --project ID
+```
+
+`sync` reports pending registration separately from experimental outcomes and never reruns an experiment. Automatic recovery does not cover low-level `apply`, `artifact`, timers or evidence reads; use those optional online operations only when appropriate. A real command's return code remains its own, even if registration is pending.
+
+`execute --project ID --title TITLE -- COMMAND...` also works without a pre-existing node: it retains a new record and the real execution together. Supply `--node NODE` only to attach an existing record. A supplied missing node remains an invalid reference awaiting correction, rather than causing the client to invent it.
 
 The following lower-level operations are optional adapter details.
 

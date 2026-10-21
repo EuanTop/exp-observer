@@ -28,10 +28,30 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, store, dist=None):
+    def __init__(self, address, store, dist=None, *, recovery=False, recovery_interval=2):
         self.store = store
         self.dist = Path(dist or Path(__file__).resolve().parents[1] / 'dist').resolve()
+        self.recovery_enabled = recovery
+        self.recovery_interval = recovery_interval
+        self.recovery = None
         super().__init__(address, Handler)
+
+    def serve_forever(self, poll_interval=0.5):
+        if self.recovery_enabled:
+            from .recovery import Recovery
+            host = self.server_address[0]
+            host = '[' + host + ']' if ':' in host else host
+            self.recovery = Recovery(f'http://{host}:{self.server_port}', interval=self.recovery_interval).start()
+        try:
+            super().serve_forever(poll_interval=poll_interval)
+        finally:
+            if self.recovery is not None:
+                self.recovery.stop()
+
+    def server_close(self):
+        if self.recovery is not None:
+            self.recovery.stop()
+        super().server_close()
 
     def server_bind(self):
         # The service is local: HTTPServer's reverse DNS lookup can stall startup
@@ -205,7 +225,7 @@ def main(argv=None):
             store.import_project(make_demo())
         except ImportError:
             pass
-    server = Server(('127.0.0.1', args.port), store)
+    server = Server(('127.0.0.1', args.port), store, recovery=True)
     print(f'ExpObserver http://127.0.0.1:{server.server_port}', flush=True)
     if args.open and not args.no_browser:
         import threading

@@ -36,6 +36,9 @@ class CaptureTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='exp capture 研究 ')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        environment = patch.dict(os.environ, {'EXP_OBSERVER_STATE_DIR': str(self.root / 'state')})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.store = Store(self.root / 'data')
         self.store.create_project({'id': 'study', 'name': 'Study'})
         self.store.batch('study', {'operations': [{'op': 'node.add', 'data': {'id': 'a'}}]})
@@ -57,7 +60,8 @@ class CaptureTests(unittest.TestCase):
 
     def tasks(self):
         return [json.loads(path.read_text(encoding='utf-8'))
-                for path in (self.root / '.exp-observer-runs' / 'outbox').glob('*.json')]
+                for path in (self.root / '.exp-observer-runs' / 'outbox').glob('*.json')
+                if not path.name.startswith('project-')]
 
     def offline(self):
         client = cli.Client(self.url, timeout=2)
@@ -231,7 +235,8 @@ class CaptureTests(unittest.TestCase):
         source.write_text('new source')
         code, synced = self.invoke('sync')
         self.assertEqual(code, 1)
-        self.assertIn('Staged evidence changed', synced['records'][0]['recordingWarnings'][0])
+        captured = next(record for record in synced['records'] if record.get('nodeId') == result['nodeId'])
+        self.assertIn('Staged evidence changed', captured['recordingWarnings'][0])
         self.assertEqual(self.store.get_project('study')['artifacts'], [])
 
     def test_concurrent_source_roots_are_merged_with_revision_retry(self):
