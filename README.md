@@ -10,33 +10,23 @@ Explore alternatives, keep evidence, and follow how an experiment changes direct
 
 *Research graph: explore nested alternatives and trace evidence into decisions.*
 
-## Start locally
+## Quick start
 
-Build from source on **Windows, macOS or Linux** with **Node.js 22+** and **Python 3.10+**. On Windows, install Python with its launcher or add Python to `PATH`; WSL is not required.
+**With an agent:** copy and send this instruction:
 
-```sh
-npm ci
-npm run build
-npm start
-```
+> Install and start ExpObserver and its Skill by following https://github.com/EuanTop/exp-observer/blob/main/INSTALL.md.
 
-Open [127.0.0.1:4317](http://127.0.0.1:4317). No account or model API key is needed. The local server uses Python's standard library.
-
-If your ZIP includes the built `dist/` directory, you can skip Node.js and start it directly:
+**By hand:** [download the ready-to-run ZIP](https://github.com/EuanTop/exp-observer/releases/latest/download/exp-observer.zip), extract it, then run this in the extracted `exp-observer` folder:
 
 ```sh
-python3 -m backend.server --port 4317
+python3 start.py
 ```
 
-On Windows (PowerShell or Command Prompt):
+On Windows, double-click `start.bat` or run `py -3 start.py`. On macOS, you can also double-click `start.command`. The launcher opens [127.0.0.1:4317](http://127.0.0.1:4317) in your browser. Keep its terminal open while using ExpObserver.
 
-```powershell
-py -3 -m backend.server --port 4317
-```
+You only need **[Python 3.10 or newer](https://www.python.org/downloads/)**. No Node.js, npm, pip packages, account or model API key is needed. On Windows, use `python start.py` if Python is on `PATH` without the `py` launcher. Download `exp-observer.zip` from Releases; GitHub's “Source code” ZIP is for developers and does not contain the built interface.
 
-You can also run `start.bat` on Windows or `start.command` on macOS. These launchers build a missing frontend when Node.js is available; an existing `dist/` needs only Python. If your Windows installation has no `py` launcher, use `python` instead of `py -3`.
-
-The default workspace includes a synthetic research demo. Add `--no-demo` to the server command for an empty workspace. Keep the server running while agents or the interface use it.
+The default workspace includes a synthetic demo. Add `--no-demo` for an empty workspace, or `--no-browser` to start without opening a browser. The interface's **Connect Agent** button supplies the instruction for attaching an agent to your experiment. [Installation details](INSTALL.md) · [Build from source](CONTRIBUTING.md#development)
 
 ## Work in the graph
 

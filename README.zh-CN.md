@@ -10,33 +10,23 @@
 
 *研究图将候选方案、实验和决策连接起来，支持展开嵌套子图。*
 
-## 本地启动
+## 快速开始
 
-支持在 **Windows、macOS 或 Linux** 上从源码构建，需要 **Node.js 22+** 和 **Python 3.10+**。Windows 安装 Python 时请安装启动器或将 Python 加入 `PATH`；无需 WSL。
+**交给 Agent：**复制这句话发送即可：
 
-```sh
-npm ci
-npm run build
-npm start
-```
+> 请按照 https://github.com/EuanTop/exp-observer/blob/main/INSTALL.md 安装并启动 ExpObserver，同时安装它的 Skill。
 
-打开 [127.0.0.1:4317](http://127.0.0.1:4317)。无需账号或模型 API Key，本地服务使用 Python 标准库。
-
-如果 ZIP 包内包含已构建的 `dist/` 目录，可以跳过 Node.js，直接运行：
+**手动安装：**[下载安装包](https://github.com/EuanTop/exp-observer/releases/latest/download/exp-observer.zip)，解压后在 `exp-observer` 文件夹中运行：
 
 ```sh
-python3 -m backend.server --port 4317
+python3 start.py
 ```
 
-Windows（PowerShell 或命令提示符）使用：
+Windows 双击 `start.bat`，或运行 `py -3 start.py`；macOS 也可以双击 `start.command`。启动器会自动打开浏览器，地址为 [127.0.0.1:4317](http://127.0.0.1:4317)。使用期间保持启动终端开启。
 
-```powershell
-py -3 -m backend.server --port 4317
-```
+只需要 **[Python 3.10 或更新版本](https://www.python.org/downloads/)**，无需 Node.js、npm、pip 依赖、账号或模型 API Key。Windows 如果没有 `py` 启动器但已将 Python 加入 `PATH`，使用 `python start.py`。请下载 Releases 中的 `exp-observer.zip`；GitHub 的“Source code”源码包不含已构建界面。
 
-也可以在 Windows 运行 `start.bat`，或在 macOS 运行 `start.command`。缺少前端构建时，启动器会使用 Node.js 构建；已有 `dist/` 时只需 Python。如果 Windows 未安装 `py` 启动器，用 `python` 替换 `py -3`。
-
-默认工作区包含模拟研究演示。需要空白工作区时，在服务命令末尾添加 `--no-demo`。Agent 或界面使用期间，请保持服务运行。
+默认包含模拟演示；添加 `--no-demo` 从空白工作区开始，添加 `--no-browser` 可不自动打开浏览器。开始研究后，用界面中的**连接 Agent**获取对应实验的接入指令。[安装细节](INSTALL.md) · [从源码开发](CONTRIBUTING.md#development)
 
 ## 在图中推进研究
 

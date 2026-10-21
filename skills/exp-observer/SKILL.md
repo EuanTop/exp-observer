@@ -13,6 +13,8 @@ The client runs on Windows, macOS and Linux with Python 3.10+. Examples below us
 
 Use **ExpObserver** as the product name and `exp-observer` as the repository and Skill name.
 
+If the local application is not installed, follow [the installation guide](https://github.com/EuanTop/exp-observer/blob/main/INSTALL.md) to download the ready-to-run release and start it with Python. Installing this Skill does not require Node.js or adding ExpObserver as a dependency to the research project.
+
 ## Restore only the relevant context
 
 Start or resume with `context --project ID`; prefer `--node NODE` for a local question. If the project is unknown, use `projects`. Scoped context includes descendants, touching relationships, and decision-referenced runs, effective assessments and evidence. Read the evidence needed for the next judgment rather than loading the entire export.

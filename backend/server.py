@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from . import __version__
 from .store import Store, StoreError, canonical
 
 MAX_BODY = 2 * 1024 * 1024
@@ -33,7 +34,7 @@ class Server(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'ExpObserver/0.1.0'
+    server_version = f'ExpObserver/{__version__}'
 
     def log_message(self, format, *args):
         if args and isinstance(args[0], str) and args[0].startswith('GET /api/projects'):
@@ -115,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
         method = 'GET' if self.command == 'HEAD' else self.command
         store = self.server.store
         if path == '/api/health' and method == 'GET':
-            return self._send({'ok': True, 'version': '0.1.0'})
+            return self._send({'ok': True, 'version': __version__})
         if path == '/api/agent-setup' and method == 'GET':
             root = Path(__file__).resolve().parents[1]
             return self._send({'skillPath': str(root / 'skills' / 'exp-observer' / 'SKILL.md'),
@@ -181,12 +182,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(target.read_bytes(), mime=mime)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description='ExpObserver local experiment workspace')
     parser.add_argument('--port', type=int, default=4317)
     parser.add_argument('--data-dir', default=str(Path(__file__).resolve().parents[1] / '.exp-observer'))
     parser.add_argument('--no-demo', action='store_true')
-    args = parser.parse_args()
+    parser.add_argument('--open', action='store_true', help='Open the interface in your browser')
+    parser.add_argument('--no-browser', action='store_true', help='Keep the browser closed when using a launcher')
+    args = parser.parse_args(argv)
     store = Store(args.data_dir)
     if not args.no_demo and not store.list_projects():
         try:
@@ -196,6 +199,10 @@ def main():
             pass
     server = Server(('127.0.0.1', args.port), store)
     print(f'ExpObserver http://127.0.0.1:{server.server_port}', flush=True)
+    if args.open and not args.no_browser:
+        import threading
+        import webbrowser
+        threading.Thread(target=webbrowser.open, args=(f'http://127.0.0.1:{server.server_port}',), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

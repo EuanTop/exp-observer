@@ -1,10 +1,10 @@
-#!/bin/zsh
+#!/bin/sh
 set -e
-cd -- "${0:A:h}"
-if [[ ! -f dist/index.html ]]; then
-  if [[ ! -d node_modules ]]; then
-    npm ci
+cd -- "$(dirname -- "$0")"
+for candidate in python3 python; do
+  if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+    exec "$candidate" start.py "$@"
   fi
-  npm run build
-fi
-exec python3 -m backend.server --port 4317
+done
+echo 'ExpObserver requires Python 3.10 or newer. Install Python, then run this launcher again.' >&2
+exit 1

@@ -4,7 +4,7 @@ ExpObserver is a local research graph that agents maintain through explicit, inc
 
 ## Development
 
-Use Node.js 22+ and Python 3.10+ on Windows, macOS or Linux. Windows runs natively and does not require WSL. Install the Python launcher or add Python to `PATH`.
+For development, use Node.js 20+ and Python 3.10+ on Windows, macOS or Linux. CI also checks Node.js 22. The ready-to-run release needs only Python; Node.js builds and tests the frontend. Windows runs natively and does not require WSL. Install the Python launcher or add Python to `PATH`.
 
 ```sh
 npm ci
@@ -41,7 +41,9 @@ npm run build
 python3 skills/exp-observer/scripts/exp_observer.py check --project PROJECT_ID
 ```
 
-Use `py -3` instead of `python3` for the client on Windows. CI runs the checks on Windows, macOS and Linux with Python 3.10 and 3.14. Keep subprocess arguments as lists, handle paths with spaces and Unicode, and make text fixture encodings and newline expectations explicit.
+Use `py -3` instead of `python3` for the client on Windows. CI runs the checks on Windows, macOS and Linux with Python 3.10 and 3.14, plus a Node.js 20 build. Keep subprocess arguments as lists, handle paths with spaces and Unicode, and make text fixture encodings and newline expectations explicit.
+
+Build the portable distribution after `npm run build` with `python3 scripts/package_release.py`. It contains the built frontend, Python backend, launchers and Skill, without Node dependencies or personal records. Tags named `v*` run distribution checks on all three platforms before publishing `exp-observer.zip` and `SHA256SUMS` to GitHub Releases.
 
 Add focused regression coverage for changes to record validation, history, concurrency, evidence handling and command capture. For interface changes, verify nested containers, collapsed connections, selection and relevant keyboard actions in both appearances.
 
