@@ -230,6 +230,78 @@ class Store:
                 destination.unlink(missing_ok=True)
             raise
 
+    def _workspaces(self, db):
+        row = db.execute("SELECT value FROM settings WHERE key = 'workspaces'").fetchone()
+        if row is None:
+            return []
+        try:
+            entries = json.loads(row['value'])
+            if not isinstance(entries, list) or any(not isinstance(entry, dict) or any(
+                    not isinstance(entry.get(key), str) for key in ('id', 'path', 'addedAt')) for entry in entries):
+                raise ValueError('Invalid workspace configuration')
+            return entries
+        except (ValueError, TypeError) as exc:
+            raise StoreError('Application workspace configuration could not be read.', 'storage_error', 500) from exc
+
+    def list_workspaces(self):
+        with self._transaction() as db:
+            return self._workspaces(db)
+
+    def _disabled_workspace_roots(self, db):
+        row = db.execute("SELECT value FROM settings WHERE key = 'disabled_workspaces'").fetchone()
+        if row is None:
+            return []
+        try:
+            roots = json.loads(row['value'])
+            if not isinstance(roots, list) or any(not isinstance(root, str) for root in roots):
+                raise ValueError('Invalid workspace configuration')
+            return roots
+        except (ValueError, TypeError) as exc:
+            raise StoreError('Application workspace configuration could not be read.', 'storage_error', 500) from exc
+
+    def recovery_workspaces(self):
+        with self._transaction() as db:
+            return {'workspaces': self._workspaces(db), 'disabledRoots': self._disabled_workspace_roots(db)}
+
+    def add_workspace(self, body):
+        object_value(body, 'Workspace')
+        supplied = body.get('path')
+        if not isinstance(supplied, str) or not supplied or not Path(supplied).is_absolute():
+            raise StoreError('Workspace path must be an absolute existing directory.')
+        try:
+            path = Path(supplied).resolve(strict=True)
+            if not path.is_dir():
+                raise ValueError('Not a directory')
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise StoreError('Workspace path must be an absolute existing directory.') from exc
+        with self._transaction(write=True) as db:
+            entries = self._workspaces(db)
+            for entry in entries:
+                try:
+                    same = path.samefile(entry['path'])
+                except OSError:
+                    same = os.path.normcase(str(path)) == os.path.normcase(entry['path'])
+                if same:
+                    return entries
+            key = hashlib.sha256(os.path.normcase(str(path)).encode('utf-8')).hexdigest()[:24]
+            entries.append({'id': 'workspace-' + key, 'path': str(path), 'addedAt': now()})
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('workspaces', ?)", (canonical(entries),))
+            disabled = [root for root in self._disabled_workspace_roots(db) if os.path.normcase(root) != os.path.normcase(str(path))]
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('disabled_workspaces', ?)", (canonical(disabled),))
+            return entries
+
+    def remove_workspace(self, body):
+        object_value(body, 'Workspace')
+        key = valid_id(body.get('id'))
+        with self._transaction(write=True) as db:
+            previous = self._workspaces(db)
+            entries = [entry for entry in previous if entry['id'] != key]
+            disabled = self._disabled_workspace_roots(db)
+            disabled.extend(entry['path'] for entry in previous if entry['id'] == key and entry['path'] not in disabled)
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('workspaces', ?)", (canonical(entries),))
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('disabled_workspaces', ?)", (canonical(disabled),))
+            return entries
+
     def _migrate_evidence(self, folder, project, installed):
         for artifact in project['artifacts']:
             if artifact.get('origin') != 'observed':
@@ -428,7 +500,7 @@ class Store:
         def bounds(node):
             x, y = node['position']['x'], node['position']['y']
             nested = [child for child in children.get(node['id'], []) if child['id'] not in unplaced]
-            width, height = 280, 178
+            width, height = 300, 250
             if nested and not node.get('collapsed', False):
                 rectangles = [bounds(child) for child in nested]
                 width = max(330, *(cx + cw - x + 28 for cx, cy, cw, ch in rectangles))
@@ -449,9 +521,9 @@ class Store:
                     rows = sorted({origin_y, *(max(origin_y, y + height + 52) for x, y, width, height in occupied)})
                     for y in rows:
                         for column in range(3):
-                            x = origin_x + column * 340
-                            if all(x + 308 <= ox or x >= ox + width + 28 or
-                                   y + 206 <= oy or y >= oy + height + 28
+                            x = origin_x + column * 360
+                            if all(x + 328 <= ox or x >= ox + width + 28 or
+                                   y + 278 <= oy or y >= oy + height + 28
                                    for ox, oy, width, height in occupied):
                                 node['position'] = {'x': x, 'y': y}
                                 break
@@ -464,6 +536,8 @@ class Store:
         visit(None)
 
     def _find(self, p, collection, key):
+        if collection == 'nodes' and isinstance(key, str):
+            key = p.get('nodeAliases', {}).get(key, key)
         for item in p.get(collection, []):
             if item['id'] == key:
                 return item
@@ -471,10 +545,47 @@ class Store:
 
     def _apply(self, p, op, d):
         stamp = now()
+        aliases = p.get('nodeAliases', {})
+        if op in ('node.update', 'node.delete', 'node.merge') and isinstance(d.get('id'), str):
+            d['id'] = aliases.get(d['id'], d['id'])
+        if op == 'node.add' and isinstance(d.get('id'), str) and d['id'] in aliases:
+            raise StoreError('This node was merged into existing work.', 'conflict', 409)
+        prefix = op.split('.', 1)[0] if isinstance(op, str) else ''
+        fields = {'node': ('parentId',), 'edge': ('source', 'target'), 'run': ('nodeId',),
+                  'artifact': ('nodeId',), 'decision': ('nodeId',), 'observation': ('nodeId',)}.get(prefix, ())
+        if op == 'node.merge':
+            fields += ('target',)
+        for field in fields:
+            if isinstance(d.get(field), str):
+                d[field] = aliases.get(d[field], d[field])
         if op == 'project.update':
             for key, value in d.items():
                 if key not in {'id', 'revision', 'createdAt', 'updatedAt', 'nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations', 'activity'}:
                     p[key] = value
+            return
+        if op == 'node.merge':
+            source = self._find(p, 'nodes', d.get('id'))
+            target = self._find(p, 'nodes', d.get('target'))
+            if source['id'] == target['id']:
+                raise StoreError('Merge requires two different nodes.', 'invalid_merge')
+            if any(node.get('parentId') == source['id'] for node in p['nodes']):
+                raise StoreError('Only a leaf node can be merged.', 'invalid_merge')
+            for collection in ('runs', 'artifacts', 'decisions', 'observations'):
+                for record in p.get(collection, []):
+                    if record.get('nodeId') == source['id']:
+                        record['nodeId'] = target['id']
+            for edge in p['edges']:
+                for endpoint in ('source', 'target'):
+                    if edge[endpoint] == source['id']:
+                        edge[endpoint] = target['id']
+            p['edges'] = [edge for edge in p['edges'] if edge['source'] != edge['target']]
+            p['nodes'] = [node for node in p['nodes'] if node['id'] != source['id']]
+            aliases = p.setdefault('nodeAliases', {})
+            for key, value in list(aliases.items()):
+                if value == source['id']:
+                    aliases[key] = target['id']
+            aliases[source['id']] = target['id']
+            target['updatedAt'] = stamp
             return
         if op == 'node.delete':
             self._find(p, 'nodes', d.get('id'))
@@ -485,6 +596,8 @@ class Store:
                     break
                 remove.update(more)
             p['nodes'] = [n for n in p['nodes'] if n['id'] not in remove]
+            if 'nodeAliases' in p:
+                p['nodeAliases'] = {key: value for key, value in p['nodeAliases'].items() if value not in remove}
             p['edges'] = [e for e in p['edges'] if e['source'] not in remove and e['target'] not in remove]
             run_ids = {r['id'] for r in p['runs'] if r.get('nodeId') in remove}
             artifact_ids = {a['id'] for a in p['artifacts'] if a.get('nodeId') in remove or a.get('runId') in run_ids}
@@ -561,7 +674,7 @@ class Store:
             raise StoreError(f'{kind} ID already exists.', 'conflict', 409)
         defaults = {
             'node': {'title': 'Untitled', 'kind': 'experiment', 'status': 'proposed', 'parentId': None,
-                     'summary': '', 'notes': '', 'nextAction': '', 'tags': [], 'position': {'x': 0, 'y': 0},
+                     'summary': '', 'conclusion': '', 'notes': '', 'nextAction': '', 'tags': [], 'position': {'x': 0, 'y': 0},
                      'importance': 'normal', 'importanceReason': '', 'pauseReason': '', 'resumeWhen': '',
                      'collapsed': False, 'createdAt': stamp, 'updatedAt': stamp},
             'edge': {'relation': 'leads_to', 'label': '', 'basis': 'unknown'},
@@ -605,6 +718,12 @@ class Store:
                 return
             if not isinstance(value, str) or value not in groups[collection]:
                 raise StoreError(f'Unknown {collection} reference: {value}', 'invalid_reference')
+        aliases = object_value(p.get('nodeAliases', {}), 'Node aliases')
+        for source, target in aliases.items():
+            valid_id(source)
+            if source in groups['nodes']:
+                raise StoreError('Merged node IDs cannot shadow current nodes.', 'invalid_merge')
+            ref(target, 'nodes')
         def refs(values, collection):
             if not isinstance(values, list):
                 raise StoreError(f'{collection} references must be an array.')
@@ -613,7 +732,7 @@ class Store:
         for node in p['nodes']:
             ref(node.get('parentId'), 'nodes', True)
         for node in p['nodes']:
-            for field in ('title', 'kind', 'status', 'summary', 'notes', 'nextAction', 'importanceReason', 'pauseReason', 'resumeWhen'):
+            for field in ('title', 'kind', 'status', 'summary', 'conclusion', 'notes', 'nextAction', 'importanceReason', 'pauseReason', 'resumeWhen'):
                 if not isinstance(node.get(field, ''), str):
                     raise StoreError(f'Node {field} must be text.')
             if node.get('importance', 'normal') not in ('normal', 'critical'):
@@ -766,6 +885,9 @@ class Store:
                 previous = self._load(db, project_id)
                 self._expected(previous, body)
                 p = copy.deepcopy(previous)
+                body = dict(body)
+                if isinstance(body.get('nodeId'), str):
+                    body['nodeId'] = p.get('nodeAliases', {}).get(body['nodeId'], body['nodeId'])
                 allowed = [self._dir(project_id).resolve()] + [Path(root).resolve() for root in p.get('sourceRoots', []) if Path(root).is_absolute()]
                 if not any(source.is_relative_to(root) for root in allowed):
                     raise StoreError('Source file is outside this experiment’s source roots.', 'path_not_allowed', 403)
@@ -902,6 +1024,7 @@ class Store:
         p = self.get_project(project_id)
         nodes = p['nodes']
         if node_id:
+            node_id = p.get('nodeAliases', {}).get(node_id, node_id)
             self._find(p, 'nodes', node_id)
             selected = {node_id}
             while True:
@@ -925,7 +1048,7 @@ class Store:
         def compact(records, fields):
             return [{key: record.get(key) for key in fields} for record in records]
         return {'projectId': p['id'], 'name': p['name'], 'revision': p['revision'], 'description': p['description'],
-                'nodes': [{k: n.get(k) for k in ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'nextAction', 'importance', 'importanceReason', 'pauseReason', 'resumeWhen')} for n in nodes],
+                'nodes': [{k: n.get(k) for k in ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'nextAction', 'importance', 'importanceReason', 'pauseReason', 'resumeWhen')} for n in nodes],
                 'boundaryNodes': compact([n for n in p['nodes'] if n['id'] in boundary_ids], ('id', 'title', 'kind', 'status', 'importance')),
                 'edges': edges,
                 'runs': [{k: r.get(k) for k in ('id', 'nodeId', 'title', 'status', 'metrics', 'artifactIds', 'origin')} for r in runs],

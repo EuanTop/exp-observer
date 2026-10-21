@@ -7,7 +7,9 @@ python3 <skill>/scripts/exp_observer.py record --project ID --title "Result alre
 python3 <skill>/scripts/exp_observer.py record --project ID --node NODE --title "Updated finding" --summary "New evidence and implication"
 ```
 
-IDs, run/evidence references and idempotent retries are handled by the client. `--after NODE` records a continuation relationship; `--parent NODE` groups related records. Metrics retain their original JSON object structure, including nested objects, arrays, empty containers and nulls. Non-object roots are stored under `result` while the original file is preserved.
+IDs, run/evidence references and idempotent retries are handled by the client. New records automatically retain their local capture order with `recorded_after` ("记录顺序"); this is chronology, not scientific causality. `--independent` omits that automatic connection. Explicit `--after ID_OR_EXACT_TITLE --relation supports` (or `refutes`, `revises`, another relation) retains an actual scientific relationship. Exact titles resolve from local records without a service lookup; an ambiguous title leaves a warning and does not invent a relationship. `--parent NODE` groups related records.
+
+Use `--conclusion TEXT` for a precise finding displayed directly with the record. Findings default to kind `finding`; completion belongs to the existing record's status. When a command's result establishes that same finding, revise its returned node ID instead of creating a separate completion message. Metrics retain their original JSON structure, including nested objects, arrays, empty containers and nulls. Non-object roots use `result` while the original file is preserved.
 
 ## Availability and recovery
 
@@ -15,7 +17,7 @@ IDs, run/evidence references and idempotent retries are handled by the client. `
 
 `context` returns an explicitly unavailable response when the service cannot be reached, together with any dated remote cache and a summary of local pending work. An unavailable response is not an empty remote experiment. Continue from research files when context is unavailable; preserve the supplied experiment ID.
 
-The client registers its outbox directory in the local user's recovery registry. The running application retries only these registered directories for its own loopback HTTP address, including after startup. It does not search research folders or execute experimental commands. Queue contents, captured timestamps and staged evidence are frozen before submission; retries reuse their stable identities. Local registration and file-access failures appear in recording warnings. A command blocked before execution cannot leave a durable record.
+The client writes only within the working directory. Application setup connects the research directory once; the running application discovers queues there, including future experiment subdirectories, without requiring the research agent to write a global registry. Discovery stays inside explicitly connected directories and never executes experimental commands. Queue contents, timestamps and staged evidence are frozen before submission; retries reuse stable identities. A child experiment reuses its ancestor's prepared project identity and metadata. A command blocked before execution cannot leave a durable record.
 
 Manual recovery remains available from the original working directory:
 
@@ -73,6 +75,7 @@ Operations:
 |---|---|
 | `node.add` | id?, title, kind?, status?, parentId?, summary?, notes?, nextAction?, importance?, importanceReason?, pauseReason?, resumeWhen?, tags? |
 | `node.update` | id plus changed fields; omitted fields preserved |
+| `node.merge` | id, target; folds a leaf into existing work, preserving runs, evidence, observations and decisions; original metadata remains in history |
 | `node.delete` | id; removes subtree and associated execution records; recoverable from history |
 | `edge.add/update/delete` | id, source/target/relation/label/basis as needed |
 | `run.add` | id?, nodeId, title, status, configuration, metrics?, origin |

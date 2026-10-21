@@ -41,10 +41,11 @@ def emit(value, stream=sys.stdout):
 
 
 class Client:
-    def __init__(self, url, timeout=30, transport_url=None, local_only=False):
+    def __init__(self, url, timeout=30, transport_url=None, local_only=False, queue_root=None):
         self.url = url.rstrip('/')
         self.timeout = timeout
         self.transport_url = (transport_url or self.url).rstrip('/')
+        self.queue_root = Path(queue_root).resolve() if queue_root is not None else None
         if local_only and loopback_origin(self.transport_url) is None:
             raise ClientError('Automatic recovery requires a loopback HTTP origin.')
         self.opener = build_opener(ProxyHandler({}), NoRedirect()) if local_only else None
@@ -97,8 +98,11 @@ def parser():
     record.add_argument('--project', required=True)
     record.add_argument('--title', required=True)
     record.add_argument('--summary')
+    record.add_argument('--conclusion', help='The substantive finding displayed directly on the node')
     record.add_argument('--node', help='Update this node; omit to create a node')
-    record.add_argument('--after', help='Previous node connected by a leads_to relation')
+    record.add_argument('--after', help='Related node ID or exact locally recorded title')
+    record.add_argument('--relation', default='leads_to', help='Meaning of an explicit --after relationship')
+    record.add_argument('--independent', action='store_true', help='Omit the automatic record-order connection')
     record.add_argument('--parent')
     record.add_argument('--status', default=None, help='Node status (default for new nodes: active)')
     record.add_argument('--metrics-file', help='UTF-8 JSON; nested objects are preserved and other root values use a result key')
@@ -144,6 +148,9 @@ def parser():
             cmd.add_argument('--output', help='Save original range bytes to this file instead of printing text')
         if command == 'execute':
             cmd.add_argument('--title', required=True)
+            cmd.add_argument('--after', help='Related node ID or exact locally recorded title')
+            cmd.add_argument('--relation', default='leads_to')
+            cmd.add_argument('--independent', action='store_true', help='Omit the automatic record-order connection')
             cmd.add_argument('--request-id', help='Stable identifier; retries never rerun this command')
             cmd.add_argument('--artifact', action='append', default=[], help='Capture a result file after execution; repeat for multiple files')
             cmd.add_argument('argv', nargs=argparse.REMAINDER)
@@ -271,12 +278,9 @@ def register_outbox(outbox, url):
 
 
 def persist_task(path, task):
-    # A registry failure must not discard the task that was already made durable.
+    # Research clients write only inside their working directory. The application
+    # discovers queues in enrolled workspaces, including future experiment folders.
     save_task(path, task)
-    warning = register_outbox(path.parent, task['url'])
-    if warning and warning not in task['recordingWarnings']:
-        task['recordingWarnings'].append(warning)
-        save_task(path, task)
 
 
 def project_plan_path(outbox, url, project_id):
@@ -292,10 +296,6 @@ def prepare_project(outbox, url, metadata, implicit=False):
     with task_lock(path):
         if path.exists():
             plan = json.loads(path.read_text(encoding='utf-8'))
-            warning = register_outbox(path.parent, url)
-            if warning and warning not in plan['recordingWarnings']:
-                plan['recordingWarnings'].append(warning)
-                save_task(path, plan)
             return path, plan
         plan = {'version': 1, 'kind': 'project', 'url': url, 'projectId': metadata['id'],
                 'project': metadata, 'implicit': implicit, 'preparedAt': stamp(), 'state': 'ready',
@@ -490,9 +490,100 @@ def load_existing(path, task):
     if not path.exists():
         return None
     existing = json.loads(path.read_text(encoding='utf-8'))
-    if existing.get('intent') != task['intent']:
+    defaults = {'conclusion': None, 'independent': False, 'relation': 'leads_to', 'after': None}
+    if (defaults | existing.get('intent', {})) != (defaults | task['intent']):
         raise ClientError('request-id was already used for different work; use a new request-id.')
     return existing
+
+
+def ancestor_outboxes(outbox, queue_root=None):
+    """Only the current folder and its ancestors; never inspect sibling research."""
+    directory = Path(outbox).parent.parent.resolve()
+    boundary = Path(queue_root).resolve() if queue_root is not None else None
+    if boundary is not None and directory != boundary and boundary not in directory.parents:
+        return
+    for ancestor in (directory, *directory.parents):
+        yield ancestor / '.exp-observer-runs' / 'outbox'
+        if ancestor == boundary:
+            break
+
+
+def local_nodes(client, outbox, project_id, exclude=None):
+    nodes = {}
+    for directory in ancestor_outboxes(outbox, client.queue_root):
+        try:
+            paths = list(directory.glob('*.json'))
+        except OSError:
+            continue
+        for path in paths:
+            if path == exclude:
+                continue
+            try:
+                task = read_queue_task(path)
+                if (task['url'] != client.url or task['projectId'] != project_id
+                        or task['state'] not in ('ready', 'synced') or task.get('kind') == 'project'):
+                    continue
+                at = task.get('capturedAt') or task.get('finishedAt') or task.get('startedAt') or ''
+                for operation in task.get('operations', []):
+                    if operation.get('op') not in ('node.add', 'node.update'):
+                        continue
+                    data = operation['data']
+                    entry = {'id': data['id'], 'title': data.get('title', ''), 'at': at}
+                    if entry['id'] not in nodes or entry['at'] > nodes[entry['id']]['at']:
+                        nodes[entry['id']] = entry
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                continue
+    return sorted(nodes.values(), key=lambda node: (node['at'], node['id']))
+
+
+def capture_project_plan(outbox, url, project_id, queue_root=None):
+    plans = []
+    for directory in ancestor_outboxes(outbox, queue_root):
+        path = project_plan_path(directory, url, project_id)
+        try:
+            if queue_root is not None and not path.resolve().is_relative_to(queue_root):
+                continue
+            plan = read_queue_task(path)
+            if (plan.get('kind') == 'project' and plan['url'] == url and plan['projectId'] == project_id
+                    and isinstance(plan.get('project'), dict) and plan['project'].get('id') == project_id):
+                plans.append((bool(plan.get('implicit')), plan.get('preparedAt', ''), str(path), path, plan))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    if plans:
+        _, _, _, path, plan = min(plans, key=lambda entry: entry[:3])
+        return path, plan
+    return prepare_project(outbox, url,
+        {'id': project_id, 'name': project_id, 'description': '', 'sourceRoots': []}, implicit=True)
+
+
+def capture_relationship(client, args, path, task):
+    """Record order is observed chronology, never an invented scientific cause."""
+    if not args.after and (args.node or args.independent):
+        return
+    nodes = local_nodes(client, path.parent, task['projectId'], exclude=path)
+    source = args.after
+    if source:
+        matches = [node for node in nodes if node['title'] == source]
+        if len(matches) == 1:
+            source = matches[0]['id']
+        elif len(matches) > 1:
+            task['recordingWarnings'].append('Relationship title is ambiguous; the finding is retained without that relationship.')
+            return
+        elif not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', source):
+            task['recordingWarnings'].append('Relationship title was not found locally; the finding is retained without that relationship.')
+            return
+        relation, label = args.relation, ''
+    else:
+        candidates = [node for node in nodes if node['id'] != task['nodeId']]
+        if not candidates:
+            return
+        source = candidates[-1]['id']
+        relation, label = 'recorded_after', '记录顺序'
+    if source == task['nodeId']:
+        return
+    task['operations'].append({'op': 'edge.add', 'data': {
+        'id': 'edge-' + task['taskId'], 'source': source, 'target': task['nodeId'],
+        'relation': relation, 'label': label, 'basis': 'observed'}})
 
 
 def file_digest(path):
@@ -549,8 +640,19 @@ def sync_task(client, path, task):
         return task_result(task, ['Capture was interrupted before its outcome was saved; sync never reruns commands.'])
     warnings = []
     try:
-        plan_path, plan = prepare_project(path.parent, client.url,
-            {'id': task['projectId'], 'name': task['projectId'], 'description': '', 'sourceRoots': []}, implicit=True)
+        if client.queue_root is not None:
+            local_plan = project_plan_path(path.parent, client.url, task['projectId'])
+            for staged in [task['captureRoot'], local_plan, local_plan.with_suffix('.lock'),
+                           *[artifact['path'] for artifact in task['artifacts']]]:
+                resolved = Path(staged).resolve()
+                if resolved != client.queue_root and client.queue_root not in resolved.parents:
+                    raise ClientError('Queued evidence is outside the connected research directory.', code='path_not_allowed')
+        plan_path, plan = capture_project_plan(path.parent, client.url, task['projectId'], client.queue_root)
+        if client.queue_root is not None:
+            for candidate in (plan_path, plan_path.with_suffix('.lock')):
+                resolved = candidate.resolve()
+                if resolved != client.queue_root and client.queue_root not in resolved.parents:
+                    raise ClientError('Project preparation is outside the connected research directory.', code='path_not_allowed')
         with task_lock(plan_path):
             plan = json.loads(plan_path.read_text(encoding='utf-8'))
             ensure_project(client, plan_path, plan)
@@ -561,16 +663,18 @@ def sync_task(client, path, task):
             project = client.project(task['projectId'])
             registered = {a['id']: a for a in project['artifacts']}
             for artifact in task['artifacts']:
+                expected = dict(artifact)
+                expected['nodeId'] = project.get('nodeAliases', {}).get(artifact['nodeId'], artifact['nodeId'])
                 existing = registered.get(artifact['id'])
                 if existing:
-                    if any(existing.get(key) != artifact[key] for key in ('sha256', 'bytes', 'nodeId', 'runId')):
+                    if any(existing.get(key) != expected[key] for key in ('sha256', 'bytes', 'nodeId', 'runId')):
                         raise ClientError('Registered evidence differs from this capture: ' + artifact['id'])
                     continue
                 snapshot = Path(artifact['path'])
                 if file_digest(snapshot) != (artifact['sha256'], artifact['bytes']):
                     raise ClientError('Staged evidence changed; original files will not be reread: ' + str(snapshot))
                 retained = client.request(client.project_route(task['projectId']) + '/artifacts', artifact)
-                if any(retained.get(key) != artifact[key] for key in ('id', 'sha256', 'bytes', 'nodeId', 'runId')):
+                if any(retained.get(key) != expected[key] for key in ('id', 'sha256', 'bytes', 'nodeId', 'runId')):
                     raise ClientError('Retained evidence differs from this capture: ' + artifact['id'])
         task['state'] = 'synced'
         save_task(path, task)
@@ -609,7 +713,7 @@ def record(client, args):
             metrics = {}
             metrics_warning = f'Metrics could not be decoded; retaining the original file as evidence when available: {exc}'
     intent = {'command': 'record', **{key: getattr(args, key) for key in
-              ('title', 'summary', 'node', 'after', 'parent', 'status', 'artifact')},
+              ('title', 'summary', 'conclusion', 'node', 'after', 'relation', 'independent', 'parent', 'status', 'artifact')},
               'metrics': metrics, 'hasMetrics': args.metrics_file is not None and metrics_warning is None,
               'metricsFile': args.metrics_file}
     path, task = task_identity(client, args, intent)
@@ -627,16 +731,16 @@ def record(client, args):
         if metrics_warning:
             task['recordingWarnings'].append(metrics_warning)
         node = {'id': task['nodeId'], 'title': args.title}
+        node['conclusion'] = args.conclusion if args.conclusion is not None else args.title
         for option, field in (('summary', 'summary'), ('parent', 'parentId'), ('status', 'status')):
             if getattr(args, option) is not None:
                 node[field] = getattr(args, option)
         if not args.node:
             node.setdefault('status', 'active')
+            node['kind'] = 'finding'
             node['createdAt'] = at
         task['operations'] = [{'op': 'node.update' if args.node else 'node.add', 'data': node}]
-        if args.after:
-            task['operations'].append({'op': 'edge.add', 'data': {'id': 'edge-' + task['taskId'],
-                'source': args.after, 'target': task['nodeId'], 'relation': 'leads_to', 'basis': 'observed'}})
+        capture_relationship(client, args, path, task)
         if intent['hasMetrics']:
             task['operations'].append({'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
                 'title': args.title, 'status': 'completed', 'startedAt': None, 'finishedAt': None, 'capturedAt': at,
@@ -704,12 +808,7 @@ def sync(client, args):
     outbox = Path.cwd() / '.exp-observer-runs' / 'outbox'
     results = drain_outbox(client, outbox, args.project)
     pending = sum(bool(result['pending']) for result in results)
-    result = {'records': results, 'pending': pending}
-    if outbox.exists():
-        warning = register_outbox(outbox, client.url)
-        if warning:
-            result['recordingWarnings'] = [warning]
-    emit(result)
+    emit({'records': results, 'pending': pending})
     return 1 if pending else 0
 
 
@@ -747,7 +846,8 @@ def execute(client, args):
     if not command:
         raise ClientError('execute requires -- COMMAND [ARG ...].')
     intent = {'command': 'execute', 'argv': command, 'cwd': str(Path.cwd()), 'node': args.node,
-              'title': args.title, 'artifact': args.artifact}
+              'title': args.title, 'artifact': args.artifact, 'after': args.after,
+              'relation': args.relation, 'independent': args.independent}
     path, task = task_identity(client, args, intent)
     with ExitStack() as stack:
         durable = True
@@ -801,6 +901,7 @@ def execute(client, args):
             if task['status'] == 'cancelled':
                 node['pauseReason'] = 'Command interrupted'
             task['operations'].insert(0, {'op': 'node.add', 'data': node})
+        capture_relationship(client, args, path, task)
         if durable:
             for filename, title in (('stdout.txt', 'Standard output'), ('stderr.txt', 'Standard error')):
                 stage_artifact(task, directory / filename, title, directory / filename)

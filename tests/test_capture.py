@@ -95,6 +95,34 @@ class CaptureTests(unittest.TestCase):
         with self.assertRaisesRegex(cli.ClientError, 'different work'):
             self.invoke('record', '--project', 'study', '--title', 'Changed', '--request-id', 'stable-record')
 
+    def test_frozen_capture_retries_after_its_node_is_merged(self):
+        (self.root / 'evidence.txt').write_bytes(b'original bytes')
+        arguments = ('record', '--project', 'study', '--title', 'Captured result',
+                     '--artifact', 'evidence.txt', '--request-id', 'merged-retry')
+        _, first = self.invoke(*arguments)
+        self.assertFalse(first['pending'])
+        self.store.batch('study', {'operations': [
+            {'op': 'node.merge', 'data': {'id': first['nodeId'], 'target': 'a'}},
+        ]})
+        revision = self.store.get_project('study')['revision']
+        (self.root / 'evidence.txt').write_bytes(b'later change')
+        _, retry = self.invoke(*arguments)
+        self.assertFalse(retry['pending'], retry)
+        project = self.store.get_project('study')
+        self.assertEqual(project['revision'], revision)
+        self.assertEqual(project['artifacts'][0]['nodeId'], 'a')
+        content, _ = self.store.artifact_content('study', project['artifacts'][0]['id'])
+        self.assertEqual(content, b'original bytes')
+
+    def test_missing_relationship_title_does_not_block_the_finding(self):
+        _, result = self.invoke('record', '--project', 'study', '--title', 'Measured finding',
+                                '--after', '尚未记录的发现', '--relation', 'supports')
+        self.assertFalse(result['pending'], result)
+        self.assertTrue(any('not found locally' in warning for warning in result['recordingWarnings']))
+        project = self.store.get_project('study')
+        self.assertEqual(project['nodes'][-1]['conclusion'], 'Measured finding')
+        self.assertEqual(project['edges'], [])
+
     def test_record_updates_existing_node_without_hand_authored_batch(self):
         code, result = self.invoke('record', '--project', 'study', '--node', 'a', '--title', 'Updated',
                                    '--summary', 'Finding', '--status', 'completed')
@@ -105,6 +133,69 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual((project['nodes'][0]['title'], project['nodes'][0]['status']), ('Updated', 'completed'))
         self.assertEqual(project['runs'], [])
         self.assertIsNone(result['runId'])
+
+    def test_record_order_is_automatic_and_distinct_from_scientific_relationships(self):
+        _, first = self.invoke('record', '--project', 'study', '--title', 'A measured finding', '--summary', 'Original measurements')
+        _, command = self.invoke('execute', '--project', 'study', '--title', 'Inspect the counterexample',
+                                 '--', sys.executable, '-c', 'print("observed")')
+        arguments = ('record', '--project', 'study', '--title', 'Tolerance reduces observed changes',
+                     '--conclusion', 'Observed changes fell from 24% to 3% in this sample', '--request-id', 'result')
+        _, finding = self.invoke(*arguments)
+        project = self.store.get_project('study')
+        self.assertEqual([(edge['source'], edge['target'], edge['relation']) for edge in project['edges']],
+                         [(first['nodeId'], command['nodeId'], 'recorded_after'),
+                          (command['nodeId'], finding['nodeId'], 'recorded_after')])
+        self.assertTrue(all(edge['label'] == '记录顺序' for edge in project['edges']))
+        node = next(node for node in project['nodes'] if node['id'] == finding['nodeId'])
+        self.assertEqual((node['kind'], node['conclusion']), ('finding', 'Observed changes fell from 24% to 3% in this sample'))
+        self.invoke(*arguments)
+        self.assertEqual(self.store.get_project('study')['revision'], project['revision'])
+        _, independent = self.invoke('record', '--project', 'study', '--title', 'An unrelated observation', '--independent')
+        self.assertEqual(len(self.store.get_project('study')['edges']), 2)
+        _, counterexample = self.invoke('record', '--project', 'study', '--title', 'A boundary remains',
+                                        '--after', 'Tolerance reduces observed changes', '--relation', 'qualifies')
+        edge = self.store.get_project('study')['edges'][-1]
+        self.assertEqual((edge['source'], edge['target'], edge['relation']),
+                         (finding['nodeId'], counterexample['nodeId'], 'qualifies'))
+
+    def test_capture_and_manual_sync_never_require_a_global_registry_write(self):
+        with patch.object(cli, 'state_directory', side_effect=AssertionError('Research client accessed global state')):
+            self.invoke('init', '--id', 'local-only', '--name', 'Local-only experiment', client=self.offline())
+            self.invoke('record', '--project', 'local-only', '--title', 'Existing evidence', client=self.offline())
+            self.invoke('execute', '--project', 'local-only', '--title', 'Local command',
+                        '--', sys.executable, '-c', 'print("actual command")', client=self.offline())
+            code, result = self.invoke('sync', '--project', 'local-only')
+        self.assertEqual((code, result['pending']), (0, 0))
+        self.assertEqual(len(self.store.get_project('local-only')['nodes']), 2)
+
+    def test_child_capture_keeps_the_ancestor_experiment_identity_and_metadata(self):
+        self.invoke('init', '--id', 'nested', '--name', 'Original research name', '--description', 'Original scope', client=self.offline())
+        child = self.root / 'new experiment'
+        child.mkdir()
+        args = cli.parser().parse_args(['--url', self.url, 'record', '--project', 'nested', '--title', 'Actual result'])
+        with working_directory(child), patch.object(cli, 'emit'):
+            self.assertEqual(cli.record(self.offline(), args), 0)
+            sync_args = cli.parser().parse_args(['--url', self.url, 'sync', '--project', 'nested'])
+            self.assertEqual(cli.sync(self.client, sync_args), 0)
+        project = self.store.get_project('nested')
+        self.assertEqual((project['name'], project['description']), ('Original research name', 'Original scope'))
+
+    def test_legacy_capture_retry_keeps_its_frozen_operations_and_never_reruns(self):
+        script = "from pathlib import Path; p=Path('once.txt'); p.write_text(str(int(p.read_text())+1) if p.exists() else '1')"
+        arguments = ('execute', '--project', 'study', '--title', 'Original command', '--request-id', 'legacy',
+                     '--', sys.executable, '-c', script)
+        self.invoke(*arguments)
+        path = next(path for path in (self.root / '.exp-observer-runs/outbox').glob('*.json')
+                    if not path.name.startswith('project-'))
+        task = json.loads(path.read_text())
+        for key in ('after', 'relation', 'independent'):
+            task['intent'].pop(key)
+        cli.save_task(path, task)
+        before = self.store.get_project('study')
+        self.invoke(*arguments)
+        self.assertEqual((self.root / 'once.txt').read_text(), '1')
+        self.assertEqual(self.store.get_project('study'), before)
+        self.assertEqual(json.loads(path.read_text())['operations'], task['operations'])
 
     def test_record_wraps_json_root_values_without_rewriting_result_files(self):
         metrics_path = self.root / 'metrics.json'

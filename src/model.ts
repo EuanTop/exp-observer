@@ -1,6 +1,7 @@
 import type { Edge, Node } from "@xyflow/react";
 import { getNodeUsage } from "./usage";
 import { facingSides } from "./edge-routing";
+import { nodePresentation, type NodePresentation } from "./node-presentation";
 export type NodeTab = "overview" | "runs" | "evidence" | "usage";
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -17,6 +18,7 @@ export type ResearchNode = {
   resumeWhen?: string;
   parentId: string | null;
   summary: string;
+  conclusion?: string;
   notes: string;
   nextAction: string;
   tags: string[];
@@ -158,6 +160,7 @@ export const relations: Record<string, string> = {
   uses: "复用",
   motivates: "触发",
   compares: "对比",
+  recorded_after: "后续记录",
 };
 export function descendants(nodes: ResearchNode[], id: string): string[] {
   const result: string[] = [];
@@ -188,6 +191,7 @@ export function ancestry(
 }
 export type CanvasData = {
   node: ResearchNode;
+  presentation: NodePresentation;
   children: number;
   runs: number;
   latest?: Run;
@@ -198,6 +202,7 @@ export type CanvasData = {
   onEnter: (id: string) => void;
   [key: string]: unknown;
 };
+export const NODE_SIZE = { w: 300, h: 250 };
 export function toCanvas(
   project: Project,
   scope: string | null,
@@ -224,8 +229,7 @@ export function toCanvas(
   function size(n: ResearchNode): { w: number; h: number } {
     if (dimensions.has(n.id)) return dimensions.get(n.id)!;
     const children = visible.filter((c) => c.parentId === n.id);
-    let w = 280,
-      h = 178;
+    let { w, h } = NODE_SIZE;
     if (children.length && !n.collapsed) {
       w = Math.max(
         330,
@@ -270,9 +274,10 @@ export function toCanvas(
         zIndex: children.length && !n.collapsed ? 0 : 2,
         data: {
           node: n,
+          presentation: nodePresentation(project, n),
           children: children.length,
           runs: runs.length,
-          latest: runs.at(-1),
+          latest: project.runs.filter((run) => run.nodeId === n.id).at(-1),
           usage: getNodeUsage(project, n.id),
           expanded: !!children.length && !n.collapsed,
           ...actions,

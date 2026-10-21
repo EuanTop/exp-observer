@@ -1,6 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { Box, ChevronDown, Clock3, Diamond, Layers, Minus } from "lucide-react";
-import { kinds, type CanvasData } from "../model";
+import { formatMetric, kinds, type CanvasData } from "../model";
+import { metricLeaves, metricPathLabel } from "../metrics";
 import { formatDuration, formatTokens } from "../usage";
 import { Badge, kindIcon } from "./Primitives";
 
@@ -48,6 +49,18 @@ function UsageStats({ data }: { data: CanvasData }) {
 export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
   const { node: n, children, expanded } = data;
   const Icon = children ? Layers : kindIcon[n.kind] || Box;
+  const presentation = data.presentation;
+  const metrics = metricLeaves(data.latest?.metrics || {})
+    .filter(
+      ({ path, value }) =>
+        !["wallTimeMs", "exitCode", "stdoutBytes", "stderrBytes"].includes(
+          String(path[0]),
+        ) &&
+        (typeof value === "number" ||
+          typeof value === "boolean" ||
+          typeof value === "string"),
+    )
+    .slice(0, 2);
   return (
     <div
       className={`research-node ${selected ? "is-selected" : ""} ${n.importance === "critical" ? "is-critical" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${children ? "is-container" : ""}`}
@@ -81,8 +94,39 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
         <Badge status={n.status} />
       </div>
       <div className="node-content">
-        <h3>{n.title}</h3>
-        {!expanded && <p>{n.summary || "尚未填写摘要"}</p>}
+        {!expanded && (presentation.context || presentation.source) && (
+          <div className="node-context" title={presentation.context}>
+            {[presentation.context, presentation.source]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+        )}
+        <h3 title={presentation.headline}>
+          {presentation.headline}
+        </h3>
+        {!expanded && presentation.summary && (
+          <p title={presentation.summary}>{presentation.summary}</p>
+        )}
+        {!expanded && !!metrics.length && (
+          <button
+            className="node-results nodrag"
+            title={`查看原始指标 · ${data.latest?.title}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              data.onInspect?.(n.id, "runs");
+            }}
+          >
+            {metrics.map(({ key, path, value }) => (
+              <span
+                key={key}
+                title={`${metricPathLabel(path)}：${formatMetric(value)}`}
+              >
+                <small>{metricPathLabel(path)}</small>
+                <strong>{formatMetric(value)}</strong>
+              </span>
+            ))}
+          </button>
+        )}
       </div>
       {expanded ? (
         <>

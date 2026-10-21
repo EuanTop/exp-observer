@@ -41,7 +41,7 @@ class Server(ThreadingHTTPServer):
             from .recovery import Recovery
             host = self.server_address[0]
             host = '[' + host + ']' if ':' in host else host
-            self.recovery = Recovery(f'http://{host}:{self.server_port}', interval=self.recovery_interval).start()
+            self.recovery = Recovery(f'http://{host}:{self.server_port}', interval=self.recovery_interval, store=self.store).start()
         try:
             super().serve_forever(poll_interval=poll_interval)
         finally:
@@ -145,6 +145,13 @@ class Handler(BaseHTTPRequestHandler):
         store = self.server.store
         if path == '/api/health' and method == 'GET':
             return self._send({'ok': True, 'version': __version__})
+        if path == '/api/workspaces':
+            if method == 'GET':
+                return self._send({'workspaces': store.list_workspaces()})
+            if method == 'POST':
+                return self._send({'workspaces': store.add_workspace(self._body())})
+        if path == '/api/workspaces/remove' and method == 'POST':
+            return self._send({'workspaces': store.remove_workspace(self._body())})
         if path == '/api/agent-setup' and method == 'GET':
             root = Path(__file__).resolve().parents[1]
             return self._send({'skillPath': str(root / 'skills' / 'exp-observer' / 'SKILL.md'),
@@ -217,8 +224,11 @@ def main(argv=None):
     parser.add_argument('--no-demo', action='store_true')
     parser.add_argument('--open', action='store_true', help='Open the interface in your browser')
     parser.add_argument('--no-browser', action='store_true', help='Keep the browser closed when using a launcher')
+    parser.add_argument('--workspace', action='append', default=[], help='Enroll a research directory for automatic recovery; repeat as needed')
     args = parser.parse_args(argv)
     store = Store(args.data_dir)
+    for workspace in args.workspace:
+        store.add_workspace({'path': str(Path(workspace).expanduser().resolve())})
     if not args.no_demo and not store.list_projects():
         try:
             from .seed import make_demo

@@ -129,7 +129,7 @@ class DistributionSmokeTests(unittest.TestCase):
             evidence.write_bytes(b'{"changed":true}')
             process = subprocess.Popen(
                 [sys.executable, '-u', str(root / 'start.py'), '--no-browser', '--port', str(port),
-                 '--data-dir', str(data), '--no-demo'], cwd=temporary,
+                 '--data-dir', str(data), '--no-demo', '--workspace', str(temporary)], cwd=temporary,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding='utf-8', errors='replace',
                 env=environment)

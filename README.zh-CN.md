@@ -26,7 +26,7 @@ Windows 双击 `start.bat`，或运行 `py -3 start.py`；macOS 也可以双击 
 
 只需要 **[Python 3.10 或更新版本](https://www.python.org/downloads/)**，无需 Node.js、npm、pip 依赖、账号或模型 API Key。Windows 如果没有 `py` 启动器但已将 Python 加入 `PATH`，使用 `python start.py`。请下载 Releases 中的 `exp-observer.zip`；GitHub 的“Source code”源码包不含已构建界面。
 
-默认包含模拟演示；添加 `--no-demo` 从空白工作区开始，添加 `--no-browser` 可不自动打开浏览器。开始研究后，用界面中的**连接 Agent**获取对应实验的接入指令。[安装细节](INSTALL.md) · [从源码开发](CONTRIBUTING.md#development)
+默认包含模拟演示；添加 `--no-demo` 从空白工作区开始，添加 `--no-browser` 可不自动打开浏览器。在**连接 Agent**中接入一次研究目录，再复制简短指令交给研究 Agent；此后新建的实验子目录也会自动发现。也可以在启动命令后添加 `--workspace /absolute/research/path`。[安装细节](INSTALL.md) · [从源码开发](CONTRIBUTING.md#development)
 
 ## 在图中推进研究
 
@@ -80,7 +80,7 @@ python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
   --metrics-file results.json --artifact results.json
 ```
 
-用 `--node NODE_ID` 更新已有节点，用 `--after NODE_ID` 关联实际研究的后续，用 `--parent NODE_ID` 分组；这些选项均可省略。嵌套指标原样保存，包括数组、null 和空容器。结果 JSON 顶层不是对象时，客户端自动放到 `result` 字段，原始文件保持原样。仅文字更新不会虚构一次实验运行。
+标题直接写实际发现，`--conclusion TEXT` 可以保留更精确的结论，卡片直接展示。用 `--node NODE_ID` 修订同一工作，也适用于写入已捕获命令的发现；完成属于该工作的状态，不再另建完成节点。新记录自动保留捕获顺序，明确标为“记录顺序”。实际支持、反驳等关系可用 `--after '之前发现的标题' --relation supports`，接受准确的本地标题或 ID；`--independent` 可省略普通顺序关系。`--parent NODE_ID` 用于分组。嵌套指标原样保存，包括数组、null 和空容器。其他 JSON 顶层类型自动放到 `result`，原文件不变。仅文字更新不会虚构实验运行。
 
 有必要时，将独立发现保留为一条新记录，用 `--node` 修订同一发现。一次批量对比可以保持为一条记录；节点数量不是目标，也不能根据最终总结虚构未记录的研究历程。
 
@@ -94,9 +94,9 @@ python3 skills/exp-observer/scripts/exp_observer.py execute \
 
 包装器自动提供记录编号，捕获真实命令的退出码、墙钟时间、标准输出／错误和指定文件，**不增加模型调用**。用 `--node NODE_ID` 可以附到已有记录。观测平台不规定实验阶段、方法、测量项目或交付格式。Agent 在研究本身已经改变判断或方向时简短更新；坐标、编号和展示格式由平台处理。
 
-`init`、`record` 和 `execute` 会在本地保存待交工作。应用运行时自动重试已注册的队列，也覆盖先离线研究、后启动应用的情况；只检查对应本机 HTTP 地址下已注册的目录。实验成功时，记录服务不可用也不会把它改判为失败。回执用 `pending` 和 `recordingWarnings` 表示记录状态，并返回已保留的标准输出／错误路径。`sync` 保留为可选的手动恢复命令，在原工作目录执行；补交不会重跑实验，也不会重新读取已经变化的原始证据。
+`init`、`record` 和 `execute` 只在工作目录内保存待交工作。应用负责发现已接入研究目录里的队列，包含后续新建的实验子目录，也覆盖先离线研究、后启动应用的情况；客户端无需写全局登记目录。应用只补交对应本机地址的队列，不跟随目录链接越过接入范围。实验成功时，记录服务不可用也不会把它改判为失败。回执用 `pending` 和 `recordingWarnings` 表示记录状态，并返回标准输出／错误路径。可选的手动 `sync` 在原工作目录执行；补交不会重跑实验或重读已变化的原始证据。
 
-只有真正运行客户端，记录才会进入队列；只保存结果文件不会自动登记。如果宿主阻止执行客户端或本地写入，就无法暂存，研究继续并如实说明即可。用 `EXP_OBSERVER_STATE_DIR` 可以指定恢复注册表目录，客户端与应用需使用相同值。安装 Skill 不会授予沙箱权限或安装系统服务。
+只有运行客户端才会暂存记录；单独保存结果文件不会入队。如果宿主阻止执行客户端或写工作目录，就无法暂存，研究继续并如实说明。研究目录在应用安装／接入阶段配置，研究 Agent 不承担这项工作。应用继续兼容旧版登记目录（`EXP_OBSERVER_STATE_DIR` 可覆盖其位置），新版客户端不再依赖它。安装 Skill 不会授予沙箱权限或安装系统服务。
 
 批量登记已有文件、读取保留的证据、检查记录或导出研究图：
 
