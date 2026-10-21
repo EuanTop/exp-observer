@@ -1,6 +1,7 @@
 import {
   Background,
   BackgroundVariant,
+  ConnectionMode,
   MiniMap,
   ReactFlow,
   SelectionMode,
@@ -48,6 +49,7 @@ import {
   ancestry,
   descendants,
   kinds,
+  isExecutionRun,
   toCanvas,
   uid,
   type Artifact,
@@ -72,8 +74,10 @@ import {
 import { OutlineTree } from "./components/OutlineTree";
 import { date, IconButton, time } from "./components/Primitives";
 import { ResearchCard } from "./components/ResearchCard";
+import { ResearchEdge } from "./components/ResearchEdge";
 import { CompareView, EvidenceView, RunsView } from "./components/Views";
 const nodeTypes = { research: ResearchCard };
+const edgeTypes = { research: ResearchEdge };
 type View = "graph" | "runs" | "compare" | "evidence";
 
 export default function App() {
@@ -568,9 +572,10 @@ export default function App() {
               >
                 <t.icon size={15} />
                 {t.label}
-                {t.id === "runs" && !!project?.runs.length && (
-                  <span>{project.runs.length}</span>
-                )}
+                {t.id === "runs" &&
+                  !!project?.runs.filter(isExecutionRun).length && (
+                    <span>{project.runs.filter(isExecutionRun).length}</span>
+                  )}
               </button>
             ))}
           </nav>
@@ -659,7 +664,9 @@ export default function App() {
               </div>
               <div className="outline-footer">
                 <span className="tiny-dot accent" />
-                <span>{project?.runs.length || 0} 次运行</span>
+                <span>
+                  {project?.runs.filter(isExecutionRun).length || 0} 次运行
+                </span>
                 <span className="outline-footer-right">
                   {project?.artifacts.length || 0} 份证据
                 </span>
@@ -767,6 +774,8 @@ export default function App() {
                         nodes={nodes}
                         edges={edges}
                         nodeTypes={nodeTypes}
+                        edgeTypes={edgeTypes}
+                        connectionMode={ConnectionMode.Loose}
                         onNodesChange={onNodesChange}
                         onEdgesChange={onEdgesChange}
                         onConnect={onConnect}

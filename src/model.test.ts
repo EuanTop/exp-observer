@@ -98,4 +98,19 @@ describe("nested research graph", () => {
     expect(effectiveAssessments(project).map((a) => a.id)).toEqual(["v2"]);
     expect(project.runs).toHaveLength(0);
   });
+  it("assigns separate reciprocal lanes after collapsing hidden endpoints", () => {
+    const project = p(
+      [n("a", null, true), n("child", "a"), n("b")],
+      [
+        { id: "out", source: "child", target: "b", relation: "supports" },
+        { id: "back", source: "b", target: "child", relation: "revisits" },
+      ],
+    );
+    const { edges } = toCanvas(project, null, [], actions);
+    expect(edges.map((edge) => [edge.source, edge.target])).toEqual([
+      ["a", "b"],
+      ["b", "a"],
+    ]);
+    expect(edges[0].data?.lane).not.toBe(edges[1].data?.lane);
+  });
 });

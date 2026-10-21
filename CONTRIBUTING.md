@@ -55,6 +55,7 @@ Add focused regression coverage for changes to record validation, history, concu
 - Preserve earlier evidence and interpretations when revising conclusions. Resolve revision conflicts rather than overwriting another contributor's work.
 - Use the portable Skill client or API for experiment maintenance. Keep synthetic fixtures marked `mock` and actual captured execution marked `observed`.
 - Keep routine capture independent of model calls. Use sparse semantic updates for branches, findings and decisions.
+- Observation supports research without prescribing its stages, methods, report format or validation work. Accept original nested JSON metrics; derive display paths in the interface. Handle IDs, layout, references and retry bookkeeping in the platform/client. Recording failures must not prevent command execution or change the experiment's exit code.
 - Keep canonical records and incremental revision history in `.exp-observer/records.sqlite3` through Python's standard-library `sqlite3`; retained evidence stays in each project's `evidence/` directory under `.exp-observer/`, using portable directory names. Stop all servers using a data directory before backing up the whole directory.
 - Keep interface text concise and actionable. Technical explanations belong in the documentation.
 

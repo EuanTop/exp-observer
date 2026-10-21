@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type AgentSetup } from "../api";
-import { agentCommand } from "../agent-command";
+import { agentCommand, agentPrompt } from "../agent-command";
 import {
   ancestry,
   kinds,
@@ -262,9 +262,7 @@ export function SkillPanel({
     };
   }, [attempt]);
   const command = setup ? agentCommand(setup, project?.id) : "";
-  const prompt = setup
-    ? `读取并使用 Skill：${setup.skillPath}\n服务地址：${setup.url}\n${project ? `维护研究「${project.name}」，实验 ID：${project.id}。先读取相关 context，再根据我的任务继续研究。` : "根据我的研究任务创建或选择实验。"}\n在研究过程中增量记录有意义的分支、真实执行、证据和结论。`
-    : "";
+  const prompt = setup ? agentPrompt(setup, project?.id) : "";
   return (
     <div className="skill-panel">
       <div className="skill-panel-icon">

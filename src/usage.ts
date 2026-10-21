@@ -1,4 +1,4 @@
-import type { Observation, Project } from "./model";
+import { isExecutionRun, type Observation, type Project } from "./model";
 
 export type NodeUsage = {
   elapsedMs: number | null;
@@ -85,7 +85,9 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
         a.id.localeCompare(b.id)
       );
     });
-  const runs = unique(project.runs).filter((run) => scope.has(run.nodeId));
+  const runs = unique(project.runs).filter(
+    (run) => scope.has(run.nodeId) && isExecutionRun(run),
+  );
   const inputTokens = sumKnown(
     observations.map((o) => o.inputTokens),
     counter,

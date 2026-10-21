@@ -52,7 +52,16 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
     <div
       className={`research-node ${selected ? "is-selected" : ""} ${n.importance === "critical" ? "is-critical" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${children ? "is-container" : ""}`}
     >
-      <Handle type="target" position={Position.Top} />
+      {(
+        [Position.Top, Position.Right, Position.Bottom, Position.Left] as const
+      ).map((position) => (
+        <Handle
+          key={position}
+          id={position}
+          type="source"
+          position={position}
+        />
+      ))}
       <div className="node-grip">
         <div className="node-type">
           <span className="node-kind-icon">
@@ -133,7 +142,6 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
           <UsageStats data={data} />
         </div>
       )}
-      <Handle type="source" position={Position.Bottom} />
     </div>
   );
 }

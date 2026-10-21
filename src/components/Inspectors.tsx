@@ -18,9 +18,8 @@ import {
 import { useEffect, useState } from "react";
 import {
   descendants,
-  formatMetric,
   kinds,
-  metricLabel,
+  isExecutionRun,
   relations,
   statuses,
   type Artifact,
@@ -32,6 +31,7 @@ import {
 
 import { Badge, date, IconButton, kindIcon } from "./Primitives";
 import { NodeUsagePanel } from "./NodeUsagePanel";
+import { MetricDetails } from "./MetricDetails";
 export function ProjectInspector({
   project,
   onAdd,
@@ -65,7 +65,7 @@ export function ProjectInspector({
             <span>研究节点</span>
           </div>
           <div>
-            <strong>{project.runs.length}</strong>
+            <strong>{project.runs.filter(isExecutionRun).length}</strong>
             <span>实验运行</span>
           </div>
           <div>
@@ -273,7 +273,7 @@ export function NodeInspector({
         <div className="detail-tabs">
           {[
             ["overview", "概览"],
-            ["runs", `运行 ${runs.length}`],
+            ["runs", `记录 ${runs.length}`],
             ["evidence", `证据 ${relatedArtifacts.length}`],
             ["usage", "用量"],
           ].map(([id, label]) => (
@@ -539,16 +539,19 @@ export function NodeInspector({
                   <div>
                     <FlaskConical size={14} />
                     <strong>{r.title}</strong>
+                    {!isExecutionRun(r) && <small>结果记录</small>}
                     <Badge status={r.status} />
                   </div>
-                  <div className="metric-grid">
-                    {Object.entries(r.metrics || {}).map(([k, v]) => (
-                      <div key={k}>
-                        <span>{metricLabel(k)}</span>
-                        <strong>{formatMetric(v)}</strong>
-                      </div>
+                  <MetricDetails metrics={r.metrics || {}} />
+                  {project.assessments
+                    .filter((a) => a.runId === r.id)
+                    .map((a) => (
+                      <details className="raw-metrics" key={a.id}>
+                        <summary>评估 · {a.rubric}</summary>
+                        {a.conclusion && <p>{a.conclusion}</p>}
+                        <MetricDetails metrics={a.metrics} />
+                      </details>
                     ))}
-                  </div>
                   {r.events?.slice(-3).map((e) => (
                     <div className="mini-event" key={e.id}>
                       <span className="tiny-dot" />
