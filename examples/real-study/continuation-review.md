@@ -1,6 +1,6 @@
 # Continuing the study from its evidence
 
-A second agent resumed the exact-search experiment through scoped Research Trail context. It did not need the original conversation. This stage reviewed existing measurements rather than running a new retrieval benchmark.
+A second agent resumed the exact-search experiment through scoped ExpObserver context. It did not need the original conversation. This stage reviewed existing measurements rather than running a new retrieval benchmark.
 
 ## Independent checks
 

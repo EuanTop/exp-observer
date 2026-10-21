@@ -22,7 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix='gtrack-overhead-') as folder:
+    with tempfile.TemporaryDirectory(prefix='exp-observer-overhead-') as folder:
         store = Store(Path(folder) / 'data')
         store.create_project({'id': 'measurement', 'name': 'Disposable overhead measurement'})
         store.batch('measurement', {'operations': [{'op': 'node.add', 'data': {
@@ -34,7 +34,7 @@ def main():
         thread.start()
         url = f'http://127.0.0.1:{server.server_port}'
         command = [sys.executable, '-c', 'print("retained output")']
-        wrapped = [sys.executable, str(ROOT / 'skills/research-trail/scripts/research_trail.py'), '--url', url,
+        wrapped = [sys.executable, str(ROOT / 'skills/exp-observer/scripts/exp_observer.py'), '--url', url,
                    'execute', '--project', 'measurement', '--node', 'capture', '--title',
                    'Measured capture', '--', *command]
         results = {'directMs': [], 'recordedMs': []}

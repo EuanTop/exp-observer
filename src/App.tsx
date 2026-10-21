@@ -98,7 +98,7 @@ export default function App() {
     [artifact, setArtifact] = useState<Artifact | null>(null),
     [history, setHistory] = useState<any[] | null>(null),
     [theme, setTheme] = useState(
-      localStorage.getItem("gtrack-theme") || "light",
+      localStorage.getItem("exp-observer-theme") || "light",
     );
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasData>>([]),
     [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -117,7 +117,7 @@ export default function App() {
   }, [project]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("gtrack-theme", theme);
+    localStorage.setItem("exp-observer-theme", theme);
   }, [theme]);
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -139,7 +139,7 @@ export default function App() {
         setSelected([]);
         setScope(null);
         setEdgeId(null);
-        localStorage.setItem("gtrack-project", id);
+        localStorage.setItem("exp-observer-project", id);
         setError("");
         setTimeout(() => flow.fitView({ padding: 0.2, duration: 400 }), 180);
       } catch (e) {
@@ -155,7 +155,7 @@ export default function App() {
       .list()
       .then(({ projects: ps }) => {
         setProjects(ps);
-        const saved = localStorage.getItem("gtrack-project");
+        const saved = localStorage.getItem("exp-observer-project");
         if (ps.length)
           void load(ps.find((p) => p.id === saved)?.id || ps[0].id);
         else setLoading(false);
@@ -503,7 +503,7 @@ export default function App() {
     <div className="app-shell">
       <div className="workspace">
         <header className="topbar">
-          <div className="wordmark">研迹</div>
+          <div className="wordmark">ExpObserver</div>
           <span className="topbar-divider" />
           <div className="project-switcher">
             <button
@@ -795,13 +795,13 @@ export default function App() {
                         onNodeDragStop={saveDrag}
                         onMoveEnd={(_, viewport) =>
                           localStorage.setItem(
-                            `gtrack-viewport-${project.id}-${scope}`,
+                            `exp-observer-viewport-${project.id}-${scope}`,
                             JSON.stringify(viewport),
                           )
                         }
                         defaultViewport={JSON.parse(
                           localStorage.getItem(
-                            `gtrack-viewport-${project.id}-${scope}`,
+                            `exp-observer-viewport-${project.id}-${scope}`,
                           ) || '{"x":0,"y":0,"zoom":0.8}',
                         )}
                         fitView
@@ -1054,7 +1054,7 @@ export default function App() {
             <footer className="statusbar">
               <span>
                 <span className="tiny-dot accent" />
-                研迹
+                ExpObserver
               </span>
               <span>{project ? `r${project.revision}` : "本地工作空间"}</span>
               <div />

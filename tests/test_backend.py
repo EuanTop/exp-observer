@@ -19,7 +19,7 @@ from backend.store import Store, StoreError
 from backend.server import Server
 
 ROOT = Path(__file__).resolve().parents[1]
-CLI = ROOT / 'skills/research-trail/scripts/research_trail.py'
+CLI = ROOT / 'skills/exp-observer/scripts/exp_observer.py'
 
 
 class StoreTests(unittest.TestCase):
@@ -378,7 +378,7 @@ class HTTPAndCLITests(unittest.TestCase):
         setup = self.request('/api/agent-setup')
         self.assertEqual(setup['url'], self.url)
         self.assertNotEqual(self.server.server_port, 4317)
-        self.assertEqual(Path(setup['skillPath']), ROOT / 'skills/research-trail/SKILL.md')
+        self.assertEqual(Path(setup['skillPath']), ROOT / 'skills/exp-observer/SKILL.md')
         self.assertEqual(Path(setup['clientPath']), CLI)
         for key in ('skillPath', 'clientPath'):
             self.assertTrue(Path(setup[key]).is_absolute())
@@ -389,18 +389,16 @@ class HTTPAndCLITests(unittest.TestCase):
         self.assertEqual(json.loads(raised.exception.read())['code'], 'untrusted_host')
         raised.exception.close()
 
-    def test_cli_url_environment_and_legacy_entrypoint(self):
-        # The renamed setting and the existing client path must reach the same server.
-        env = dict(os.environ, RESEARCH_TRAIL_URL=self.url, GTRACK_URL='http://127.0.0.1:1')
+    def test_cli_url_environment_and_explicit_override(self):
+        env = dict(os.environ, EXP_OBSERVER_URL=self.url)
         current = subprocess.run([sys.executable, str(CLI), 'projects'], env=env,
                                  text=True, capture_output=True, cwd=self.root, timeout=20)
         self.assertEqual(current.returncode, 0, current.stderr)
-        env.pop('RESEARCH_TRAIL_URL')
-        env['GTRACK_URL'] = self.url
-        legacy = subprocess.run([sys.executable, str(ROOT / 'skills/gtrack/scripts/gtrack.py'), 'projects'],
-                                env=env, text=True, capture_output=True, cwd=self.root, timeout=20)
-        self.assertEqual(legacy.returncode, 0, legacy.stderr)
-        self.assertEqual(json.loads(current.stdout), json.loads(legacy.stdout))
+        env['EXP_OBSERVER_URL'] = 'http://127.0.0.1:1'
+        explicit = subprocess.run([sys.executable, str(CLI), '--url', self.url, 'projects'],
+                                  env=env, text=True, capture_output=True, cwd=self.root, timeout=20)
+        self.assertEqual(explicit.returncode, 0, explicit.stderr)
+        self.assertEqual(json.loads(current.stdout), json.loads(explicit.stdout))
 
     def test_security_and_body_limit(self):
         self.assertTrue(self.request('/api/health')['ok'])
@@ -478,11 +476,11 @@ class HTTPAndCLITests(unittest.TestCase):
         summary = json.loads(result.stdout)
         self.assertEqual(len(summary['artifactIds']), 4)
         p = self.store.get_project('study')
-        self.assertEqual(p['sourceRoots'], [str((self.root / '.gtrack-runs/study').resolve())])
+        self.assertEqual(p['sourceRoots'], [str((self.root / '.exp-observer-runs/study').resolve())])
         by_title = {a['title']: a for a in p['artifacts']}
         captured = by_title['result.json']
         self.assertEqual(json.loads(self.store.artifact_content('study', captured['id'])[0]), {'measured': 42})
-        self.assertTrue(Path(captured['sourcePath']).is_relative_to((self.root / '.gtrack-runs/study').resolve()))
+        self.assertTrue(Path(captured['sourcePath']).is_relative_to((self.root / '.exp-observer-runs/study').resolve()))
         self.store.batch('study', {'operations': [{'op': 'project.update', 'data': {'sourceRoots': p['sourceRoots'] + [str(self.root)]}}]})
         bulk = self.cli('artifact', '--project', 'study', '--node', 'a', '--path', 'result.json', 'result.csv')
         self.assertEqual(bulk.returncode, 0, bulk.stderr)

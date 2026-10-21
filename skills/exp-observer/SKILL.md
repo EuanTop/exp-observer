@@ -1,15 +1,15 @@
 ---
-name: research-trail
-description: Maintain a Research Trail experiment during agent-led research, including exploratory branches, observations, evidence and decisions. Use when working with a Research Trail project or asked to track, resume, compare or inspect experiments. Experiments are independent of conversations.
+name: exp-observer
+description: Maintain an ExpObserver experiment during agent-led research, including exploratory branches, observations, evidence and decisions. Use when working with an ExpObserver project or asked to track, resume, compare or inspect experiments. Experiments are independent of conversations.
 ---
 
-# 研迹 · Research Trail
+# ExpObserver
 
-Maintain a useful research record while doing the research. Choose the next question, method and depth from the user's objective, current evidence and existing budget; Research Trail does not prescribe a fixed experimental pipeline. It does not grant additional budget or override a pause request.
+Maintain a useful research record while doing the research. Choose the next question, method and depth from the user's objective, current evidence and existing budget; ExpObserver does not prescribe a fixed experimental pipeline. It does not grant additional budget or override a pause request.
 
-Use the bundled standard-library client at `scripts/research_trail.py`, relative to this directory. `RESEARCH_TRAIL_URL` defaults to `http://127.0.0.1:4317`; global `--url` overrides it. No model key is needed.
+Use the bundled standard-library client at `scripts/exp_observer.py`, relative to this directory. `EXP_OBSERVER_URL` defaults to `http://127.0.0.1:4317`; global `--url` overrides it. No model key is needed.
 
-Use **研迹 / Research Trail** as the product name and `research-trail` as the Skill name. The old client path and URL environment variable remain compatibility aliases; existing storage and browser preference keys do not require migration.
+Use **ExpObserver** as the product name and `exp-observer` as the repository and Skill name.
 
 ## Restore only the relevant context
 
@@ -37,11 +37,11 @@ These are decision criteria, not mandatory stages. Write concise research reason
 ## Capture facts cheaply
 
 ```sh
-python3 <skill>/scripts/research_trail.py context --project ID --node NODE
-python3 <skill>/scripts/research_trail.py execute --project ID --node NODE --title "Experiment title" --artifact results.json -- python3 experiment.py
-python3 <skill>/scripts/research_trail.py apply --project ID --file changes.json --expected-revision N --request-id stable-operation-id
-python3 <skill>/scripts/research_trail.py read --project ID --artifact ARTIFACT_ID
-python3 <skill>/scripts/research_trail.py check --project ID
+python3 <skill>/scripts/exp_observer.py context --project ID --node NODE
+python3 <skill>/scripts/exp_observer.py execute --project ID --node NODE --title "Experiment title" --artifact results.json -- python3 experiment.py
+python3 <skill>/scripts/exp_observer.py apply --project ID --file changes.json --expected-revision N --request-id stable-operation-id
+python3 <skill>/scripts/exp_observer.py read --project ID --artifact ARTIFACT_ID
+python3 <skill>/scripts/exp_observer.py check --project ID
 ```
 
 `execute` actually runs the command and records lifecycle, measured wall time, exit code and stdout/stderr evidence with no extra model calls. Repeat `--artifact PATH` to retain result files. Existing outputs can be registered together with `artifact --path FILE1 FILE2`; registration computes hashes and retains copies. `read --offset N --limit N` returns a verified byte window. Capture is explicit, not an implicit host hook.

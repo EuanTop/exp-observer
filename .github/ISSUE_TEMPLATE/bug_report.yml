@@ -1,5 +1,5 @@
 name: Bug report
-description: Report unexpected behavior in Research Trail.
+description: Report unexpected behavior in ExpObserver.
 title: "[Bug] "
 body:
   - type: textarea
@@ -15,7 +15,7 @@ body:
       label: Steps to reproduce
       description: Include the smallest example that reproduces the issue.
       placeholder: |
-        1. Start Research Trail with ...
+        1. Start ExpObserver with ...
         2. Open or create ...
         3. ...
     validations:
@@ -24,7 +24,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: OS, browser, Node.js and Python versions, Research Trail revision or ZIP version, and how you started it.
+      description: OS, browser, Node.js and Python versions, ExpObserver revision or ZIP version, and how you started it.
     validations:
       required: true
   - type: textarea

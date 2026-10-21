@@ -1,4 +1,4 @@
-"""Research Trail local experiment records."""
+"""ExpObserver local experiment records."""
 from .store import Store, StoreError
 
 __all__ = ['Store', 'StoreError']

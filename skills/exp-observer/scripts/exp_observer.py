@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone Research Trail client: explicit experiment IDs, incremental writes, no model dependency."""
+"""Standalone ExpObserver client: explicit experiment IDs, incremental writes, no model dependency."""
 from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
@@ -47,7 +47,7 @@ class Client:
             except (ValueError, UnicodeError):
                 raise ClientError(f'HTTP {exc.code}: {exc.reason}') from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise ClientError(f'Cannot reach Research Trail at {self.url}: {exc.reason if isinstance(exc, URLError) else exc}') from exc
+            raise ClientError(f'Cannot reach ExpObserver at {self.url}: {exc.reason if isinstance(exc, URLError) else exc}') from exc
 
     def project_route(self, project):
         return '/api/projects/' + quote(project, safe='')
@@ -63,8 +63,8 @@ class Client:
 
 
 def parser():
-    root = argparse.ArgumentParser(description='Maintain independent Research Trail experiment records.')
-    root.add_argument('--url', default=os.environ.get('RESEARCH_TRAIL_URL') or os.environ.get('GTRACK_URL', 'http://127.0.0.1:4317'))
+    root = argparse.ArgumentParser(description='Maintain independent ExpObserver experiment records.')
+    root.add_argument('--url', default=os.environ.get('EXP_OBSERVER_URL') or 'http://127.0.0.1:4317')
     commands = root.add_subparsers(dest='command', required=True)
     commands.add_parser('projects', help='List experiments')
     init = commands.add_parser('init', help='Create an experiment')
@@ -123,7 +123,7 @@ def execute(client, args):
     if not any(n['id'] == args.node for n in project['nodes']):
         raise ClientError('Selected node does not exist.')
     run_id = 'run-' + uuid4().hex[:16]
-    capture_root = (Path.cwd() / '.gtrack-runs' / project['id']).resolve()
+    capture_root = (Path.cwd() / '.exp-observer-runs' / project['id']).resolve()
     capture_dir = capture_root / run_id
     capture_dir.mkdir(parents=True, exist_ok=False)
     roots = project.get('sourceRoots', [])

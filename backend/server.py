@@ -1,4 +1,4 @@
-"""Loopback HTTP service for Research Trail."""
+"""Loopback HTTP service for ExpObserver."""
 from __future__ import annotations
 import argparse
 import json
@@ -23,7 +23,7 @@ class Server(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'ResearchTrail/0.1.0'
+    server_version = 'ExpObserver/0.1.0'
 
     def log_message(self, format, *args):
         if args and isinstance(args[0], str) and args[0].startswith('GET /api/projects'):
@@ -108,8 +108,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send({'ok': True, 'version': '0.1.0'})
         if path == '/api/agent-setup' and method == 'GET':
             root = Path(__file__).resolve().parents[1]
-            return self._send({'skillPath': str(root / 'skills' / 'research-trail' / 'SKILL.md'),
-                               'clientPath': str(root / 'skills' / 'research-trail' / 'scripts' / 'research_trail.py'),
+            return self._send({'skillPath': str(root / 'skills' / 'exp-observer' / 'SKILL.md'),
+                               'clientPath': str(root / 'skills' / 'exp-observer' / 'scripts' / 'exp_observer.py'),
                                'url': f'http://127.0.0.1:{self.server.server_port}'})
         if path == '/api/projects':
             if method == 'GET':
@@ -164,15 +164,15 @@ class Handler(BaseHTTPRequestHandler):
         if not target.is_file() and not Path(path).suffix:
             target = self.server.dist / 'index.html'
         if not target.is_file():
-            raise StoreError('Build the frontend to open Research Trail.', 'not_found', 404)
+            raise StoreError('Build the frontend to open ExpObserver.', 'not_found', 404)
         mime = mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
         return self._send(target.read_bytes(), mime=mime)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Research Trail local experiment workspace')
+    parser = argparse.ArgumentParser(description='ExpObserver local experiment workspace')
     parser.add_argument('--port', type=int, default=4317)
-    parser.add_argument('--data-dir', default=str(Path(__file__).resolve().parents[1] / '.gtrack'))
+    parser.add_argument('--data-dir', default=str(Path(__file__).resolve().parents[1] / '.exp-observer'))
     parser.add_argument('--no-demo', action='store_true')
     args = parser.parse_args()
     store = Store(args.data_dir)
@@ -183,7 +183,7 @@ def main():
         except ImportError:
             pass
     server = Server(('127.0.0.1', args.port), store)
-    print(f'Research Trail http://127.0.0.1:{server.server_port}', flush=True)
+    print(f'ExpObserver http://127.0.0.1:{server.server_port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

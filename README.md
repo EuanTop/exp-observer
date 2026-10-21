@@ -1,4 +1,4 @@
-# Research Trail
+# ExpObserver
 
 [简体中文](README.zh-CN.md)
 
@@ -6,6 +6,9 @@
 
 Explore alternatives, keep evidence, and follow how an experiment changes direction. Any node can contain a graph: group a few algorithm ideas, expand their experiments, then trace the results into a decision. Agents maintain the same experiment across conversations through a portable Skill and small JSON updates.
 
+![Research graph with nested algorithm branches, experiment states and linked findings](docs/screenshots/research.png)
+
+*Research graph: explore nested alternatives and trace evidence into decisions.*
 
 ## Start locally
 
@@ -39,31 +42,35 @@ Node state distinguishes **not started** (`proposed`), **active**, **paused**, *
 
 `N` adds a node, `⌘/Ctrl K` opens search, `⌘/Ctrl G` groups selected nodes, and `F` fits the graph. Drag a node by its header. Shift-drag selects nodes; a trackpad or middle/right mouse button pans the canvas. Double-click a container to focus it.
 
+![Measured results and assessments for Python inverted-index and SQLite FTS5 runs](docs/screenshots/comparison.png)
+
+*Compare measured results and assessments side by side. Shown here: the [exact-search study](examples/real-study/report.md).*
+
 ## Give your agent the Skill
 
-Copy [`skills/research-trail`](skills/research-trail) into your agent host's supported Skill directory, or give the agent the path to [`SKILL.md`](skills/research-trail/SKILL.md). The standalone client travels with the Skill; the research project does not need to import Research Trail as a dependency.
+Copy [`skills/exp-observer`](skills/exp-observer) into your agent host's supported Skill directory, or give the agent the path to [`SKILL.md`](skills/exp-observer/SKILL.md). The standalone client travels with the Skill; the research project does not need to import ExpObserver as a dependency.
 
 The interface's **Connect Agent** action copies an instruction with the actual Skill path, local server address and current experiment ID. Paste it into a new agent conversation and add your research task.
 
 A useful instruction is:
 
-> Use the Research Trail Skill to maintain experiment `my-study`. Begin with a visible start node, connect research steps as the work advances, and state findings directly in node titles and overviews. Keep evidence attached to the graph; do not generate a separate conclusion document unless explicitly requested. Explore within the authorized goal and budget.
+> Use the ExpObserver Skill to maintain experiment `my-study`. Begin with a visible start node, connect research steps as the work advances, and state findings directly in node titles and overviews. Keep evidence attached to the graph; do not generate a separate conclusion document unless explicitly requested. Explore within the authorized goal and budget.
 
 An experiment belongs to its persistent record. **Multiple conversations and agents can contribute to the same experiment.** Operations explicitly select the project and, where relevant, the node; there is no conversation binding or global current-experiment pointer.
 
 ### Read, run, record
 
 ```sh
-python3 skills/research-trail/scripts/research_trail.py projects
-python3 skills/research-trail/scripts/research_trail.py init --id my-study --name 'My study' --source-root /absolute/study/directory
-python3 skills/research-trail/scripts/research_trail.py context --project my-study
-python3 skills/research-trail/scripts/research_trail.py context --project my-study --node NODE_ID
+python3 skills/exp-observer/scripts/exp_observer.py projects
+python3 skills/exp-observer/scripts/exp_observer.py init --id my-study --name 'My study' --source-root /absolute/study/directory
+python3 skills/exp-observer/scripts/exp_observer.py context --project my-study
+python3 skills/exp-observer/scripts/exp_observer.py context --project my-study --node NODE_ID
 ```
 
 Use `apply` for small, related changes rather than rewriting the experiment. Read the revision from `context`; supply it when updating existing work. Reuse the request ID when retrying an uncertain write.
 
 ```sh
-python3 skills/research-trail/scripts/research_trail.py apply --project my-study \
+python3 skills/exp-observer/scripts/exp_observer.py apply --project my-study \
   --file changes.json --expected-revision REVISION --request-id stable-change-id
 ```
 
@@ -88,7 +95,7 @@ For example, `changes.json` can contain:
 Capture a real command and its result files with one call:
 
 ```sh
-python3 skills/research-trail/scripts/research_trail.py execute \
+python3 skills/exp-observer/scripts/exp_observer.py execute \
   --project my-study --node candidate-a --title 'Evaluate candidate A' \
   --artifact results.json --artifact timing.csv -- python3 experiment.py
 ```
@@ -98,21 +105,21 @@ The wrapper records lifecycle, exit code, wall time, stdout/stderr and the reque
 Register existing files in bulk, inspect retained evidence, check the record or export the graph:
 
 ```sh
-python3 skills/research-trail/scripts/research_trail.py artifact --project my-study --node candidate-a --path results.json timing.csv
-python3 skills/research-trail/scripts/research_trail.py read --project my-study --artifact ARTIFACT_ID
-python3 skills/research-trail/scripts/research_trail.py check --project my-study
-python3 skills/research-trail/scripts/research_trail.py export --project my-study --output my-study.json
+python3 skills/exp-observer/scripts/exp_observer.py artifact --project my-study --node candidate-a --path results.json timing.csv
+python3 skills/exp-observer/scripts/exp_observer.py read --project my-study --artifact ARTIFACT_ID
+python3 skills/exp-observer/scripts/exp_observer.py check --project my-study
+python3 skills/exp-observer/scripts/exp_observer.py export --project my-study --output my-study.json
 ```
 
-`RESEARCH_TRAIL_URL` or the global `--url` option selects another local server address. The former environment variable and client paths remain compatible, and the existing `.gtrack` storage directory is retained. See the [Skill guide](skills/research-trail/SKILL.md), [record reference](skills/research-trail/references/records.md) and [HTTP/data contract](docs/contract.md) for operations, versioning and bounded evidence reads. Automatic command capture uses the explicit `execute` wrapper; installing the Skill does not install global hooks.
+`EXP_OBSERVER_URL` or the global `--url` option selects another local server address. See the [Skill guide](skills/exp-observer/SKILL.md), [record reference](skills/exp-observer/references/records.md) and [HTTP/data contract](docs/contract.md) for operations, versioning and bounded evidence reads. Automatic command capture uses the explicit `execute` wrapper; installing the Skill does not install global hooks.
 
 ### Observe a research step
 
 Use an observation to time work on any node, including analysis that spans several commands. Start the step, do the work, then finish with the returned observation ID:
 
 ```sh
-python3 skills/research-trail/scripts/research_trail.py observe start --project my-study --node candidate-a --title 'Review candidate A' --request-id review-a-start
-python3 skills/research-trail/scripts/research_trail.py observe finish --project my-study --id OBSERVATION_ID --request-id review-a-finish
+python3 skills/exp-observer/scripts/exp_observer.py observe start --project my-study --node candidate-a --title 'Review candidate A' --request-id review-a-start
+python3 skills/exp-observer/scripts/exp_observer.py observe finish --project my-study --id OBSERVATION_ID --request-id review-a-finish
 ```
 
 The server records start/finish times and elapsed wall time, including waits. An observation belongs to a node, with no session binding. If the runtime or provider exposes counters for this step, pass `--input-tokens N`, `--output-tokens N` and `--usage-source SOURCE` when finishing; `--usage-ref REF` identifies the source record. Omit unavailable counters: **unknown stays `null`, while measured zero stays zero**. Use step-specific counters rather than repeating cumulative usage across observations.
@@ -121,9 +128,9 @@ The interface aggregates a node and its contained descendants. Finished time int
 
 ## Your records stay local
 
-Canonical JSON lives in `.gtrack/<project-id>/state.json`; retained evidence copies live in its `evidence/` directory. Atomic writes, file locks, revision checks and idempotent request IDs support incremental maintenance by multiple agents. Evidence is verified against its registered identity when read.
+Canonical JSON lives in `.exp-observer/<project-id>/state.json`; retained evidence copies live in its `evidence/` directory. Atomic writes, file locks, revision checks and idempotent request IDs support incremental maintenance by multiple agents. Evidence is verified against its registered identity when read.
 
-Back up the **whole `.gtrack` directory** to preserve history and evidence. A graph export contains references rather than embedded file contents. The server binds to localhost and is intended for local use.
+Back up the **whole `.exp-observer` directory** to preserve history and evidence. A graph export contains references rather than embedded file contents. The server binds to localhost and is intended for local use.
 
 ## Examples and development
 

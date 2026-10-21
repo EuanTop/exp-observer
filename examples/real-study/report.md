@@ -17,9 +17,13 @@ python3 study.py fts5
 
 `fixture` generates deterministic input. Each implementation writes a result JSON, a per-query latency CSV and an output JSON in this directory. These generated files are ignored by Git. New timings will depend on the machine and load.
 
-To record a new investigation in Research Trail, create a project and candidate nodes through the [Skill](../../skills/research-trail/SKILL.md), run these commands with `execute`, and retain the resulting files using `--artifact` or bulk `artifact` registration.
+To record a new investigation in ExpObserver, create a project and candidate nodes through the [Skill](../../skills/exp-observer/SKILL.md), run these commands with `execute`, and retain the resulting files using `--artifact` or bulk `artifact` registration.
 
 ## Recorded observations
+
+![Recorded comparison of Python inverted-index and SQLite FTS5 runs in the application](../../docs/screenshots/comparison.png)
+
+*The comparison view shows recorded measurements and their assessments.*
 
 | Implementation | Fresh build median, ms (3 samples) | 48-query batch median, ms (5 batches) | One explicit update, ms |
 |---|---:|---:|---:|

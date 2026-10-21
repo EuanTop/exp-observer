@@ -64,9 +64,9 @@ Register actual evidence with `artifact`, rather than supplying hashes in metada
 Every node can have observations, including questions, analysis and decisions without a command run. An observation is a measured work interval; it does not bind a conversation or change node/run state.
 
 ```sh
-python3 <skill>/scripts/research_trail.py observe start --project ID --node NODE --title "Review retained outputs" --request-id review-start-1
+python3 <skill>/scripts/exp_observer.py observe start --project ID --node NODE --title "Review retained outputs" --request-id review-start-1
 # Work on the research question; retain the returned observationId.
-python3 <skill>/scripts/research_trail.py observe finish --project ID --id OBSERVATION_ID --request-id review-finish-1
+python3 <skill>/scripts/exp_observer.py observe finish --project ID --id OBSERVATION_ID --request-id review-finish-1
 ```
 
 If the host or provider supplies actual counters, finish can additionally carry `--input-tokens N --output-tokens N --usage-source SOURCE --usage-ref UNIQUE_USAGE_ID`. These are usage deltas attributed once, ideally to the most specific node. Do not estimate counts from text, time or command exit status. Do not repeat cumulative conversation totals on multiple nodes. A supplied counter requires a source; the same source/reference pair cannot be recorded twice. Missing counters are `null`; an actual measured zero is `0`.
@@ -76,9 +76,9 @@ The server timestamps start/finish and calculates `durationMs`. A node's display
 Read registered evidence through the Skill client:
 
 ```sh
-python <skill>/scripts/research_trail.py read --project ID --artifact ARTIFACT_ID
-python <skill>/scripts/research_trail.py read --project ID --artifact ARTIFACT_ID --offset 262144 --limit 262144
-python <skill>/scripts/research_trail.py read --project ID --artifact ARTIFACT_ID --offset 0 --limit 4096 --output result-part.bin
+python <skill>/scripts/exp_observer.py read --project ID --artifact ARTIFACT_ID
+python <skill>/scripts/exp_observer.py read --project ID --artifact ARTIFACT_ID --offset 262144 --limit 262144
+python <skill>/scripts/exp_observer.py read --project ID --artifact ARTIFACT_ID --offset 0 --limit 4096 --output result-part.bin
 ```
 
 The server verifies the full artifact's SHA-256 and byte count before returning the requested range. `read` defaults to the first 262144 bytes; `--offset` is a zero-based byte position and `--limit` is capped at 1048576 bytes. Default output is UTF-8 text; invalid or split characters use replacement characters. `--output` preserves the original range bytes and prints a concise file acknowledgement. Use it for binary evidence or exact bytes. Reads do not update experiment records. For direct adapters, `/api/projects/ID/artifacts/ARTIFACT/content?offset=0&limit=262144` provides the same bounded bytes, and `/metadata` verifies identity without returning content.

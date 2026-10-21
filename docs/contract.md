@@ -1,4 +1,4 @@
-# Research Trail engineering contract
+# ExpObserver engineering contract
 
 Local application; persistent experiments independent of conversations. JSON is canonical. No account, telemetry, model API or Git required. UI consumes real HTTP data. camelCase fields everywhere. Unknown optional fields must survive edits. Node containment is separate from semantic edges; arbitrary kinds and arbitrary finite depth, no containment cycles.
 
@@ -40,7 +40,7 @@ Live observations are written through the existing atomic batch endpoint, not a 
 
 Each operation targets its explicit project; observations have no conversation or session ownership. They can span multiple commands, waits or research actions. Node completion and command success do not imply that an observation has finished.
 
-Token counters supplied to `finish` must be nonnegative integers; omit unknown values rather than sending `null`. A supplied counter, including zero, requires a nonblank `usageSource`. A nonempty `usageRef` also requires a source; the trimmed `(usageSource, usageRef)` pair must be unique across the project, or validation returns `duplicate_usage_ref` (HTTP 409). Use non-overlapping step counters from the runtime/provider, not repeated cumulative totals. Research Trail does not infer token counts from text, duration or run success.
+Token counters supplied to `finish` must be nonnegative integers; omit unknown values rather than sending `null`. A supplied counter, including zero, requires a nonblank `usageSource`. A nonempty `usageRef` also requires a source; the trimmed `(usageSource, usageRef)` pair must be unique across the project, or validation returns `duplicate_usage_ref` (HTTP 409). Use non-overlapping step counters from the runtime/provider, not repeated cumulative totals. ExpObserver does not infer token counts from text, duration or run success.
 
 Finishing an already finished observation returns `observation_finished` (HTTP 409). Reuse the original batch request ID to retry an uncertain successful finish without duplication. If the server clock precedes the start, finishing returns `invalid_observation_duration` (HTTP 409) rather than storing a negative interval. Imported timestamps must include a timezone; finished duration must agree with its nonnegative timestamp interval within 1 ms. Running records cannot have a finish time or duration. Deleting a node removes observations on that containment subtree.
 
@@ -56,11 +56,11 @@ The UI scopes usage to the selected node and its containment descendants. It nev
 ### Observation CLI
 
 ```text
-python3 skills/research-trail/scripts/research_trail.py observe start --project ID --node NODE [--title TEXT] [--request-id REQUEST]
-python3 skills/research-trail/scripts/research_trail.py observe finish --project ID --id OBSERVATION_ID [--input-tokens N] [--output-tokens N] [--usage-source SOURCE] [--usage-ref REF] [--request-id REQUEST]
+python3 skills/exp-observer/scripts/exp_observer.py observe start --project ID --node NODE [--title TEXT] [--request-id REQUEST]
+python3 skills/exp-observer/scripts/exp_observer.py observe finish --project ID --id OBSERVATION_ID [--input-tokens N] [--output-tokens N] [--usage-source SOURCE] [--usage-ref REF] [--request-id REQUEST]
 ```
 
-`start` returns `observationId`, the project revision and observation fields. With a request ID, the CLI derives a stable observation ID from it; use the same request ID only to retry the same operation. Finish uses a distinct request ID and the returned observation ID. Finish also returns the resulting fields, including actual elapsed time and the known/unknown counters. Either input or output count can be supplied independently when only one is available. Both commands use the same `RESEARCH_TRAIL_URL` / global `--url` configuration as other CLI operations. No additional model call is used to start, finish or aggregate observations.
+`start` returns `observationId`, the project revision and observation fields. With a request ID, the CLI derives a stable observation ID from it; use the same request ID only to retry the same operation. Finish uses a distinct request ID and the returned observation ID. Finish also returns the resulting fields, including actual elapsed time and the known/unknown counters. Either input or output count can be supplied independently when only one is available. Both commands use the same `EXP_OBSERVER_URL` / global `--url` configuration as other CLI operations. No additional model call is used to start, finish or aggregate observations.
 
 HTTP, local loopback only:
 - GET `/api/health` -> `{ok:true,version:'0.1.0'}`
@@ -86,6 +86,6 @@ Frontend reads the project list and current snapshot, then polls revisions and l
 
 Evidence preview renders verified PNG/JPEG/GIF/WebP files up to 5 MiB as images. Other binary files show verified metadata and offer the original download. SVG, HTML and script-like text remain inert text. Previews use the same hash-checked content route; image data stays local.
 
-Skill CLI standalone Python stdlib HTTP client at `skills/research-trail/scripts/research_trail.py`, URL env RESEARCH_TRAIL_URL default http://127.0.0.1:4317. Commands: `observe start/finish` (syntax above), `projects`, `init --name NAME [--id ID] [--source-root PATH]`, `context --project ID [--node ID]`, `apply --project ID [--file FILE] [--expected-revision N] [--request-id ID]` reading JSON array/operations from stdin, `artifact --project ID --path PATH... [--node ID] [--run ID]`, `read --project ID --artifact ID [--offset N] [--limit N] [--output PATH]`, `export --project ID [--output PATH]`, `check --project ID`, `execute --project ID --node ID --title TITLE [--artifact PATH ...] -- COMMAND...` (runs actual command; registers lifecycle, stdout/stderr and specified result files without extra model calls). Each explicit operation selects experiment/node; no conversation registry or global current experiment.
+Skill CLI standalone Python stdlib HTTP client at `skills/exp-observer/scripts/exp_observer.py`, URL env EXP_OBSERVER_URL default http://127.0.0.1:4317. Commands: `observe start/finish` (syntax above), `projects`, `init --name NAME [--id ID] [--source-root PATH]`, `context --project ID [--node ID]`, `apply --project ID [--file FILE] [--expected-revision N] [--request-id ID]` reading JSON array/operations from stdin, `artifact --project ID --path PATH... [--node ID] [--run ID]`, `read --project ID --artifact ID [--offset N] [--limit N] [--output PATH]`, `export --project ID [--output PATH]`, `check --project ID`, `execute --project ID --node ID --title TITLE [--artifact PATH ...] -- COMMAND...` (runs actual command; registers lifecycle, stdout/stderr and specified result files without extra model calls). Each explicit operation selects experiment/node; no conversation registry or global current experiment.
 
 Server `python3 -m backend.server --port 4317 [--data-dir PATH] [--no-demo]` serves built dist and API from the same origin. An empty store is seeded through `backend/seed.py` unless `--no-demo` is supplied.

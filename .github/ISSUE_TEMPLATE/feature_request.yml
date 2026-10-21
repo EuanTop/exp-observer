@@ -6,7 +6,7 @@ body:
     id: task
     attributes:
       label: Research task
-      description: What are you trying to do, and where does Research Trail get in the way?
+      description: What are you trying to do, and where does ExpObserver get in the way?
     validations:
       required: true
   - type: textarea

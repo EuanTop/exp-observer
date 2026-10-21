@@ -1,4 +1,4 @@
-name: Check Research Trail
+name: Check ExpObserver
 on: [push, pull_request]
 jobs:
   verify:
