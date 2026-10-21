@@ -139,6 +139,7 @@ class RecoveryTests(unittest.TestCase):
         self.start()
         self.wait_for(lambda: len(self.store.get_project('no-init')['nodes']) == 2
                       and len(self.store.get_project('no-init')['artifacts']) == 1)
+        self.server.recovery.stop()
         project = self.store.get_project('no-init')
         self.assertEqual(project['runs'][0]['metrics'], metrics)
         self.assertIsNone(project['runs'][0]['startedAt'])
