@@ -89,6 +89,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotEqual(first['id'], different_workspace['id'])
         self.start()
         self.wait_for(lambda: len(self.store.list_projects()) == 2)
+        self.server.recovery.stop()
         project = self.store.get_project(first['id'])
         self.assertEqual(project['description'], 'Original description')
         self.assertEqual(project['sourceRoots'], [str(self.root / 'results')])
