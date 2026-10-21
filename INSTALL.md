@@ -12,6 +12,10 @@ This guide is for an agent asked to install ExpObserver and its portable Skill. 
 6. Verify `GET /api/health` returns `ok: true`, `/` serves the interface, and `/api/agent-setup` points to existing Skill/client files. Run `<python> <installed-skill>/scripts/exp_observer.py projects` (with `--url URL` before `projects` when using a different address). A copied Skill is self-contained; no backend imports belong in the user's research project.
 7. Tell the user the browser URL, application location and Skill location. They can then give the agent a research task or use **Connect Agent** in the interface. Do not create a research project or run experiments merely to verify installation.
 
+Research can begin while the application is closed. The installed client saves project preparation and records locally, and the application recovers registered queues automatically when running. This requires the client to execute and write locally; installing a Skill does not grant its host sandbox permissions. Verify installation and host access separately from the research task, so the research conversation is not responsible for starting or diagnosing the application.
+
+The client and application share a user recovery registry; `EXP_OBSERVER_STATE_DIR` overrides its location for both. Keep that setting consistent. Automatic recovery only visits registered outbox directories for the application's loopback HTTP address and never executes experiments. Manual `sync` remains available from the original experiment working directory. Copy the whole updated Skill on upgrades as well as updating the application; old copied clients do not acquire new recovery behavior automatically.
+
 ## Manual installation
 
 Download [exp-observer.zip](https://github.com/EuanTop/exp-observer/releases/latest/download/exp-observer.zip), extract it and open the extracted `exp-observer` folder. Install [Python](https://www.python.org/downloads/) first if it is not available.

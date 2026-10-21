@@ -14,13 +14,22 @@ import subprocess
 import sys
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener, urlopen
 from uuid import uuid4
 
 
 class ClientError(Exception):
-    pass
+    def __init__(self, message, *, code=None, status=None):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        response.close()
+        raise ClientError('Automatic recovery does not follow HTTP redirects.', code='redirect_not_allowed', status=code)
 
 
 def stamp():
@@ -32,27 +41,34 @@ def emit(value, stream=sys.stdout):
 
 
 class Client:
-    def __init__(self, url, timeout=30):
+    def __init__(self, url, timeout=30, transport_url=None, local_only=False):
         self.url = url.rstrip('/')
         self.timeout = timeout
+        self.transport_url = (transport_url or self.url).rstrip('/')
+        if local_only and loopback_origin(self.transport_url) is None:
+            raise ClientError('Automatic recovery requires a loopback HTTP origin.')
+        self.opener = build_opener(ProxyHandler({}), NoRedirect()) if local_only else None
 
     def request(self, route, body=None, raw=False):
         data = None if body is None else json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
-        request = Request(self.url + route, data=data, headers={'Content-Type': 'application/json'})
+        request = Request(self.transport_url + route, data=data, headers={'Content-Type': 'application/json'})
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with (self.opener.open(request, timeout=self.timeout) if self.opener else urlopen(request, timeout=self.timeout)) as response:
                 content = response.read()
                 return content if raw else json.loads(content)
         except HTTPError as exc:
             try:
                 detail = json.loads(exc.read())
-                raise ClientError(f'{detail.get("code", exc.code)}: {detail.get("error", exc.reason)}') from exc
+                if not isinstance(detail, dict):
+                    raise ValueError('Invalid error response')
+                code = detail.get('code', str(exc.code))
+                raise ClientError(f'{code}: {detail.get("error", exc.reason)}', code=code, status=exc.code) from exc
             except (ValueError, UnicodeError):
-                raise ClientError(f'HTTP {exc.code}: {exc.reason}') from exc
+                raise ClientError(f'HTTP {exc.code}: {exc.reason}', code='http_error', status=exc.code) from exc
             finally:
                 exc.close()
         except (URLError, TimeoutError, OSError) as exc:
-            raise ClientError(f'Cannot reach ExpObserver at {self.url}: {exc.reason if isinstance(exc, URLError) else exc}') from exc
+            raise ClientError(f'Cannot reach ExpObserver at {self.url}: {exc.reason if isinstance(exc, URLError) else exc}', code='unavailable') from exc
 
     def project_route(self, project):
         return '/api/projects/' + quote(project, safe='')
@@ -110,7 +126,7 @@ def parser():
         cmd = commands.add_parser(command, **options)
         cmd.add_argument('--project', required=True)
         if command in ('context', 'artifact', 'execute'):
-            cmd.add_argument('--node', required=command == 'execute')
+            cmd.add_argument('--node', help='Existing node; execute creates a node when omitted')
         if command == 'apply':
             cmd.add_argument('--file')
             cmd.add_argument('--expected-revision', type=int)
@@ -144,6 +160,25 @@ def capture_root(project_id):
     return (Path.cwd() / '.exp-observer-runs' / directory).resolve()
 
 
+def sync_directory(path):
+    if os.name != 'nt':
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def ensure_directory(path):
+    missing, ancestor = [], path
+    while not ancestor.exists():
+        missing.append(ancestor)
+        ancestor = ancestor.parent
+    path.mkdir(parents=True, exist_ok=True)
+    for created in reversed(missing):
+        sync_directory(created.parent)
+
+
 def save_task(path, task):
     """Atomic replacement keeps a timeout or interrupted sync safely retryable."""
     temporary = path.with_name(path.name + '.' + uuid4().hex + '.tmp')
@@ -154,6 +189,7 @@ def save_task(path, task):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        sync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -161,7 +197,7 @@ def save_task(path, task):
 @contextmanager
 def task_lock(path):
     """An OS lock is released on process death, including on Windows."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_directory(path.parent)
     with path.with_suffix('.lock').open('a+b') as lock:
         if os.name == 'nt':
             import msvcrt
@@ -188,6 +224,219 @@ def task_lock(path):
                 msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def state_directory():
+    """Only the small directory registry is shared between workspaces."""
+    override = os.environ.get('EXP_OBSERVER_STATE_DIR')
+    if override:
+        return Path(override).expanduser().resolve()
+    if os.name == 'nt':
+        base = Path(os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA') or Path.home() / 'AppData' / 'Local')
+        return base / 'ExpObserver'
+    if sys.platform == 'darwin':
+        return Path.home() / 'Library' / 'Application Support' / 'ExpObserver'
+    return Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local' / 'state') / 'exp-observer'
+
+
+def loopback_origin(url):
+    """Automatic recovery accepts only an explicit local HTTP origin."""
+    if not isinstance(url, str):
+        return None
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', 'localhost', '::1')
+                or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+            return None
+        port = parsed.port if parsed.port is not None else 80
+        hostname = '127.0.0.1' if parsed.hostname == 'localhost' else parsed.hostname
+        return (hostname, port) if 1 <= port <= 65535 else None
+    except ValueError:
+        return None
+
+
+def register_outbox(outbox, url):
+    if loopback_origin(url) is None:
+        return 'Automatic recovery requires a loopback HTTP URL; this outbox remains available to manual sync.'
+    outbox = str(Path(outbox).resolve())
+    key = hashlib.sha256(json.dumps([url, outbox], ensure_ascii=False).encode('utf-8')).hexdigest()
+    registration = state_directory() / 'outboxes' / (key + '.json')
+    try:
+        with task_lock(registration):
+            if not registration.exists():
+                save_task(registration, {'version': 1, 'url': url, 'outbox': outbox, 'registeredAt': stamp()})
+    except (ClientError, OSError, ValueError) as exc:
+        return f'Automatic recovery registration is unavailable; the durable outbox is retained: {exc}'
+    return None
+
+
+def persist_task(path, task):
+    # A registry failure must not discard the task that was already made durable.
+    save_task(path, task)
+    warning = register_outbox(path.parent, task['url'])
+    if warning and warning not in task['recordingWarnings']:
+        task['recordingWarnings'].append(warning)
+        save_task(path, task)
+
+
+def project_plan_path(outbox, url, project_id):
+    key = hashlib.sha256(json.dumps([url, project_id], ensure_ascii=False).encode('utf-8')).hexdigest()[:32]
+    return Path(outbox) / ('project-' + key + '.json')
+
+
+def prepare_project(outbox, url, metadata, implicit=False):
+    """First writer freezes a creation plan; later captures never edit it."""
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', metadata['id']):
+        raise ClientError('Project IDs must use 1–128 letters, numbers, dots, underscores or hyphens.')
+    path = project_plan_path(outbox, url, metadata['id'])
+    with task_lock(path):
+        if path.exists():
+            plan = json.loads(path.read_text(encoding='utf-8'))
+            warning = register_outbox(path.parent, url)
+            if warning and warning not in plan['recordingWarnings']:
+                plan['recordingWarnings'].append(warning)
+                save_task(path, plan)
+            return path, plan
+        plan = {'version': 1, 'kind': 'project', 'url': url, 'projectId': metadata['id'],
+                'project': metadata, 'implicit': implicit, 'preparedAt': stamp(), 'state': 'ready',
+                'recordingWarnings': []}
+        persist_task(path, plan)
+        return path, plan
+
+
+def ensure_project(client, path, plan):
+    """Create only after a confirmed not_found. Never update an existing project."""
+    try:
+        project = client.project(plan['projectId'])
+    except ClientError as exc:
+        if not str(exc).startswith('not_found:'):
+            raise
+        try:
+            project = client.request('/api/projects', plan['project'])
+        except ClientError as creation_error:
+            if not str(creation_error).startswith('conflict:'):
+                raise
+            # A concurrent creator may have won after our GET.
+            project = client.project(plan['projectId'])
+    if plan['state'] != 'synced':
+        plan['state'] = 'synced'
+        save_task(path, plan)
+    return project
+
+
+def sync_project(client, path, plan):
+    warnings = list(plan['recordingWarnings'])
+    project = None
+    try:
+        project = ensure_project(client, path, plan)
+    except (ClientError, OSError, ValueError) as exc:
+        warnings.append(str(exc))
+    source = project if project is not None else plan['project']
+    result = {key: source[key] for key in ('id', 'name', 'description', 'revision') if key in source}
+    result.update({'projectId': plan['projectId'], 'pending': project is None, 'preparedAt': plan['preparedAt'],
+                   'availability': 'available' if project is not None else 'unavailable'})
+    if warnings:
+        result['recordingWarnings'] = warnings
+    return result
+
+
+def init(client, args):
+    if not args.name.strip():
+        raise ClientError('Experiment name is required.')
+    project_id = args.id or 'study-' + hashlib.sha256(json.dumps(
+        [client.url, str(Path.cwd().resolve()), args.name.strip()], ensure_ascii=False).encode('utf-8')).hexdigest()[:24]
+    metadata = {'id': project_id, 'name': args.name.strip(), 'description': args.description,
+                'sourceRoots': [str(Path(root).expanduser().resolve()) for root in args.source_root]}
+    path, plan = prepare_project(Path.cwd() / '.exp-observer-runs' / 'outbox', client.url, metadata)
+    with task_lock(path):
+        plan = json.loads(path.read_text(encoding='utf-8'))
+        result = sync_project(client, path, plan)
+    if plan['project'] != metadata:
+        result.setdefault('recordingWarnings', []).append('Creation metadata was already prepared; the original plan is retained.')
+    emit(result)
+    return 0
+
+
+def read_queue_task(path):
+    task = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(task, dict) or any(not isinstance(task.get(key), str) for key in ('url', 'projectId', 'state')):
+        raise ValueError('Queued records require an object with url, projectId and state text fields.')
+    return task
+
+
+def local_context(outbox, client, project_id):
+    project, records = None, []
+    for path in Path(outbox).glob('*.json'):
+        try:
+            task = read_queue_task(path)
+            if task['url'] != client.url or task['projectId'] != project_id:
+                continue
+            if task.get('kind') == 'project':
+                project = {'metadata': task['project'], 'preparedAt': task['preparedAt'], 'state': task['state']}
+            else:
+                record = {key: task[key] for key in
+                          ('requestId', 'nodeId', 'runId', 'state', 'capturedAt', 'startedAt', 'finishedAt') if key in task}
+                record['operations'] = []
+                for operation in task.get('operations', []):
+                    data = operation.get('data', {})
+                    detail = {'op': operation['op'], **{key: data[key] for key in
+                              ('id', 'title', 'status', 'nodeId', 'source', 'target', 'parentId') if key in data}}
+                    if isinstance(data.get('summary'), str):
+                        detail['summary'] = data['summary'][:512]
+                        if len(data['summary']) > 512:
+                            detail['summaryTruncated'] = True
+                    record['operations'].append(detail)
+                record['artifactCount'] = len(task.get('artifacts', []))
+                records.append(record)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+    records.sort(key=lambda record: record.get('capturedAt') or record.get('startedAt') or '')
+    pending = [record for record in records if record['state'] != 'synced']
+    return project, records, pending
+
+
+def context(client, args):
+    workspace = Path.cwd() / '.exp-observer-runs'
+    key = hashlib.sha256(json.dumps([client.url, args.project, args.node], ensure_ascii=False).encode('utf-8')).hexdigest()
+    cache_path = workspace / 'context' / (key + '.json')
+    project, records, pending = local_context(workspace / 'outbox', client, args.project)
+    try:
+        route = client.project_route(args.project) + '/context'
+        if args.node:
+            route += '?' + urlencode({'node': args.node})
+        result = client.request(route)
+    except (ClientError, OSError, ValueError) as exc:
+        cached = None
+        try:
+            cached = json.loads(cache_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            pass
+        has_pending = bool(pending or (project and project['state'] != 'synced'))
+        rejected = isinstance(exc, ClientError) and exc.status is not None
+        pending_project = rejected and exc.code == 'not_found' and 'Experiment not found.' in str(exc) and has_pending
+        result = {'projectId': args.project, 'availability': 'pending' if pending_project else ('error' if rejected else 'unavailable'),
+                  'pending': has_pending,
+                  'cachedRemote': cached, 'localProject': project, 'localRecords': records[-20:],
+                  'localPending': pending[-20:], 'localRecordCount': len(records), 'localPendingCount': len(pending),
+                  'recordingWarnings': [str(exc)]}
+        if rejected:
+            result['remoteError'] = {'code': exc.code, 'status': exc.status, 'message': str(exc)}
+            if not pending_project:
+                result['error'] = str(exc)
+        emit(result)
+        return 1 if rejected and not pending_project else 0
+    fetched_at = stamp()
+    try:
+        ensure_directory(cache_path.parent)
+        save_task(cache_path, {'cachedAt': fetched_at, 'nodeId': args.node, 'context': result})
+    except OSError as exc:
+        result.setdefault('recordingWarnings', []).append(f'Context cache unavailable: {exc}')
+    result.update({'availability': 'available', 'pending': bool(pending), 'fetchedAt': fetched_at})
+    if pending:
+        result['localPending'] = pending[-20:]
+        result['localPendingCount'] = len(pending)
+    emit(result)
+    return 0
 
 
 def task_identity(client, args, intent):
@@ -230,6 +479,7 @@ def stage_artifact(task, source, title, target):
         # Flush snapshots before persisting the task that refers to them.
         with target.open('r+b') as stream:
             os.fsync(stream.fileno())
+        sync_directory(target.parent)
         sha256, size = file_digest(target)
         index = len(task['artifacts'])
         task['artifacts'].append({'id': f'artifact-{task["taskId"]}-{index}', 'path': str(target),
@@ -263,6 +513,11 @@ def sync_task(client, path, task):
         return task_result(task, ['Capture was interrupted before its outcome was saved; sync never reruns commands.'])
     warnings = []
     try:
+        plan_path, plan = prepare_project(path.parent, client.url,
+            {'id': task['projectId'], 'name': task['projectId'], 'description': '', 'sourceRoots': []}, implicit=True)
+        with task_lock(plan_path):
+            plan = json.loads(plan_path.read_text(encoding='utf-8'))
+            ensure_project(client, plan_path, plan)
         # All operations (including timestamps) are frozen before the first send.
         client.apply(task['projectId'], task['operations'], request_id='capture-' + task['taskId'])
         if task['artifacts']:
@@ -330,7 +585,7 @@ def record(client, args):
             emit(sync_task(client, path, existing))
             return 0
         directory = Path(task['captureRoot']) / task['taskId']
-        directory.mkdir(parents=True, exist_ok=True)
+        ensure_directory(directory)
         at = stamp()
         task.update({'capturedAt': at, 'status': 'recorded'})
         if metrics_warning:
@@ -350,34 +605,75 @@ def record(client, args):
             task['operations'].append({'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
                 'title': args.title, 'status': 'completed', 'startedAt': None, 'finishedAt': None, 'capturedAt': at,
                 'metrics': metrics, 'origin': 'observed', 'configuration': {'capturedExternalResult': True}}})
-        save_task(path, task)
+        persist_task(path, task)
         artifacts = list(args.artifact)
         if metrics_warning and args.metrics_file not in artifacts:
             artifacts.append(args.metrics_file)
         for index, requested in enumerate(artifacts):
             stage_artifact(task, requested, Path(requested).name, directory / (str(index) + '-' + Path(requested).name))
         task['state'] = 'ready'
-        save_task(path, task)
+        persist_task(path, task)
         emit(sync_task(client, path, task))
     return 0
 
 
-def sync(client, args):
+def file_signature(path):
+    stat = path.stat()
+    return stat.st_mtime_ns, stat.st_size, stat.st_ino
+
+
+def drain_outbox(client, outbox, project_id=None, stop_event=None, acknowledged=None):
+    """Submit frozen tasks only. This function never starts a subprocess."""
     results = []
-    outbox = Path.cwd() / '.exp-observer-runs' / 'outbox'
-    for path in sorted(outbox.glob('*.json')):
+    candidates = []
+    for path in Path(outbox).glob('*.json'):
+        if stop_event is not None and stop_event.is_set():
+            break
+        try:
+            signature = file_signature(path)
+            if acknowledged is not None and acknowledged.get(str(path)) == signature:
+                continue
+            task = read_queue_task(path)
+            if task['url'] != client.url or (project_id and task['projectId'] != project_id):
+                continue
+            if task['state'] == 'synced':
+                if acknowledged is not None:
+                    acknowledged[str(path)] = signature
+                continue
+            priority = 0 if task.get('kind') == 'project' else 1
+            at = task.get('capturedAt') or task.get('startedAt') or task.get('preparedAt') or ''
+            candidates.append(((priority, at, path.name), path))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            results.append({'task': path.name, 'pending': True, 'recordingWarnings': [str(exc)]})
+    for _, path in sorted(candidates):
+        if stop_event is not None and stop_event.is_set():
+            break
         try:
             with task_lock(path):
-                task = json.loads(path.read_text(encoding='utf-8'))
-                if task['url'] != client.url or (args.project and task['projectId'] != args.project):
+                task = read_queue_task(path)
+                if task['url'] != client.url or (project_id and task['projectId'] != project_id):
                     continue
                 if task['state'] == 'synced':
                     continue
-                results.append(sync_task(client, path, task))
-        except (ClientError, OSError, ValueError, KeyError) as exc:
+                result = sync_project(client, path, task) if task.get('kind') == 'project' else sync_task(client, path, task)
+                results.append(result)
+                if not result['pending'] and acknowledged is not None:
+                    acknowledged[str(path)] = file_signature(path)
+        except (ClientError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             results.append({'task': path.name, 'pending': True, 'recordingWarnings': [str(exc)]})
+    return results
+
+
+def sync(client, args):
+    outbox = Path.cwd() / '.exp-observer-runs' / 'outbox'
+    results = drain_outbox(client, outbox, args.project)
     pending = sum(bool(result['pending']) for result in results)
-    emit({'records': results, 'pending': pending})
+    result = {'records': results, 'pending': pending}
+    if outbox.exists():
+        warning = register_outbox(outbox, client.url)
+        if warning:
+            result['recordingWarnings'] = [warning]
+    emit(result)
     return 1 if pending else 0
 
 
@@ -432,7 +728,7 @@ def execute(client, args):
         directory = Path(task['captureRoot']) / task['taskId']
         stdout = stderr = None
         try:
-            directory.mkdir(parents=True, exist_ok=True)
+            ensure_directory(directory)
             stdout = stack.enter_context((directory / 'stdout.txt').open('wb'))
             stderr = stack.enter_context((directory / 'stderr.txt').open('wb'))
         except OSError as exc:
@@ -445,7 +741,7 @@ def execute(client, args):
         task.update({'state': 'running', 'startedAt': stamp()})
         if durable:
             try:
-                save_task(path, task)
+                persist_task(path, task)
             except OSError as exc:
                 durable = False
                 task['recordingWarnings'].append('Local outbox unavailable: ' + str(exc))
@@ -456,13 +752,19 @@ def execute(client, args):
         if stderr:
             stderr.close()
         task.update(outcome, finishedAt=stamp())
-        task['operations'] = [{'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': args.node,
+        task['operations'] = [{'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
             'title': args.title, 'status': task['status'], 'startedAt': task['startedAt'], 'finishedAt': task['finishedAt'],
             'metrics': {key: task[key] for key in ('exitCode', 'wallTimeMs')}, 'origin': 'observed',
             'configuration': {'command': command, 'cwd': str(Path.cwd()), 'artifactPaths': args.artifact},
             'events': [{'id': 'start-' + task['taskId'], 'type': 'started', 'message': 'Command started', 'at': task['startedAt']},
                        {'id': 'finish-' + task['taskId'], 'type': 'finished', 'message': error or f'Process exited with code {task["exitCode"]}',
                         'at': task['finishedAt'], 'exitCode': task['exitCode'], 'elapsedMs': task['wallTimeMs']}]}}]
+        if args.node is None:
+            node = {'id': task['nodeId'], 'title': args.title, 'createdAt': task['startedAt'],
+                    'status': 'paused' if task['status'] == 'cancelled' else task['status']}
+            if task['status'] == 'cancelled':
+                node['pauseReason'] = 'Command interrupted'
+            task['operations'].insert(0, {'op': 'node.add', 'data': node})
         if durable:
             for filename, title in (('stdout.txt', 'Standard output'), ('stderr.txt', 'Standard error')):
                 stage_artifact(task, directory / filename, title, directory / filename)
@@ -470,7 +772,7 @@ def execute(client, args):
                 stage_artifact(task, requested, Path(requested).name, directory / (str(index) + '-' + Path(requested).name))
             task['state'] = 'ready'
             try:
-                save_task(path, task)
+                persist_task(path, task)
                 result = sync_task(client, path, task)
             except OSError as exc:
                 result = task_result(task, ['Could not persist command outcome: ' + str(exc)])
@@ -508,21 +810,14 @@ def main(argv=None):
             stream.reconfigure(encoding='utf-8-sig' if stream is sys.stdin else 'utf-8',
                                errors='backslashreplace' if stream is sys.stderr else 'strict')
     args = parser().parse_args(argv)
-    client = Client(args.url, timeout=2 if args.command in ('record', 'execute', 'sync') else 30)
+    client = Client(args.url, timeout=2 if args.command in ('init', 'context', 'record', 'execute', 'sync') else 30)
     try:
         if args.command == 'projects':
             result = client.request('/api/projects')
         elif args.command == 'init':
-            body = {'name': args.name, 'description': args.description,
-                    'sourceRoots': [str(Path(root).expanduser().resolve()) for root in args.source_root]}
-            if args.id:
-                body['id'] = args.id
-            result = client.request('/api/projects', body)
+            return init(client, args)
         elif args.command == 'context':
-            route = client.project_route(args.project) + '/context'
-            if args.node:
-                route += '?' + urlencode({'node': args.node})
-            result = client.request(route)
+            return context(client, args)
         elif args.command == 'observe':
             if args.observation_action == 'start':
                 observation_id = 'observation-' + (hashlib.sha256(args.request_id.encode()).hexdigest()[:24] if args.request_id else uuid4().hex[:16])

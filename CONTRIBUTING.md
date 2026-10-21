@@ -1,6 +1,6 @@
 # Contributing to ExpObserver
 
-ExpObserver is a local research graph that agents maintain through explicit, incremental operations. Contributions should keep that workflow direct and the interface focused on the research.
+ExpObserver retains local experiment records through explicit, incremental operations. Contributions should keep recording lightweight and the interface focused on the research.
 
 ## Development
 
@@ -56,6 +56,7 @@ Add focused regression coverage for changes to record validation, history, concu
 - Use the portable Skill client or API for experiment maintenance. Keep synthetic fixtures marked `mock` and actual captured execution marked `observed`.
 - Keep routine capture independent of model calls. Use sparse semantic updates for branches, findings and decisions.
 - Observation supports research without prescribing its stages, methods, report format or validation work. Accept original nested JSON metrics; derive display paths in the interface. Handle IDs, layout, references and retry bookkeeping in the platform/client. Recording failures must not prevent command execution or change the experiment's exit code.
+- First contact must also work offline. Persist project identity and records before networking; label unavailable or cached context honestly. The application recovers registered local queues itself. Recovery must never execute an experiment, invent research history, overwrite an existing project or reread changed source evidence. Use an isolated `EXP_OBSERVER_STATE_DIR` in tests and scratch servers so automatic recovery cannot access a person's registered queues.
 - Keep canonical records and incremental revision history in `.exp-observer/records.sqlite3` through Python's standard-library `sqlite3`; retained evidence stays in each project's `evidence/` directory under `.exp-observer/`, using portable directory names. Stop all servers using a data directory before backing up the whole directory.
 - Keep interface text concise and actionable. Technical explanations belong in the documentation.
 

@@ -11,9 +11,12 @@ const setup: AgentSetup = {
 };
 
 describe("agent client command", () => {
-  it("passes only connection and experiment context to the research instruction", () => {
+  it("preserves the selected experiment while research can continue without live context", () => {
     expect(agentPrompt(setup, "study")).toBe(
-      `请读取 Skill：${setup.skillPath}\n服务：${setup.url}\n实验：study\n读取该实验的 context，再执行我的研究任务。`,
+      `请读取 Skill：${setup.skillPath}\n服务：${setup.url}\n实验 ID：study\n按我的研究任务推进，参考可用的实验 context。`,
+    );
+    expect(agentPrompt(setup)).toBe(
+      `请读取 Skill：${setup.skillPath}\n服务：${setup.url}\n按我的研究任务推进。`,
     );
   });
   it("quotes POSIX paths with spaces, apostrophes and shell metacharacters", () => {

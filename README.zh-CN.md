@@ -52,7 +52,7 @@ Windows 双击 `start.bat`，或运行 `py -3 start.py`；macOS 也可以双击 
 
 可以这样下达指令：
 
-> 使用 ExpObserver Skill 观测实验 `my-study`。按我的研究任务推进，在已有发现或方向变化时简短记录并关联现有证据；记录问题留待补交，不打断研究。
+> 使用 ExpObserver Skill 接入实验 `my-study`，按我的研究任务推进。
 
 实验属于其持久化记录。**多个对话和 Agent 可以共同维护同一个实验。** 每次操作显式指定项目，相关操作同时指定节点；不绑定对话，也不存在全局“当前实验”指针。
 
@@ -65,13 +65,14 @@ py -3 skills/exp-observer/scripts/exp_observer.py init --id my-study --name 'My 
 ```
 
 ```sh
-python3 skills/exp-observer/scripts/exp_observer.py projects
 python3 skills/exp-observer/scripts/exp_observer.py init --id my-study --name 'My study' --source-root /absolute/study/directory
 python3 skills/exp-observer/scripts/exp_observer.py context --project my-study
 python3 skills/exp-observer/scripts/exp_observer.py context --project my-study --node NODE_ID
 ```
 
-一条命令即可登记已有结果。客户端处理编号与引用，平台安排初始位置：
+`init` 会先在本地保存实验身份，再联系服务，因此第一次接入也可以离线完成。`context` 明确区分可用记录、有日期的缓存和服务不可用；读取成功不是继续研究的前提。服务运行时，可用 `projects` 列出实验。
+
+一条命令即可登记已有结果。显式指定实验 ID 时，也可以自动准备缺失的实验，无需单独 `init`。客户端处理编号与引用，平台安排初始位置：
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
@@ -81,17 +82,21 @@ python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
 
 用 `--node NODE_ID` 更新已有节点，用 `--after NODE_ID` 关联实际研究的后续，用 `--parent NODE_ID` 分组；这些选项均可省略。嵌套指标原样保存，包括数组、null 和空容器。结果 JSON 顶层不是对象时，客户端自动放到 `result` 字段，原始文件保持原样。仅文字更新不会虚构一次实验运行。
 
+有必要时，将独立发现保留为一条新记录，用 `--node` 修订同一发现。一次批量对比可以保持为一条记录；节点数量不是目标，也不能根据最终总结虚构未记录的研究历程。
+
 一次调用即可捕获真实命令及其结果文件：
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py execute \
-  --project my-study --node NODE_ID --title 'Evaluate candidate A' \
+  --project my-study --title 'Evaluate candidate A' \
   --artifact results.json --artifact timing.csv -- python3 experiment.py
 ```
 
-包装器记录真实命令的退出码、墙钟时间、标准输出／错误和指定文件，**不增加模型调用**。观测平台不规定实验阶段、方法、测量项目或交付格式。Agent 在研究本身已经改变判断或方向时简短更新；坐标、编号和展示格式由平台处理。
+包装器自动提供记录编号，捕获真实命令的退出码、墙钟时间、标准输出／错误和指定文件，**不增加模型调用**。用 `--node NODE_ID` 可以附到已有记录。观测平台不规定实验阶段、方法、测量项目或交付格式。Agent 在研究本身已经改变判断或方向时简短更新；坐标、编号和展示格式由平台处理。
 
-登记失败时，`record` 和 `execute` 会在本地保留待补交记录与证据。实验成功时，记录服务不可用也不会把它改判为失败。在合适的间隙运行 `python3 skills/exp-observer/scripts/exp_observer.py sync` 即可补交，无需重跑实验。回执用 `pending` 和 `recordingWarnings` 表示记录状态，并返回已保留的标准输出／错误路径。
+`init`、`record` 和 `execute` 会在本地保存待交工作。应用运行时自动重试已注册的队列，也覆盖先离线研究、后启动应用的情况；只检查对应本机 HTTP 地址下已注册的目录。实验成功时，记录服务不可用也不会把它改判为失败。回执用 `pending` 和 `recordingWarnings` 表示记录状态，并返回已保留的标准输出／错误路径。`sync` 保留为可选的手动恢复命令，在原工作目录执行；补交不会重跑实验，也不会重新读取已经变化的原始证据。
+
+只有真正运行客户端，记录才会进入队列；只保存结果文件不会自动登记。如果宿主阻止执行客户端或本地写入，就无法暂存，研究继续并如实说明即可。用 `EXP_OBSERVER_STATE_DIR` 可以指定恢复注册表目录，客户端与应用需使用相同值。安装 Skill 不会授予沙箱权限或安装系统服务。
 
 批量登记已有文件、读取保留的证据、检查记录或导出研究图：
 
@@ -102,7 +107,7 @@ python3 skills/exp-observer/scripts/exp_observer.py check --project my-study
 python3 skills/exp-observer/scripts/exp_observer.py export --project my-study --output my-study.json
 ```
 
-通过 `EXP_OBSERVER_URL` 或全局 `--url` 参数选择其他本地服务地址。操作、版本控制和分段证据读取见 [Skill 指南](skills/exp-observer/SKILL.md)、[记录参考](skills/exp-observer/references/records.md)和 [HTTP／数据契约](docs/contract.md)。自动命令采集使用显式的 `execute` 包装器；安装 Skill 不会安装全局 Hook。
+通过 `EXP_OBSERVER_URL` 或全局 `--url` 参数选择其他本地服务地址。操作、版本控制和分段证据读取见 [Skill 指南](skills/exp-observer/SKILL.md)、[记录参考](skills/exp-observer/references/records.md)和 [HTTP／数据契约](docs/contract.md)。[测试说明与研究提示词](docs/observation-test.md)将接入检查和实验任务分别验证。自动命令采集使用显式的 `execute` 包装器；安装 Skill 不会安装全局 Hook。
 
 ### 观测研究步骤
 

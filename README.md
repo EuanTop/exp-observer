@@ -52,7 +52,7 @@ The interface's **Connect Agent** action copies an instruction with the actual S
 
 A useful instruction is:
 
-> Use the ExpObserver Skill to observe experiment `my-study` while working on my task. Record brief findings and existing evidence at natural milestones; let recording issues remain pending while the research continues.
+> Use the ExpObserver Skill for experiment `my-study`. Follow my research task.
 
 An experiment belongs to its persistent record. **Multiple conversations and agents can contribute to the same experiment.** Operations explicitly select the project and, where relevant, the node; there is no conversation binding or global current-experiment pointer.
 
@@ -65,13 +65,14 @@ py -3 skills/exp-observer/scripts/exp_observer.py init --id my-study --name 'My 
 ```
 
 ```sh
-python3 skills/exp-observer/scripts/exp_observer.py projects
 python3 skills/exp-observer/scripts/exp_observer.py init --id my-study --name 'My study' --source-root /absolute/study/directory
 python3 skills/exp-observer/scripts/exp_observer.py context --project my-study
 python3 skills/exp-observer/scripts/exp_observer.py context --project my-study --node NODE_ID
 ```
 
-Record an existing result with one call. The client supplies IDs and references; the platform places the node:
+`init` saves the experiment's identity locally before contacting the service, so a new experiment can begin offline. `context` distinguishes available records, dated cached context and an unavailable service. Reading context is not a condition for continuing research. Use `projects` to list experiments when the service is running.
+
+Record an existing result with one call. An explicit project ID can also prepare a missing project without a separate `init`. The client supplies IDs and references; the platform places the node:
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
@@ -81,17 +82,21 @@ python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
 
 Use `--node NODE_ID` to update an existing node, `--after NODE_ID` for a research continuation, or `--parent NODE_ID` to group related records. These options are optional. Nested metrics are stored intact, including arrays, nulls and empty containers. Non-object result JSON is wrapped under `result` automatically; the original file is unchanged. Text-only updates do not invent an experiment run.
 
+Keep a distinct finding as its own record when useful, and revise the same finding with `--node`. A batch comparison can remain one record. Node count is not a target; a final summary does not establish an unrecorded research chronology.
+
 Capture a real command and its result files with one call:
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py execute \
-  --project my-study --node NODE_ID --title 'Evaluate candidate A' \
+  --project my-study --title 'Evaluate candidate A' \
   --artifact results.json --artifact timing.csv -- python3 experiment.py
 ```
 
-The wrapper records the actual command's exit code, wall time, stdout/stderr and requested files with **zero extra model calls**. Recording does not prescribe experimental phases, methods, measurements or deliverables. Agents leave brief updates when the research already changes a judgment or direction; coordinates, IDs and display formatting belong to the platform.
+The wrapper supplies a record ID and captures the actual command's exit code, wall time, stdout/stderr and requested files with **zero extra model calls**. Use `--node NODE_ID` to attach an existing record. Recording does not prescribe experimental phases, methods, measurements or deliverables. Agents leave brief updates when the research already changes a judgment or direction; coordinates, IDs and display formatting belong to the platform.
 
-`record` and `execute` stage pending records and evidence locally if registration fails. A successful experiment remains successful even when recording is unavailable. At a natural boundary, run `python3 skills/exp-observer/scripts/exp_observer.py sync` to retry registration without rerunning the experiment. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths.
+`init`, `record` and `execute` save pending work locally. The application automatically retries registered queues while running, including when it starts after offline research. It checks only registered directories for its own loopback HTTP address. A successful experiment remains successful even when recording is unavailable. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths. `sync` remains an optional manual recovery command, run from the original working directory; recovery never reruns an experiment or rereads changed source evidence.
+
+The client must run to queue a record: saving result files alone does not register them. If the host blocks client execution or local writes, the record cannot be queued. Keep the research moving and report that limitation accurately. For isolation, `EXP_OBSERVER_STATE_DIR` selects the recovery registry directory; use the same value for the client and application. Installing the Skill does not grant sandbox permissions or install a system service.
 
 Register existing files in bulk, inspect retained evidence, check the record or export the graph:
 
@@ -102,7 +107,7 @@ python3 skills/exp-observer/scripts/exp_observer.py check --project my-study
 python3 skills/exp-observer/scripts/exp_observer.py export --project my-study --output my-study.json
 ```
 
-`EXP_OBSERVER_URL` or the global `--url` option selects another local server address. See the [Skill guide](skills/exp-observer/SKILL.md), [record reference](skills/exp-observer/references/records.md) and [HTTP/data contract](docs/contract.md) for operations, versioning and bounded evidence reads. Automatic command capture uses the explicit `execute` wrapper; installing the Skill does not install global hooks.
+`EXP_OBSERVER_URL` or the global `--url` option selects another local server address. See the [Skill guide](skills/exp-observer/SKILL.md), [record reference](skills/exp-observer/references/records.md) and [HTTP/data contract](docs/contract.md) for operations, versioning and bounded evidence reads. [Testing notes and a research-focused trial prompt](docs/observation-test.md) separate connection checks from the research task. Automatic command capture uses the explicit `execute` wrapper; installing the Skill does not install global hooks.
 
 ### Observe a research step
 
