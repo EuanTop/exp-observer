@@ -22,14 +22,14 @@ export const kindIcon: Record<string, typeof Target> = {
   reference: FileText,
   plan: ListTree,
 };
-export const time = (s?: string) =>
+export const time = (s?: string | null) =>
   s
     ? new Date(s).toLocaleTimeString("zh-CN", {
         hour: "2-digit",
         minute: "2-digit",
       })
     : "—";
-export const date = (s?: string) =>
+export const date = (s?: string | null) =>
   s
     ? new Date(s).toLocaleString("zh-CN", {
         month: "2-digit",
@@ -134,6 +134,7 @@ export function StatusMark({
       ) : state === "active" ? (
         <>
           <circle
+            className="status-spinner"
             cx="8"
             cy="8"
             r="6.5"

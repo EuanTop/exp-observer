@@ -1,50 +1,60 @@
-# Incremental record reference
+# Record reference
 
-All CLI writes use `apply --project ID`, JSON input from stdin or `--file`. `context` returns the current `revision`. Supply `--expected-revision` for edits and a stable `--request-id` for safe retries. The batch is atomic: either all operations validate or none are saved.
+For routine recording, prefer the high-level client:
+
+```sh
+python3 <skill>/scripts/exp_observer.py record --project ID --title "Result already reached" --metrics-file result.json --artifact result.json
+python3 <skill>/scripts/exp_observer.py record --project ID --node NODE --title "Updated finding" --summary "New evidence and implication"
+python3 <skill>/scripts/exp_observer.py sync
+```
+
+IDs, run/evidence references and idempotent retries are handled by the client. `--after NODE` records a continuation relationship; `--parent NODE` groups related records. Metrics retain their original JSON object structure, including nested objects, arrays, empty containers and nulls. Non-object roots are stored under `result` while the original file is preserved.
+
+The following lower-level operations are optional adapter details.
+
+For low-level atomic writes use `apply --project ID`, JSON input from stdin or `--file`. `context` returns the current `revision`. Supply `--expected-revision` for edits and a stable `--request-id` for safe retries. The batch is atomic: either all operations validate or none are saved.
 
 ```json
 [
-  {"op":"node.add","data":{"id":"goal","kind":"group","title":"Reduce query cost without changing results","status":"active","collapsed":false,"position":{"x":300,"y":0}}},
-  {"op":"node.add","data":{"id":"start","parentId":"goal","kind":"start","title":"Can indexing reduce query cost with identical results?","status":"active","summary":"Use a fixed local corpus and exact result equality; first inspect the scan baseline.","position":{"x":330,"y":100}}},
-  {"op":"node.add","data":{"id":"baseline","parentId":"goal","kind":"experiment","title":"Measure the fixed scan baseline","status":"proposed","position":{"x":330,"y":340}}},
-  {"op":"edge.add","data":{"id":"start-baseline","source":"start","target":"baseline","relation":"leads_to","basis":"hypothesis","label":"Establish cost and result identity before comparing alternatives"}}
+  {"op":"node.add","data":{"id":"study","kind":"group","title":"Retrieval study"}},
+  {"op":"node.add","data":{"id":"baseline","parentId":"study","kind":"experiment","title":"Recorded scan result","status":"completed"}},
+  {"op":"node.add","data":{"id":"index","parentId":"study","title":"Investigate indexing","status":"active"}},
+  {"op":"edge.add","data":{"source":"baseline","target":"index","relation":"leads_to"}}
 ]
 ```
 
-Positions are absolute world coordinates, including children. Default node dimensions are 280×178. Place children at least 30px to the right and 85px below their parent origin. `collapsed` affects graph visibility; children remain stored and queryable. Any node kind is allowed. Parent IDs and edge endpoints must exist in the resulting batch. Containment cycles are rejected; semantic revisit cycles are allowed.
-
-Use `kind: start` for the investigation's visible entry and add directed edges as real research advances; `parentId` only expresses containment. Update a result or decision node's `title` and `summary` with the actual answer, decisive evidence and limits. A decision record and its evidence references support that overview, rather than replacing it. Do not create an independent conclusion document unless the user explicitly requests one. Follow the graph presentation requirements in [the Skill](../SKILL.md); a structurally valid batch alone does not ensure a readable research path.
+Any node kind is allowed. Parent IDs and relationship endpoints must exist in the resulting batch. Containment cycles are rejected; semantic revisit cycles are allowed.
 
 Node states describe work, rather than scientific truth:
 
-| Status | Meaning | Mark |
-|---|---|---|
-| `proposed` | Planned or untried; no execution implied | Dashed ring |
-| `active` | Currently being investigated | Blue activity ring |
-| `paused` | Started, intentionally parked; record reason and resume condition | Pause bars in a dashed ring |
-| `completed` | Research unit completed, including useful negative results | White check in a green circle |
-| `rejected` | Deliberately excluded from this study, with a reason | Minus |
-| `failed` | Execution error prevented completion | Red cross |
+| Status | Meaning |
+|---|---|
+| `proposed` | Planned or untried; no execution implied |
+| `active` | Currently being investigated |
+| `paused` | Started, intentionally parked |
+| `completed` | Research unit completed, including useful negative results |
+| `rejected` | Deliberately excluded from this study |
+| `failed` | Execution error prevented completion |
 
-Runs retain their own status. Fixing a failed run may continue the same research question; do not treat execution failure as evidence that an algorithm is scientifically wrong. `importance` is independently `normal` (default) or `critical`; use `importanceReason` for the impact on the main conclusion. A critical node receives a blue outline, whether it is completed, paused or failed.
+Runs retain their own status. Execution failure is distinct from a research conclusion. Optional `importance` is independently `normal` (default) or `critical`, with `importanceReason` for its significance.
 
 Example of parking started work while opening another direction, in one atomic batch:
 
 ```json
 [
   {"op":"node.update","data":{"id":"EXISTING-NODE","status":"paused","pauseReason":"A newly observed counterexample changes the next priority","resumeWhen":"After the counterexample is explained","nextAction":"Finish the remaining repeated measurements"}},
-  {"op":"node.add","data":{"id":"counterexample-review","title":"Explain the observed counterexample","status":"proposed","importance":"critical","importanceReason":"The retained result conflicts with the current conclusion","position":{"x":650,"y":500}}},
+  {"op":"node.add","data":{"id":"counterexample-review","title":"Explain the observed counterexample","status":"proposed","importance":"critical","importanceReason":"The retained result conflicts with the current conclusion"}},
   {"op":"edge.add","data":{"id":"pivot-review","source":"EXISTING-NODE","target":"counterexample-review","relation":"leads_to","basis":"observed","label":"Investigate the retained conflicting output"}}
 ]
 ```
 
-Use `observed` only when there really is retained supporting evidence. An idea without observed support uses `hypothesis`. A pending direction may remain proposed; a change in attention alone does not justify rejecting or completing it.
+Describe a relationship's basis honestly: `observed` for an actual observation, `hypothesis` for an untested relationship, or omit it when unknown.
 
 Operations:
 
 | Operation | Data |
 |---|---|
-| `node.add` | id?, title, kind?, status?, parentId?, summary?, notes?, nextAction?, importance?, importanceReason?, pauseReason?, resumeWhen?, tags?, position?, collapsed? |
+| `node.add` | id?, title, kind?, status?, parentId?, summary?, notes?, nextAction?, importance?, importanceReason?, pauseReason?, resumeWhen?, tags? |
 | `node.update` | id plus changed fields; omitted fields preserved |
 | `node.delete` | id; removes subtree and associated execution records; recoverable from history |
 | `edge.add/update/delete` | id, source/target/relation/label/basis as needed |
@@ -61,7 +71,7 @@ Register actual evidence with `artifact`, rather than supplying hashes in metada
 
 ## Step timing and measured usage
 
-Every node can have observations, including questions, analysis and decisions without a command run. An observation is a measured work interval; it does not bind a conversation or change node/run state.
+Optional observations can measure a work interval, including analysis without a command run. They do not bind a conversation or change node/run state. Leave them unused when timing would require extra bookkeeping; the research can continue with unknown timing and token values.
 
 ```sh
 python3 <skill>/scripts/exp_observer.py observe start --project ID --node NODE --title "Review retained outputs" --request-id review-start-1
@@ -71,7 +81,7 @@ python3 <skill>/scripts/exp_observer.py observe finish --project ID --id OBSERVA
 
 If the host or provider supplies actual counters, finish can additionally carry `--input-tokens N --output-tokens N --usage-source SOURCE --usage-ref UNIQUE_USAGE_ID`. These are usage deltas attributed once, ideally to the most specific node. Do not estimate counts from text, time or command exit status. Do not repeat cumulative conversation totals on multiple nodes. A supplied counter requires a source; the same source/reference pair cannot be recorded twice. Missing counters are `null`; an actual measured zero is `0`.
 
-The server timestamps start/finish and calculates `durationMs`. A node's displayed timing combines its own and contained descendants' finished intervals, merging overlaps; command execution wall time is shown separately. Token counters sum known observations in that containment subtree; partial coverage remains marked. Semantic links and decision evidence references do not add usage. Keep a running interval when work continues; finish it when the observed work stops or is parked, and update research state independently.
+The server timestamps start/finish and calculates `durationMs`. Command execution wall time is stored separately. Semantic relationships and decision evidence references do not duplicate recorded usage. A running interval can finish when the observed work stops; research state is updated independently.
 
 Read registered evidence through the Skill client:
 

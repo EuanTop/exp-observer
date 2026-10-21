@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentCommand } from "./agent-command";
+import { agentCommand, agentPrompt } from "./agent-command";
 import type { AgentSetup } from "./api";
 
 const setup: AgentSetup = {
@@ -11,6 +11,11 @@ const setup: AgentSetup = {
 };
 
 describe("agent client command", () => {
+  it("passes only connection and experiment context to the research instruction", () => {
+    expect(agentPrompt(setup, "study")).toBe(
+      `请读取 Skill：${setup.skillPath}\n服务：${setup.url}\n实验：study\n读取该实验的 context，再执行我的研究任务。`,
+    );
+  });
   it("quotes POSIX paths with spaces, apostrophes and shell metacharacters", () => {
     expect(
       agentCommand(

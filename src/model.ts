@@ -1,6 +1,10 @@
 import type { Edge, Node } from "@xyflow/react";
 import { getNodeUsage } from "./usage";
+import { facingSides } from "./edge-routing";
 export type NodeTab = "overview" | "runs" | "evidence" | "usage";
+export type JsonValue =
+  null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+export type Metrics = Record<string, JsonValue>;
 
 export type ResearchNode = {
   id: string;
@@ -36,9 +40,10 @@ export type Run = {
   title: string;
   status: string;
   configuration: Record<string, unknown>;
-  metrics: Record<string, number | string | boolean>;
-  startedAt: string;
-  finishedAt?: string;
+  metrics: Metrics;
+  startedAt: string | null;
+  finishedAt?: string | null;
+  capturedAt?: string;
   events: { id: string; type: string; message: string; at: string }[];
   artifactIds: string[];
   origin: string;
@@ -54,11 +59,13 @@ export type Artifact = {
   runId?: string;
   origin: string;
 };
+export const isExecutionRun = (run: Run) =>
+  run.configuration?.capturedExternalResult !== true;
 export type Assessment = {
   id: string;
   runId: string;
   rubric: string;
-  metrics: Record<string, number | string | boolean>;
+  metrics: Metrics;
   conclusion: string;
   limitations: string;
   supersedes?: string;
@@ -245,7 +252,9 @@ export function toCanvas(
         n.parentId && visibleIds.has(n.parentId)
           ? byId.get(n.parentId)
           : undefined;
-      const runs = project.runs.filter((r) => r.nodeId === n.id);
+      const runs = project.runs.filter(
+        (r) => r.nodeId === n.id && isExecutionRun(r),
+      );
       const d = size(n);
       return {
         id: n.id,
@@ -290,15 +299,22 @@ export function toCanvas(
     const key = `${source}:${target}:${e.relation}`;
     if (dedup.has(key)) continue;
     dedup.add(key);
+    const sourceNode = byId.get(source)!,
+      targetNode = byId.get(target)!;
+    const sourceSize = dimensions.get(source)!,
+      targetSize = dimensions.get(target)!;
+    const [sourceHandle, targetHandle] = facingSides(
+      { ...sourceNode.position, width: sourceSize.w, height: sourceSize.h },
+      { ...targetNode.position, width: targetSize.w, height: targetSize.h },
+    );
     edges.push({
       id: e.id,
       source,
       target,
-      type: "smoothstep",
+      type: "research",
+      sourceHandle,
+      targetHandle,
       label: e.label || relations[e.relation] || e.relation,
-      animated: project.runs.some(
-        (r) => r.nodeId === target && r.status === "running",
-      ),
       style: {
         stroke: e.basis === "hypothesis" ? "#94a3b8" : "#71717a",
         strokeWidth: 1.4,
@@ -314,8 +330,39 @@ export function toCanvas(
         height: 12,
         color: "#71717a",
       },
-      data: { original: e },
+      data: {
+        original: e,
+        active:
+          project.runs.some(
+            (r) =>
+              (r.nodeId === target || r.nodeId === source) &&
+              r.status === "running",
+          ) ||
+          sourceNode.status === "active" ||
+          targetNode.status === "active",
+      },
     });
+  }
+  const pairs = new Map<string, Edge[]>();
+  for (const edge of edges) {
+    const key = JSON.stringify([edge.source, edge.target].sort());
+    pairs.set(key, [...(pairs.get(key) ?? []), edge]);
+  }
+  for (const pair of pairs.values()) {
+    const reciprocal = pair.some((edge) => edge.source !== pair[0].source);
+    for (const direction of new Set(pair.map((edge) => edge.source))) {
+      const sameDirection = pair
+        .filter((edge) => edge.source === direction)
+        .sort((a, b) => a.id.localeCompare(b.id));
+      sameDirection.forEach((edge, index) => {
+        edge.data = {
+          ...edge.data,
+          lane: reciprocal
+            ? (edge.source < edge.target ? -1 : 1) * (18 + index * 14)
+            : (index - (sameDirection.length - 1) / 2) * 18,
+        };
+      });
+    }
   }
   return { nodes: result, edges };
 }
@@ -355,12 +402,15 @@ export function metricLabel(key: string): string {
   );
 }
 export function formatMetric(v: unknown): string {
-  if (v === undefined || v === null) return "—";
+  if (v === undefined) return "—";
+  if (v === null) return "null";
   if (typeof v === "boolean") return v ? "是" : "否";
   if (typeof v === "number")
     return Number.isInteger(v)
       ? String(v)
-      : v.toLocaleString("en-US", { maximumFractionDigits: 4 });
+      : v.toLocaleString("en-US", { maximumSignificantDigits: 8 });
+  if (typeof v === "object") return JSON.stringify(v);
+  if (v === "") return '""';
   return String(v);
 }
 export function validateProject(p: Project): string[] {

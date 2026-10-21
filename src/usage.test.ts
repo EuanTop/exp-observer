@@ -82,6 +82,23 @@ function project(
 }
 
 describe("getNodeUsage", () => {
+  it("does not count captured external results as executions or execution time", () => {
+    const recorded = {
+      ...run("result", "a", { wallTimeMs: 9000 }),
+      startedAt: null,
+      finishedAt: null,
+      capturedAt: "2026-10-21T10:00:00Z",
+      configuration: { capturedExternalResult: true },
+    };
+    const p = project(
+      [node("a")],
+      [],
+      [run("actual", "a", { wallTimeMs: 20 }), recorded],
+    );
+    expect(getNodeUsage(p, "a")).toMatchObject({ runCount: 1, runMs: 20 });
+    p.runs = [recorded];
+    expect(getNodeUsage(p, "a")).toMatchObject({ runCount: 0, runMs: null });
+  });
   it("aggregates containment, ignoring semantic links and reused decision runs", () => {
     const p = project(
       [

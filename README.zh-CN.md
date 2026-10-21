@@ -52,7 +52,7 @@ Windows 双击 `start.bat`，或运行 `py -3 start.py`；macOS 也可以双击 
 
 可以这样下达指令：
 
-> 使用 ExpObserver Skill 维护实验 `my-study`。研究开始时建立清晰的 start 节点，推进时连接前后研究步骤，实际发现直接写进节点标题和概览。证据关联在图中，默认不生成独立结论文档。在已授权目标和预算内自主探索。
+> 使用 ExpObserver Skill 观测实验 `my-study`。按我的研究任务推进，在已有发现或方向变化时简短记录并关联现有证据；记录问题留待补交，不打断研究。
 
 实验属于其持久化记录。**多个对话和 Agent 可以共同维护同一个实验。** 每次操作显式指定项目，相关操作同时指定节点；不绑定对话，也不存在全局“当前实验”指针。
 
@@ -71,45 +71,32 @@ python3 skills/exp-observer/scripts/exp_observer.py context --project my-study
 python3 skills/exp-observer/scripts/exp_observer.py context --project my-study --node NODE_ID
 ```
 
-使用 `apply` 批量提交少量相关变化，无需重写整个实验。先从 `context` 获取版本号，修改已有工作时携带该版本；写入结果不确定时，使用相同的请求 ID 重试。
+一条命令即可登记已有结果。客户端处理编号与引用，平台安排初始位置：
 
 ```sh
-python3 skills/exp-observer/scripts/exp_observer.py apply --project my-study \
-  --file changes.json --expected-revision REVISION --request-id stable-change-id
+python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
+  --title '已经得到的发现' --summary '证据与含义' \
+  --metrics-file results.json --artifact results.json
 ```
 
-例如，`changes.json` 可以包含：
-
-```json
-[
-  {
-    "op": "node.add",
-    "data": {
-      "id": "candidate-a",
-      "kind": "algorithm",
-      "title": "Try candidate A",
-      "status": "proposed",
-      "importance": "normal",
-      "nextAction": "Run against the fixed baseline"
-    }
-  }
-]
-```
+用 `--node NODE_ID` 更新已有节点，用 `--after NODE_ID` 关联实际研究的后续，用 `--parent NODE_ID` 分组；这些选项均可省略。嵌套指标原样保存，包括数组、null 和空容器。结果 JSON 顶层不是对象时，客户端自动放到 `result` 字段，原始文件保持原样。仅文字更新不会虚构一次实验运行。
 
 一次调用即可捕获真实命令及其结果文件：
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py execute \
-  --project my-study --node candidate-a --title 'Evaluate candidate A' \
+  --project my-study --node NODE_ID --title 'Evaluate candidate A' \
   --artifact results.json --artifact timing.csv -- python3 experiment.py
 ```
 
-包装器记录生命周期、退出码、墙钟时间、标准输出／错误和指定文件。机械记录**不增加模型调用**，但仍涉及本地处理和文件读写。Agent 在有研究意义的决策点补充目的、观察和结论，可以在授权目标及预算内选择分支、记录转向，并根据证据修订结论。暂停节点使用 `pauseReason` 和 `resumeWhen`；关键节点使用 `importance: "critical"` 和 `importanceReason`。
+包装器记录真实命令的退出码、墙钟时间、标准输出／错误和指定文件，**不增加模型调用**。观测平台不规定实验阶段、方法、测量项目或交付格式。Agent 在研究本身已经改变判断或方向时简短更新；坐标、编号和展示格式由平台处理。
+
+登记失败时，`record` 和 `execute` 会在本地保留待补交记录与证据。实验成功时，记录服务不可用也不会把它改判为失败。在合适的间隙运行 `python3 skills/exp-observer/scripts/exp_observer.py sync` 即可补交，无需重跑实验。回执用 `pending` 和 `recordingWarnings` 表示记录状态，并返回已保留的标准输出／错误路径。
 
 批量登记已有文件、读取保留的证据、检查记录或导出研究图：
 
 ```sh
-python3 skills/exp-observer/scripts/exp_observer.py artifact --project my-study --node candidate-a --path results.json timing.csv
+python3 skills/exp-observer/scripts/exp_observer.py artifact --project my-study --node NODE_ID --path results.json timing.csv
 python3 skills/exp-observer/scripts/exp_observer.py read --project my-study --artifact ARTIFACT_ID
 python3 skills/exp-observer/scripts/exp_observer.py check --project my-study
 python3 skills/exp-observer/scripts/exp_observer.py export --project my-study --output my-study.json
@@ -119,7 +106,7 @@ python3 skills/exp-observer/scripts/exp_observer.py export --project my-study --
 
 ### 观测研究步骤
 
-使用 observation 为任意节点上的工作计时，也可以覆盖跨越多条命令的分析过程。开始步骤，完成工作，再使用返回的 observation ID 结束：
+可选的 observation 为节点上的工作计时，也可以覆盖跨越多条命令的分析。需要这项测量时再使用；它不是开展研究或登记结果的前提。开始步骤，完成工作，再使用返回的 observation ID 结束：
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py observe start --project my-study --node candidate-a --title 'Review candidate A' --request-id review-a-start

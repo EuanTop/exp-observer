@@ -13,10 +13,12 @@ import {
   Settings2,
 } from "lucide-react";
 import { useState } from "react";
+import { metricLeaves, metricPathLabel, type MetricLeaf } from "../metrics";
+import { MetricDetails } from "./MetricDetails";
 import {
   effectiveAssessments,
   formatMetric,
-  metricLabel,
+  isExecutionRun,
   statuses,
   type Artifact,
   type Project,
@@ -42,8 +44,13 @@ export function RunsView({
     <div className="data-view">
       <div className="data-heading">
         <div>
-          <h2>运行记录</h2>
-          <span>{project.runs.length} 次运行</span>
+          <h2>运行与结果</h2>
+          <span>
+            {project.runs.filter(isExecutionRun).length} 次运行
+            {project.runs.some((r) => !isExecutionRun(r))
+              ? ` · ${project.runs.filter((r) => !isExecutionRun(r)).length} 条结果记录`
+              : ""}
+          </span>
         </div>
         <select
           aria-label="运行状态筛选"
@@ -79,22 +86,31 @@ export function RunsView({
                 <span>
                   <strong>{r.title}</strong>
                   <small>
+                    {!isExecutionRun(r) && "结果记录 · "}
                     {project.nodes.find((n) => n.id === r.nodeId)?.title}
                   </small>
                 </span>
               </span>
               <Badge status={r.status} />
               <span className="run-metric">
-                {Object.entries(r.metrics || {})
+                {metricLeaves(r.metrics || {})
                   .slice(0, 2)
-                  .map(([k, v]) => (
-                    <span key={k}>
-                      <strong>{formatMetric(v)}</strong>
-                      <small>{metricLabel(k)}</small>
+                  .map(({ key, path, value }) => (
+                    <span key={key}>
+                      <strong>{formatMetric(value)}</strong>
+                      <small>{metricPathLabel(path)}</small>
                     </span>
                   ))}
               </span>
-              <time>{date(r.startedAt)}</time>
+              <time
+                title={
+                  isExecutionRun(r)
+                    ? "执行开始时间"
+                    : "结果登记时间；执行时间未知"
+                }
+              >
+                {date(isExecutionRun(r) ? r.startedAt : r.capturedAt)}
+              </time>
               <ChevronDown
                 className={expanded === r.id ? "rotated" : ""}
                 size={14}
@@ -112,6 +128,8 @@ export function RunsView({
                     <ArrowUpRight size={12} />
                   </button>
                 </div>
+                <div className="section-label">原始指标</div>
+                <MetricDetails metrics={r.metrics || {}} />
                 <div className="run-detail-grid">
                   <div>
                     <div className="section-label">过程事件</div>
@@ -183,7 +201,15 @@ export function CompareView({ project }: { project: Project }) {
     allAssessments.find((a) => a.runId === r.id && a.rubric === rubric);
   const metricsFor = (r: Run) =>
     rubric ? assessmentFor(r)?.metrics || {} : r.metrics || {};
-  const keys = [...new Set(runs.flatMap((r) => Object.keys(metricsFor(r))))];
+  const metricRows = new Map<string, MetricLeaf>();
+  const valuesByRun = new Map(
+    runs.map((r) => {
+      const rows = metricLeaves(metricsFor(r));
+      rows.forEach((row) => metricRows.set(row.key, row));
+      return [r.id, new Map(rows.map((row) => [row.key, row.value]))];
+    }),
+  );
+  const keys = [...metricRows.keys()];
   const configKeys = [
     ...new Set(runs.flatMap((r) => Object.keys(r.configuration || {}))),
   ];
@@ -200,7 +226,7 @@ export function CompareView({ project }: { project: Project }) {
       <div className="data-heading">
         <div>
           <h2>对比评估</h2>
-          <span>{picked.length} 次运行已选择</span>
+          <span>{picked.length} 条记录已选择</span>
         </div>
         <select
           aria-label="评价口径"
@@ -240,7 +266,7 @@ export function CompareView({ project }: { project: Project }) {
       {runs.length < 2 ? (
         <div className="empty-state compact">
           <LayoutGrid size={32} />
-          <h3>选择至少两次运行</h3>
+          <h3>选择至少两条记录</h3>
         </div>
       ) : (
         <>
@@ -313,7 +339,7 @@ export function CompareView({ project }: { project: Project }) {
               </thead>
               <tbody>
                 {keys.map((k) => {
-                  const values = runs.map((r) => metricsFor(r)[k]);
+                  const values = runs.map((r) => valuesByRun.get(r.id)?.get(k));
                   const max = Math.max(
                     ...(values.filter(
                       (v) => typeof v === "number",
@@ -322,9 +348,9 @@ export function CompareView({ project }: { project: Project }) {
                   );
                   return (
                     <tr key={k}>
-                      <td>{metricLabel(k)}</td>
+                      <td>{metricPathLabel(metricRows.get(k)!.path)}</td>
                       {runs.map((r) => {
-                        const v = metricsFor(r)[k];
+                        const v = valuesByRun.get(r.id)?.get(k);
                         return (
                           <td key={r.id}>
                             <strong>{formatMetric(v)}</strong>
@@ -367,6 +393,10 @@ export function CompareView({ project }: { project: Project }) {
                     </div>
                   )}
                   {a && <code>{a.id}</code>}
+                  <details className="raw-metrics">
+                    <summary>原始指标</summary>
+                    <MetricDetails metrics={metricsFor(r)} />
+                  </details>
                 </div>
               );
             })}

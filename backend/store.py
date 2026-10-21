@@ -404,12 +404,64 @@ class Store:
             previous = self._load(db, project_id)
             self._expected(previous, body)
             p = copy.deepcopy(previous)
+            unplaced = set()
             for operation in operations:
                 object_value(operation, 'Operation')
-                self._apply(p, operation.get('op'), copy.deepcopy(object_value(operation.get('data', {}), 'Operation data')))
+                data = copy.deepcopy(object_value(operation.get('data', {}), 'Operation data'))
+                self._apply(p, operation.get('op'), data)
+                if operation.get('op') == 'node.add' and 'position' not in data:
+                    unplaced.add(p['nodes'][-1]['id'])
             self._validate(p)
+            if unplaced:
+                self._place_nodes(p, unplaced)
+                self._validate(p)
             self._record(db, previous, p, operations, request_id, fingerprint)
             return copy.deepcopy(p)
+
+    def _place_nodes(self, p, unplaced):
+        """Assign initial positions; callers need only describe research and containment."""
+        children = {}
+        by_id = {node['id']: node for node in p['nodes']}
+        for node in p['nodes']:
+            children.setdefault(node.get('parentId'), []).append(node)
+
+        def bounds(node):
+            x, y = node['position']['x'], node['position']['y']
+            nested = [child for child in children.get(node['id'], []) if child['id'] not in unplaced]
+            width, height = 280, 178
+            if nested and not node.get('collapsed', False):
+                rectangles = [bounds(child) for child in nested]
+                width = max(330, *(cx + cw - x + 28 for cx, cy, cw, ch in rectangles))
+                height = max(230, *(cy + ch - y + 28 for cx, cy, cw, ch in rectangles))
+            return x, y, width, height
+
+        def visit(parent_id):
+            siblings = children.get(parent_id, [])
+            # Finish existing containers before placing new siblings beside their bounds.
+            for node in sorted(siblings, key=lambda n: n['id'] in unplaced):
+                if node['id'] in unplaced:
+                    parent = by_id.get(parent_id)
+                    origin_x = parent['position']['x'] + 30 if parent else 40
+                    origin_y = parent['position']['y'] + 100 if parent else 40
+                    occupied = [bounds(other) for other in siblings
+                                if other['id'] != node['id'] and other['id'] not in unplaced]
+                    # Candidate rows jump over occupied containers rather than scanning pixels.
+                    rows = sorted({origin_y, *(max(origin_y, y + height + 52) for x, y, width, height in occupied)})
+                    for y in rows:
+                        for column in range(3):
+                            x = origin_x + column * 340
+                            if all(x + 308 <= ox or x >= ox + width + 28 or
+                                   y + 206 <= oy or y >= oy + height + 28
+                                   for ox, oy, width, height in occupied):
+                                node['position'] = {'x': x, 'y': y}
+                                break
+                        else:
+                            continue
+                        break
+                    unplaced.remove(node['id'])
+                visit(node['id'])
+
+        visit(None)
 
     def _find(self, p, collection, key):
         for item in p.get(collection, []):
@@ -688,8 +740,19 @@ class Store:
 
     def _metrics(self, metrics):
         object_value(metrics, 'Metrics')
-        if any(type(value) not in (int, float, str, bool) for value in metrics.values()):
-            raise StoreError('Metrics must contain numbers, strings or booleans.')
+        # Preserve native result structure. Flattening is a presentation concern.
+        pending = [metrics]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, dict):
+                if any(not isinstance(key, str) for key in value):
+                    raise StoreError('Metric object keys must be strings.')
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+            elif value is not None and type(value) not in (int, float, str, bool):
+                raise StoreError('Metrics must contain JSON values.')
+        canonical(metrics)
 
     def register_artifact(self, project_id, body):
         object_value(body, 'Artifact')
@@ -726,11 +789,17 @@ class Store:
                         size += len(chunk)
                     target.flush()
                     os.fsync(target.fileno())
+                if ('sha256' in body and body['sha256'] != digest.hexdigest()) or ('bytes' in body and body['bytes'] != size):
+                    raise StoreError('Captured evidence changed before registration; the original snapshot is still required.',
+                                     'evidence_changed', 409)
                 artifact = {'id': artifact_id, 'nodeId': body.get('nodeId'), 'runId': body.get('runId'),
                             'title': body.get('title') or source.name, 'path': str(destination),
                             'sourcePath': str(source), 'sha256': digest.hexdigest(), 'bytes': size,
                             'mime': mimetypes.guess_type(source.name)[0] or 'application/octet-stream',
                             'createdAt': now(), 'origin': 'observed'}
+                if 'capturedAt' in body:
+                    self._observation_time(body['capturedAt'])
+                    artifact['capturedAt'] = body['capturedAt']
                 p['artifacts'].append(artifact)
                 if artifact['runId']:
                     self._find(p, 'runs', artifact['runId']).setdefault('artifactIds', []).append(artifact_id)

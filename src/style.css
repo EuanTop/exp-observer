@@ -689,6 +689,88 @@ p {
   flex-shrink: 0;
   vertical-align: middle;
 }
+.status-spinner {
+  transform-origin: 8px 8px;
+  animation: status-rotate 1.4s linear infinite;
+}
+@keyframes status-rotate {
+  from {
+    transform: rotate(-90deg);
+  }
+  to {
+    transform: rotate(270deg);
+  }
+}
+.research-edge-flow {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 2 22;
+  opacity: 0.55;
+  pointer-events: none;
+  animation: edge-direction 2.8s linear infinite;
+}
+.research-edge-flow.is-active {
+  stroke: var(--accent);
+  opacity: 0.8;
+  animation-duration: 1.6s;
+}
+.react-flow__edge.selected .research-edge-flow {
+  stroke: var(--accent);
+}
+@keyframes edge-direction {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+.metric-details {
+  margin: 12px 0;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.metric-details > div {
+  min-width: 0;
+}
+.metric-details dt {
+  font-size: 10px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.metric-details dd {
+  margin: 5px 0 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.metric-details pre {
+  margin: 0;
+  padding: 10px;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--raised);
+  border-radius: 5px;
+  font:
+    10px/1.65 ui-monospace,
+    monospace;
+  color: var(--text);
+}
+.raw-metrics {
+  margin-top: 14px;
+  font-size: 10px;
+}
+.raw-metrics summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.metrics-table td:first-child {
+  overflow-wrap: anywhere;
+}
+.run-metric small {
+  overflow-wrap: anywhere;
+}
 .status-active,
 .status-running {
   color: #60a5fa;

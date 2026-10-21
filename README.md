@@ -52,7 +52,7 @@ The interface's **Connect Agent** action copies an instruction with the actual S
 
 A useful instruction is:
 
-> Use the ExpObserver Skill to maintain experiment `my-study`. Begin with a visible start node, connect research steps as the work advances, and state findings directly in node titles and overviews. Keep evidence attached to the graph; do not generate a separate conclusion document unless explicitly requested. Explore within the authorized goal and budget.
+> Use the ExpObserver Skill to observe experiment `my-study` while working on my task. Record brief findings and existing evidence at natural milestones; let recording issues remain pending while the research continues.
 
 An experiment belongs to its persistent record. **Multiple conversations and agents can contribute to the same experiment.** Operations explicitly select the project and, where relevant, the node; there is no conversation binding or global current-experiment pointer.
 
@@ -71,45 +71,32 @@ python3 skills/exp-observer/scripts/exp_observer.py context --project my-study
 python3 skills/exp-observer/scripts/exp_observer.py context --project my-study --node NODE_ID
 ```
 
-Use `apply` for small, related changes rather than rewriting the experiment. Read the revision from `context`; supply it when updating existing work. Reuse the request ID when retrying an uncertain write.
+Record an existing result with one call. The client supplies IDs and references; the platform places the node:
 
 ```sh
-python3 skills/exp-observer/scripts/exp_observer.py apply --project my-study \
-  --file changes.json --expected-revision REVISION --request-id stable-change-id
+python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
+  --title 'Observed result' --summary 'Evidence and implication' \
+  --metrics-file results.json --artifact results.json
 ```
 
-For example, `changes.json` can contain:
-
-```json
-[
-  {
-    "op": "node.add",
-    "data": {
-      "id": "candidate-a",
-      "kind": "algorithm",
-      "title": "Try candidate A",
-      "status": "proposed",
-      "importance": "normal",
-      "nextAction": "Run against the fixed baseline"
-    }
-  }
-]
-```
+Use `--node NODE_ID` to update an existing node, `--after NODE_ID` for a research continuation, or `--parent NODE_ID` to group related records. These options are optional. Nested metrics are stored intact, including arrays, nulls and empty containers. Non-object result JSON is wrapped under `result` automatically; the original file is unchanged. Text-only updates do not invent an experiment run.
 
 Capture a real command and its result files with one call:
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py execute \
-  --project my-study --node candidate-a --title 'Evaluate candidate A' \
+  --project my-study --node NODE_ID --title 'Evaluate candidate A' \
   --artifact results.json --artifact timing.csv -- python3 experiment.py
 ```
 
-The wrapper records lifecycle, exit code, wall time, stdout/stderr and the requested files. Mechanical recording adds **zero model calls**; it still performs local processing and file I/O. Agents supply purpose, observations and conclusions at meaningful decision points. They can choose branches within the authorized goal and budget, record pivots, and revise conclusions from the evidence. A paused node uses `pauseReason` and `resumeWhen`; critical importance uses `importance: "critical"` and `importanceReason`.
+The wrapper records the actual command's exit code, wall time, stdout/stderr and requested files with **zero extra model calls**. Recording does not prescribe experimental phases, methods, measurements or deliverables. Agents leave brief updates when the research already changes a judgment or direction; coordinates, IDs and display formatting belong to the platform.
+
+`record` and `execute` stage pending records and evidence locally if registration fails. A successful experiment remains successful even when recording is unavailable. At a natural boundary, run `python3 skills/exp-observer/scripts/exp_observer.py sync` to retry registration without rerunning the experiment. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths.
 
 Register existing files in bulk, inspect retained evidence, check the record or export the graph:
 
 ```sh
-python3 skills/exp-observer/scripts/exp_observer.py artifact --project my-study --node candidate-a --path results.json timing.csv
+python3 skills/exp-observer/scripts/exp_observer.py artifact --project my-study --node NODE_ID --path results.json timing.csv
 python3 skills/exp-observer/scripts/exp_observer.py read --project my-study --artifact ARTIFACT_ID
 python3 skills/exp-observer/scripts/exp_observer.py check --project my-study
 python3 skills/exp-observer/scripts/exp_observer.py export --project my-study --output my-study.json
@@ -119,7 +106,7 @@ python3 skills/exp-observer/scripts/exp_observer.py export --project my-study --
 
 ### Observe a research step
 
-Use an observation to time work on any node, including analysis that spans several commands. Start the step, do the work, then finish with the returned observation ID:
+Optional observations can time work on a node, including analysis spanning several commands. Use them when timing is useful; they are not a requirement for conducting or recording research. Start the step, do the work, then finish with the returned observation ID:
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py observe start --project my-study --node candidate-a --title 'Review candidate A' --request-id review-a-start
