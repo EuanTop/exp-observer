@@ -9,6 +9,8 @@ Maintain a useful research record while doing the research. Choose the next ques
 
 Use the bundled standard-library client at `scripts/exp_observer.py`, relative to this directory. `EXP_OBSERVER_URL` defaults to `http://127.0.0.1:4317`; global `--url` overrides it. No model key is needed.
 
+The client runs on Windows, macOS and Linux with Python 3.10+. Examples below use `python3`; on Windows use `py -3` or a supported `python`, quote paths containing spaces, and use PowerShell syntax rather than Unix shell continuations. The interface's client command selects the server's actual Python executable and shell syntax.
+
 Use **ExpObserver** as the product name and `exp-observer` as the repository and Skill name.
 
 ## Restore only the relevant context
@@ -48,7 +50,7 @@ python3 <skill>/scripts/exp_observer.py check --project ID
 
 For research beyond command execution—reading, analysis, comparison or decisions—use `observe start --project ID --node NODE` and `observe finish --project ID --id OBSERVATION_ID` around a meaningful work interval. The server measures elapsed time; starting a timer does not change the node's research state. At finish, supply `--input-tokens` / `--output-tokens` only from actual runtime or provider counters, with `--usage-source` and preferably a unique `--usage-ref`. Record each usage delta once at the most specific node; do not copy a conversation's cumulative total onto several nodes. Unavailable counters stay unknown, never estimated or zero-filled. Containers aggregate their descendants and merge overlapping timing intervals. See the reference for details.
 
-Read [the record reference](references/records.md) when constructing writes, assessments or state transitions. `apply` accepts an operations array or `{operations,expectedRevision,requestId}` from a file or stdin and returns a compact acknowledgement. Batch related changes; do not rewrite the canonical JSON file directly. For a new experiment use `init --name NAME --id ID --source-root /absolute/study/directory`.
+Read [the record reference](references/records.md) when constructing writes, assessments or state transitions. `apply` accepts an operations array or `{operations,expectedRevision,requestId}` from a file or stdin and returns a compact acknowledgement. Batch related changes; do not edit the SQLite database directly. For a new experiment use `init --name NAME --id ID --source-root /absolute/study/directory` (a native absolute directory on the current host).
 
 ## Preserve the evidence trail
 

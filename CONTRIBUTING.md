@@ -4,7 +4,7 @@ ExpObserver is a local research graph that agents maintain through explicit, inc
 
 ## Development
 
-Use Node.js 22+ and Python 3.10+ on macOS or Linux.
+Use Node.js 22+ and Python 3.10+ on Windows, macOS or Linux. Windows runs natively and does not require WSL. Install the Python launcher or add Python to `PATH`.
 
 ```sh
 npm ci
@@ -15,6 +15,8 @@ Start the API in one terminal:
 ```sh
 python3 -m backend.server --port 4317
 ```
+
+On Windows, use `py -3 -m backend.server --port 4317` (or `python` if the launcher is unavailable). The `npm start` and `npm test` commands select a supported Python installation for the current OS.
 
 Start the frontend in another:
 
@@ -39,6 +41,8 @@ npm run build
 python3 skills/exp-observer/scripts/exp_observer.py check --project PROJECT_ID
 ```
 
+Use `py -3` instead of `python3` for the client on Windows. CI runs the checks on Windows, macOS and Linux with Python 3.10 and 3.14. Keep subprocess arguments as lists, handle paths with spaces and Unicode, and make text fixture encodings and newline expectations explicit.
+
 Add focused regression coverage for changes to record validation, history, concurrency, evidence handling and command capture. For interface changes, verify nested containers, collapsed connections, selection and relevant keyboard actions in both appearances.
 
 ## Design and data conventions
@@ -49,6 +53,7 @@ Add focused regression coverage for changes to record validation, history, concu
 - Preserve earlier evidence and interpretations when revising conclusions. Resolve revision conflicts rather than overwriting another contributor's work.
 - Use the portable Skill client or API for experiment maintenance. Keep synthetic fixtures marked `mock` and actual captured execution marked `observed`.
 - Keep routine capture independent of model calls. Use sparse semantic updates for branches, findings and decisions.
+- Keep canonical records and incremental revision history in `.exp-observer/records.sqlite3` through Python's standard-library `sqlite3`; retained evidence stays in each project's `evidence/` directory under `.exp-observer/`, using portable directory names. Stop all servers using a data directory before backing up the whole directory.
 - Keep interface text concise and actionable. Technical explanations belong in the documentation.
 
 The [data contract](docs/contract.md) describes persistence and HTTP behavior. The [Skill](skills/exp-observer/SKILL.md) and [record reference](skills/exp-observer/references/records.md) describe agent-facing operations. Update both READMEs together when changing setup or public behavior.

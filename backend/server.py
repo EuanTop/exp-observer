@@ -3,13 +3,23 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import sys
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .store import Store, StoreError, canonical
 
 MAX_BODY = 2 * 1024 * 1024
+STATIC_MIME = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.svg': 'image/svg+xml',
+}
 
 
 class Server(ThreadingHTTPServer):
@@ -110,6 +120,7 @@ class Handler(BaseHTTPRequestHandler):
             root = Path(__file__).resolve().parents[1]
             return self._send({'skillPath': str(root / 'skills' / 'exp-observer' / 'SKILL.md'),
                                'clientPath': str(root / 'skills' / 'exp-observer' / 'scripts' / 'exp_observer.py'),
+                               'pythonPath': sys.executable, 'shell': 'powershell' if os.name == 'nt' else 'posix',
                                'url': f'http://127.0.0.1:{self.server.server_port}'})
         if path == '/api/projects':
             if method == 'GET':
@@ -165,7 +176,8 @@ class Handler(BaseHTTPRequestHandler):
             target = self.server.dist / 'index.html'
         if not target.is_file():
             raise StoreError('Build the frontend to open ExpObserver.', 'not_found', 404)
-        mime = mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
+        # Windows registry entries may misidentify JavaScript and break strict MIME checks.
+        mime = STATIC_MIME.get(target.suffix.lower()) or mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
         return self._send(target.read_bytes(), mime=mime)
 
 

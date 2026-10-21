@@ -125,7 +125,7 @@ class StoreTests(unittest.TestCase):
 
     def test_evidence_copy_and_tamper(self):
         source = self.root / 'output.txt'
-        source.write_text('measured evidence\n')
+        source.write_bytes(b'measured evidence\n')
         artifact = self.store.register_artifact('study', {'path': str(source), 'nodeId': 'a'})
         source.write_text('source changed independently')
         self.assertEqual(self.store.artifact_content('study', artifact['id'])[0], b'measured evidence\n')
@@ -337,11 +337,9 @@ class StoreTests(unittest.TestCase):
     def test_evicted_request_retry_stays_idempotent(self):
         body = {'requestId': 'original', 'operations': [{'op': 'node.update', 'data': {'id': 'a', 'title': 'original'}}]}
         original = self.store.batch('study', body)
-        # Exercise cache eviction without growing 256 full project snapshots in the fixture.
-        with self.store._lock():
-            bundle = self.store._load('study')
-            bundle['requests'] = {}
-            self.store._save(bundle)
+        # The durable index must retain early requests beyond the former 256-entry cache.
+        for index in range(260):
+            self.apply([{'op': 'node.update', 'data': {'id': 'a', 'title': str(index)}}], requestId=f'later-{index}')
         self.add_node('b')
         self.assertEqual(self.store.batch('study', body), original)
         body['operations'][0]['data']['title'] = 'different'
@@ -372,7 +370,7 @@ class HTTPAndCLITests(unittest.TestCase):
             return json.loads(response.read())
 
     def cli(self, *args, input=None):
-        return subprocess.run([sys.executable, str(CLI), '--url', self.url, *args], input=input, text=True, capture_output=True, cwd=self.root, timeout=20)
+        return subprocess.run([sys.executable, str(CLI), '--url', self.url, *args], input=input, text=True, encoding='utf-8', capture_output=True, cwd=self.root, timeout=20)
 
     def test_agent_setup_uses_repo_paths_and_actual_custom_port(self):
         setup = self.request('/api/agent-setup')
@@ -380,6 +378,8 @@ class HTTPAndCLITests(unittest.TestCase):
         self.assertNotEqual(self.server.server_port, 4317)
         self.assertEqual(Path(setup['skillPath']), ROOT / 'skills/exp-observer/SKILL.md')
         self.assertEqual(Path(setup['clientPath']), CLI)
+        self.assertEqual(setup['pythonPath'], sys.executable)
+        self.assertEqual(setup['shell'], 'powershell' if os.name == 'nt' else 'posix')
         for key in ('skillPath', 'clientPath'):
             self.assertTrue(Path(setup[key]).is_absolute())
             self.assertTrue(Path(setup[key]).is_file())
@@ -430,7 +430,7 @@ class HTTPAndCLITests(unittest.TestCase):
         self.assertEqual(run['origin'], 'observed')
         self.assertEqual(run['metrics']['exitCode'], 0)
         self.assertGreater(run['metrics']['wallTimeMs'], 0)
-        self.assertEqual(self.store.artifact_content('study', run['artifactIds'][0])[0], b'observed\n')
+        self.assertEqual(self.store.artifact_content('study', run['artifactIds'][0])[0], b'observed' + os.linesep.encode())
         result = self.cli('check', '--project', 'study')
         self.assertTrue(json.loads(result.stdout)['ok'])
         result = self.cli('export', '--project', 'study', '--output', str(self.root / 'export.json'))

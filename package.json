@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc -b && vite build",
-    "start": "python3 -m backend.server --port 4317",
-    "test": "vitest run && python3 -m unittest discover -s tests -v",
+    "start": "node scripts/python.mjs -m backend.server --port 4317",
+    "test": "vitest run && node scripts/python.mjs -m unittest discover -s tests -v",
     "check": "tsc -b"
   },
   "dependencies": {

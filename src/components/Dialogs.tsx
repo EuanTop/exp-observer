@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type AgentSetup } from "../api";
+import { agentCommand } from "../agent-command";
 import {
   ancestry,
   kinds,
@@ -260,10 +261,7 @@ export function SkillPanel({
       current = false;
     };
   }, [attempt]);
-  const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  const command = setup
-    ? `python3 ${shellQuote(setup.clientPath)} --url ${shellQuote(setup.url)} ${project ? `context --project ${shellQuote(project.id)}` : "projects"}`
-    : "";
+  const command = setup ? agentCommand(setup, project?.id) : "";
   const prompt = setup
     ? `读取并使用 Skill：${setup.skillPath}\n服务地址：${setup.url}\n${project ? `维护研究「${project.name}」，实验 ID：${project.id}。先读取相关 context，再根据我的任务继续研究。` : "根据我的研究任务创建或选择实验。"}\n在研究过程中增量记录有意义的分支、真实执行、证据和结论。`
     : "";
@@ -301,7 +299,9 @@ export function SkillPanel({
         复制接续指令
       </button>
       <details>
-        <summary>客户端命令</summary>
+        <summary>
+          客户端命令{setup?.shell === "powershell" ? "（PowerShell）" : ""}
+        </summary>
         <pre>{command || "正在读取…"}</pre>
       </details>
     </div>
@@ -360,7 +360,7 @@ export function CreateDialog({
       if (dialog.type === "artifact") {
         await api.artifact(project.id, {
           path,
-          title: title || path.split(/[\/]/).at(-1),
+          title: title || path.split(/[\\/]/).at(-1),
           nodeId: parentId || undefined,
         });
         notify("证据已登记");

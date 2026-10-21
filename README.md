@@ -12,7 +12,7 @@ Explore alternatives, keep evidence, and follow how an experiment changes direct
 
 ## Start locally
 
-Build from source on **macOS or Linux** with **Node.js 22+** and **Python 3.10+**:
+Build from source on **Windows, macOS or Linux** with **Node.js 22+** and **Python 3.10+**. On Windows, install Python with its launcher or add Python to `PATH`; WSL is not required.
 
 ```sh
 npm ci
@@ -28,7 +28,15 @@ If your ZIP includes the built `dist/` directory, you can skip Node.js and start
 python3 -m backend.server --port 4317
 ```
 
-The default workspace includes a synthetic research demo. For an empty workspace, start with `python3 -m backend.server --port 4317 --no-demo`. Keep the server running while agents or the interface use it.
+On Windows (PowerShell or Command Prompt):
+
+```powershell
+py -3 -m backend.server --port 4317
+```
+
+You can also run `start.bat` on Windows or `start.command` on macOS. These launchers build a missing frontend when Node.js is available; an existing `dist/` needs only Python. If your Windows installation has no `py` launcher, use `python` instead of `py -3`.
+
+The default workspace includes a synthetic research demo. Add `--no-demo` to the server command for an empty workspace. Keep the server running while agents or the interface use it.
 
 ## Work in the graph
 
@@ -59,6 +67,12 @@ A useful instruction is:
 An experiment belongs to its persistent record. **Multiple conversations and agents can contribute to the same experiment.** Operations explicitly select the project and, where relevant, the node; there is no conversation binding or global current-experiment pointer.
 
 ### Read, run, record
+
+The following examples use a macOS/Linux shell. In Windows PowerShell, replace `python3` with `py -3`, put continued commands on one line (remove the trailing `\`), and use a Windows source path such as `C:/research/my-study`. Quote paths containing spaces. For example:
+
+```powershell
+py -3 skills/exp-observer/scripts/exp_observer.py init --id my-study --name 'My study' --source-root 'C:/research/my study'
+```
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py projects
@@ -128,9 +142,11 @@ The interface aggregates a node and its contained descendants. Finished time int
 
 ## Your records stay local
 
-Canonical JSON lives in `.exp-observer/<project-id>/state.json`; retained evidence copies live in its `evidence/` directory. Atomic writes, file locks, revision checks and idempotent request IDs support incremental maintenance by multiple agents. Evidence is verified against its registered identity when read.
+Canonical records and incremental revision history live in `.exp-observer/records.sqlite3`, using Python's built-in `sqlite3` module. Retained evidence copies live in each project's `evidence/` directory under `.exp-observer/`; directory names are encoded when needed for portable paths. SQLite transactions, revision checks and idempotent request IDs support maintenance by multiple agents. Evidence is verified against its registered identity when read.
 
-Back up the **whole `.exp-observer` directory** to preserve history and evidence. A graph export contains references rather than embedded file contents. The server binds to localhost and is intended for local use.
+Stop existing servers before upgrading. Existing `state.json` workspaces migrate automatically to SQLite, preserving their history and original JSON files. Subsequent updates use the database.
+
+Stop every server using the data directory, then back up the **whole `.exp-observer` directory** to preserve the database, history and evidence together. Do not copy just the database file while a server is running. A graph export contains references rather than embedded file contents. The server binds to localhost and is intended for local use.
 
 ## Examples and development
 

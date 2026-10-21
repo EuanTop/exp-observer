@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -123,7 +124,11 @@ def execute(client, args):
     if not any(n['id'] == args.node for n in project['nodes']):
         raise ClientError('Selected node does not exist.')
     run_id = 'run-' + uuid4().hex[:16]
-    capture_root = (Path.cwd() / '.exp-observer-runs' / project['id']).resolve()
+    directory = project['id']
+    stem = directory.split('.')[0].upper()
+    if directory != directory.lower() or directory.endswith('.') or stem in {'CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'} or re.fullmatch(r'(COM|LPT)[1-9]', stem):
+        directory = '~' + hashlib.sha256(directory.encode('utf-8')).hexdigest()
+    capture_root = (Path.cwd() / '.exp-observer-runs' / directory).resolve()
     capture_dir = capture_root / run_id
     capture_dir.mkdir(parents=True, exist_ok=False)
     roots = project.get('sourceRoots', [])
@@ -212,6 +217,11 @@ def check(client, project_id):
 
 
 def main(argv=None):
+    # JSON and evidence text use UTF-8 even when Windows pipes use a legacy code page.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8-sig' if stream is sys.stdin else 'utf-8',
+                               errors='backslashreplace' if stream is sys.stderr else 'strict')
     args = parser().parse_args(argv)
     client = Client(args.url)
     try:
@@ -244,7 +254,7 @@ def main(argv=None):
             result = {'projectId': project['id'], 'observationId': observation_id, 'revision': project['revision'],
                       **{field: observation.get(field) for field in ('nodeId', 'status', 'startedAt', 'finishedAt', 'durationMs', 'inputTokens', 'outputTokens', 'usageSource', 'usageRef')}}
         elif args.command == 'apply':
-            content = Path(args.file).read_text(encoding='utf-8') if args.file else sys.stdin.read()
+            content = Path(args.file).read_text(encoding='utf-8-sig') if args.file else sys.stdin.read()
             value = json.loads(content)
             body = {'operations': value} if isinstance(value, list) else value
             if not isinstance(body, dict):

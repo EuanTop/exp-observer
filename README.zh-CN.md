@@ -12,7 +12,7 @@
 
 ## 本地启动
 
-在 **macOS 或 Linux** 上从源码构建，需要 **Node.js 22+** 和 **Python 3.10+**：
+支持在 **Windows、macOS 或 Linux** 上从源码构建，需要 **Node.js 22+** 和 **Python 3.10+**。Windows 安装 Python 时请安装启动器或将 Python 加入 `PATH`；无需 WSL。
 
 ```sh
 npm ci
@@ -28,7 +28,15 @@ npm start
 python3 -m backend.server --port 4317
 ```
 
-默认工作区包含模拟研究演示。需要空白工作区时，使用 `python3 -m backend.server --port 4317 --no-demo` 启动。Agent 或界面使用期间，请保持服务运行。
+Windows（PowerShell 或命令提示符）使用：
+
+```powershell
+py -3 -m backend.server --port 4317
+```
+
+也可以在 Windows 运行 `start.bat`，或在 macOS 运行 `start.command`。缺少前端构建时，启动器会使用 Node.js 构建；已有 `dist/` 时只需 Python。如果 Windows 未安装 `py` 启动器，用 `python` 替换 `py -3`。
+
+默认工作区包含模拟研究演示。需要空白工作区时，在服务命令末尾添加 `--no-demo`。Agent 或界面使用期间，请保持服务运行。
 
 ## 在图中推进研究
 
@@ -59,6 +67,12 @@ python3 -m backend.server --port 4317
 实验属于其持久化记录。**多个对话和 Agent 可以共同维护同一个实验。** 每次操作显式指定项目，相关操作同时指定节点；不绑定对话，也不存在全局“当前实验”指针。
 
 ### 读取、执行、记录
+
+以下示例使用 macOS/Linux Shell。Windows PowerShell 中请把 `python3` 替换为 `py -3`，将续行命令合并为一行（删除行末的 `\`），并使用 `C:/research/my-study` 等 Windows 源目录。含空格的路径需要加引号，例如：
+
+```powershell
+py -3 skills/exp-observer/scripts/exp_observer.py init --id my-study --name 'My study' --source-root 'C:/research/my study'
+```
 
 ```sh
 python3 skills/exp-observer/scripts/exp_observer.py projects
@@ -128,9 +142,11 @@ python3 skills/exp-observer/scripts/exp_observer.py observe finish --project my-
 
 ## 记录保存在本地
 
-权威 JSON 位于 `.exp-observer/<project-id>/state.json`，证据副本位于其 `evidence/` 目录。原子写入、文件锁、版本检查和幂等请求 ID 支持多个 Agent 增量维护。读取证据时按登记身份校验内容。
+权威记录和增量版本历史位于 `.exp-observer/records.sqlite3`，使用 Python 内置的 `sqlite3` 模块。证据副本位于 `.exp-observer/` 下各项目的 `evidence/` 目录；需要时会编码目录名，以兼容不同系统的路径。SQLite 事务、版本检查和幂等请求 ID 支持多个 Agent 共同维护。读取证据时按登记身份校验内容。
 
-请备份**整个 `.exp-observer` 目录**，以保留历史和证据。研究图导出包含引用，不内嵌文件内容。服务绑定 localhost，用于本地运行。
+升级前请先停止已有服务。已有的 `state.json` 工作区会自动迁移到 SQLite，同时保留历史和原始 JSON 文件；后续更新写入数据库。
+
+先停止使用该数据目录的所有服务，再备份**整个 `.exp-observer` 目录**，一并保留数据库、历史和证据。不要在服务运行时仅复制数据库文件。研究图导出包含引用，不内嵌文件内容。服务绑定 localhost，用于本地运行。
 
 ## 示例与开发
 

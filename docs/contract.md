@@ -1,6 +1,6 @@
 # ExpObserver engineering contract
 
-Local application; persistent experiments independent of conversations. JSON is canonical. No account, telemetry, model API or Git required. UI consumes real HTTP data. camelCase fields everywhere. Unknown optional fields must survive edits. Node containment is separate from semantic edges; arbitrary kinds and arbitrary finite depth, no containment cycles.
+Local application for Windows, macOS and Linux; persistent experiments independent of conversations. SQLite is canonical; JSON is the HTTP/export format. No account, telemetry, model API or Git required. UI consumes real HTTP data. camelCase fields everywhere. Unknown optional fields must survive edits. Node containment is separate from semantic edges; arbitrary kinds and arbitrary finite depth, no containment cycles.
 
 Project: `{id,name,description,revision,createdAt,updatedAt,nodes:[],edges:[],runs:[],artifacts:[],assessments:[],decisions:[],observations:[],activity:[]}`. `origin` on runs/evidence is `mock` or `observed`.
 
@@ -11,6 +11,20 @@ Importance is independent: `normal` or `critical`, with `importanceReason` descr
 Any node can contain nodes. Positions are absolute world coordinates, including children; a collapsed container hides descendants. Edges reference stable node IDs. Edge: `{id,source,target,relation,label,basis:'observed'|'hypothesis'|'unknown'}`. Self edges invalid. Relations free text.
 
 Run: `{id,nodeId,title,status,configuration:{},metrics:{},startedAt,finishedAt,events:[],artifactIds:[],origin}`. Each event `{id,type,message,at,...}`. `metrics` numeric/string/bool values. Assessment: `{id,runId,rubric,metrics:{},conclusion,limitations,artifactIds:[],supersedes:null,createdAt}`. Different assessment revisions never fabricate a run. Decision: `{id,nodeId,title,conclusion,scope,nextAction,runIds:[],artifactIds:[],createdAt}`. Artifact `{id,nodeId,runId,title,path,sha256,bytes,mime,createdAt,origin}`. Evidence registration copies a file into project-managed evidence and computes identity, never trusts supplied hash.
+
+## Storage and history
+
+The default data directory is `.exp-observer/`. Its `records.sqlite3` database uses Python's standard-library SQLite implementation. Each operation opens and closes its own connection; write transactions use `BEGIN IMMEDIATE`, foreign-key enforcement and `synchronous=FULL`. SQLite provides process/thread coordination on all supported platforms; no Unix-specific file locks are required. Busy requests time out after 30 seconds with `storage_busy` (HTTP 503).
+
+Current project metadata and collection records are stored separately. Only changed records, their ordering and project metadata are updated. Project list polling reads indexed summaries, without parsing project bodies or history. Reading a current project loads its current collection records, without reconstructing a historical version.
+
+Each successful mutation atomically appends one version containing compact operation metadata and resolved JSON changes. Changes contain actual values, including generated IDs and timestamps; history reconstruction never re-executes commands or recalculates observation time. A full checkpoint is saved at the initial revision and every 50 revisions. Restore and exact idempotent retry reconstruct from the nearest checkpoint plus subsequent changes. Restoring appends a new revision and retains the current activity chronology. Request IDs and fingerprints remain durably indexed with their resulting revision; they are not evicted after 256 writes. The public history endpoint returns metadata, excluding changes and checkpoints.
+
+On first initialization of a data directory, existing `*/state.json` bundles migrate in one transaction, including snapshots and request identities. A failed migration rolls back all imported projects and can be retried after the source is fixed. Original JSON files remain untouched as backups and are not rewritten by subsequent operations. Stop existing servers before upgrading; simultaneous JSON-based and SQLite-based writers are unsupported.
+
+Retained evidence remains under `<project-folder>/evidence/`, outside the database. Files are copied to a temporary file, flushed and atomically installed before metadata commit. A failed commit removes the installed copy; a process crash before commit can leave an unreferenced file, never a committed partial copy. File identity is verified on reads. Existing retained files are never replaced, including after a restore or node deletion. IDs containing uppercase letters, Windows device names and trailing dots map to bounded hash-based filenames; extensions use lowercase. Logical IDs remain unchanged and case-sensitive, with distinct paths across all supported filesystems. Retained evidence paths recognize both Windows and Unix separators after backup relocation; foreign-platform source roots remain metadata until replaced with local source directories.
+
+Stop all servers using a data directory before copying the whole directory for backup. The database and evidence must be backed up together. JSON exports contain the current graph and evidence references, rather than the database history or evidence bytes.
 
 ## Node observations
 
@@ -64,12 +78,12 @@ python3 skills/exp-observer/scripts/exp_observer.py observe finish --project ID 
 
 HTTP, local loopback only:
 - GET `/api/health` -> `{ok:true,version:'0.1.0'}`
-- GET `/api/agent-setup` -> `{skillPath,clientPath,url}` using the running server's absolute bundled Skill/client paths and actual loopback port; used by the UI's copyable Agent instructions.
+- GET `/api/agent-setup` -> `{skillPath,clientPath,pythonPath,shell,url}` using the running server's absolute bundled Skill/client/interpreter paths and actual loopback port; `shell` is `powershell` on Windows and `posix` elsewhere. The UI uses literal quoting and the PowerShell call operator where required, so copied client commands work with spaces, apostrophes and shell metacharacters in installation paths.
 - GET `/api/projects` -> `{projects:[{id,name,description,revision,nodeCount,updatedAt}]}`
 - POST `/api/projects` `{id?,name,description?}` -> Project
 - GET `/api/projects/:id` -> Project
 - GET `/api/projects/:id/context?node=ID` -> compact state and record IDs
-- POST `/api/projects/:id/batch` `{expectedRevision?,requestId?,operations:[{op,data}]}` -> Project. Atomic, flock protected. Reject stale expectedRevision with HTTP 409. Stable requestId retry returns same result without duplication.
+- POST `/api/projects/:id/batch` `{expectedRevision?,requestId?,operations:[{op,data}]}` -> Project. Atomic SQLite write transaction. Reject stale expectedRevision with HTTP 409. Stable requestId retry returns the exact original result without duplication.
 - operations: node.add, node.update (`{id,...patch}`), node.delete (`{id}`, removes subtree and dangling relations), edge.add/update/delete, run.add/update/event (`{runId,event}`), assessment.add, decision.add, observation.start/finish (see below), project.update (`{name?,description?}`), artifact.add (metadata only for mock; observed evidence requires registration).
 - POST `/api/projects/:id/artifacts` `{path,title?,nodeId?,runId?}` -> Artifact; source must be under project sourceRoots (set through project.update) or project data directory. CLI can set sourceRoots on init/update. No arbitrary external reads by content endpoint.
 - GET `/api/projects/:id/artifacts/:artifactId/content` -> verified raw content; fail clearly on hash change; no HTML execution.

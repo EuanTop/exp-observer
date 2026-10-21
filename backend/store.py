@@ -1,15 +1,15 @@
-"""Atomic, process-safe JSON records. No conversation state is stored."""
+"""Transactional SQLite records with incremental, reconstructable history."""
 from __future__ import annotations
 
 import copy
-import fcntl
 import hashlib
 import json
 import math
 import mimetypes
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
+import sqlite3
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -61,51 +61,255 @@ def identity(path):
     return digest.hexdigest(), size
 
 
+COLLECTIONS = ('nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations', 'activity')
+CHECKPOINT_INTERVAL = 50
+
+
+def changes(before, after, path=()):
+    """Store resolved values, including generated IDs/times, rather than replaying commands."""
+    if isinstance(before, dict) and isinstance(after, dict):
+        result = [['remove', list(path + (key,))] for key in before if key not in after]
+        for key, value in after.items():
+            if key not in before:
+                result.append(['set', list(path + (key,)), value])
+            else:
+                result.extend(changes(before[key], value, path + (key,)))
+        return result
+    if isinstance(before, list) and isinstance(after, list):
+        result = []
+        for index in range(min(len(before), len(after))):
+            result.extend(changes(before[index], after[index], path + (index,)))
+        if len(after) > len(before):
+            result.append(['extend', list(path), after[len(before):]])
+        elif len(after) < len(before):
+            result.append(['truncate', list(path), len(after)])
+        return result
+    if type(before) is not type(after) or before != after:
+        return [['set', list(path), after]]
+    return []
+
+
+def apply_changes(project, delta):
+    for change in delta:
+        action, path = change[:2]
+        if not path and action == 'set':
+            project = copy.deepcopy(change[2])
+            continue
+        target = project
+        for key in path[:-1] if action in ('set', 'remove') else path:
+            target = target[key]
+        if action == 'set':
+            target[path[-1]] = copy.deepcopy(change[2])
+        elif action == 'remove':
+            del target[path[-1]]
+        elif action == 'extend':
+            target.extend(copy.deepcopy(change[2]))
+        elif action == 'truncate':
+            del target[change[2]:]
+        else:
+            raise StoreError('Unknown history change.', 'storage_error', 500)
+    return project
+
+
+def disk_name(value):
+    # Preserve ordinary names while avoiding Windows device names and trailing-dot aliases.
+    stem = value.split('.')[0].upper()
+    if value != value.lower() or value.endswith('.') or stem in {'CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'} or re.fullmatch(r'(COM|LPT)[1-9]', stem):
+        return '~' + hashlib.sha256(value.encode('utf-8')).hexdigest()
+    return value
+
+
+def evidence_names(artifact):
+    basename = artifact.get('path', '').replace('\\', '/').rsplit('/', 1)[-1]
+    encoded = disk_name(artifact['id'])
+    match = re.fullmatch('(?:' + re.escape(artifact['id']) + '|' + re.escape(encoded) + r')(\.[A-Za-z0-9_-]{1,19})?', basename)
+    if match:
+        return basename, encoded + (match.group(1) or '').lower()
+    return artifact['id'], encoded
+
+
+def sync_directory(path):
+    if os.name != 'nt':
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
 class Store:
     def __init__(self, data_dir):
         self.root = Path(data_dir).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self.database = self.root / 'records.sqlite3'
+        self._initialize()
 
     @contextmanager
-    def _lock(self):
-        with open(self.root / '.lock', 'a+b') as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    def _transaction(self, write=False):
+        connection = None
+        try:
+            connection = sqlite3.connect(self.database, timeout=30, isolation_level=None)
+            connection.row_factory = sqlite3.Row
+            connection.execute('PRAGMA foreign_keys = ON')
+            connection.execute('PRAGMA synchronous = FULL')
+            connection.execute('BEGIN IMMEDIATE' if write else 'BEGIN')
+            yield connection
+            connection.commit()
+        except sqlite3.Error as exc:
+            code = 'storage_busy' if 'locked' in str(exc).lower() or 'busy' in str(exc).lower() else 'storage_error'
+            raise StoreError('Experiment database is busy; retry the request.' if code == 'storage_busy'
+                             else 'Experiment database could not complete the operation.', code, 503 if code == 'storage_busy' else 500) from exc
+        finally:
+            if connection is not None:
+                connection.close()  # Rolls back an unfinished transaction, including validation failures.
+
+    def _initialize(self):
+        with self._transaction() as db:
+            version = db.execute('PRAGMA user_version').fetchone()[0]
+        if version not in (0, 1):
+            raise StoreError('This database requires a newer ExpObserver version.', 'storage_version', 500)
+        if version == 0:
+            with self._transaction(write=True) as db:
+                for statement in (
+                    'CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, '
+                    'revision INTEGER NOT NULL, updated_at TEXT NOT NULL, node_count INTEGER NOT NULL, document TEXT NOT NULL, collections TEXT NOT NULL)',
+                    'CREATE TABLE IF NOT EXISTS records (project_id TEXT NOT NULL REFERENCES projects(id), collection TEXT NOT NULL, '
+                    'record_id TEXT NOT NULL, position INTEGER NOT NULL, document TEXT NOT NULL, PRIMARY KEY (project_id, collection, record_id))',
+                    'CREATE INDEX IF NOT EXISTS record_order ON records(project_id, collection, position)',
+                    'CREATE TABLE IF NOT EXISTS versions (project_id TEXT NOT NULL REFERENCES projects(id), revision INTEGER NOT NULL, '
+                    'at TEXT NOT NULL, operations TEXT NOT NULL, delta TEXT NOT NULL, checkpoint TEXT, request_id TEXT, fingerprint TEXT, '
+                    'PRIMARY KEY (project_id, revision), UNIQUE (project_id, request_id))',
+                    'CREATE INDEX IF NOT EXISTS checkpoints ON versions(project_id, revision) WHERE checkpoint IS NOT NULL',
+                    'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+                ):
+                    db.execute(statement)
+                db.execute('PRAGMA user_version = 1')
+        with self._transaction() as db:
+            migrated = db.execute("SELECT 1 FROM settings WHERE key = 'json_migrated'").fetchone()
+        if not migrated:
+            self._migrate_json()
+
+    def _migrate_json(self):
+        """One transaction, once per data directory; leave original JSON backups untouched."""
+        installed = []
+        try:
+            with self._transaction(write=True) as db:
+                if db.execute("SELECT 1 FROM settings WHERE key = 'json_migrated'").fetchone():
+                    return
+                for path in sorted(self.root.glob('*/state.json')):
+                    try:
+                        bundle = json.loads(path.read_text(encoding='utf-8'))
+                        project = bundle['project']
+                        self._validate(project)
+                        if db.execute('SELECT 1 FROM projects WHERE id = ?', (project['id'],)).fetchone():
+                            raise StoreError('JSON migration would replace an existing experiment.', 'migration_conflict', 409)
+                        self._sync_current(db, None, project)
+                        previous = None
+                        latest_revision = 0
+                        for entry in bundle['history']:
+                            snapshot = entry['snapshot']
+                            if snapshot['id'] != project['id'] or type(snapshot['revision']) is not int or snapshot['revision'] <= latest_revision:
+                                raise ValueError('History IDs and revisions must be consistent')
+                            self._validate(snapshot)
+                            self._migrate_evidence(path.parent, snapshot, installed)
+                            self._insert_version(db, previous, snapshot, entry['operations'], entry.get('requestId'), entry.get('fingerprint'))
+                            previous, latest_revision = snapshot, snapshot['revision']
+                        if canonical(previous) != canonical(project):
+                            raise ValueError('History must end at the current project')
+                        for request_id, cached in bundle.get('requests', {}).items():
+                            revision = cached.get('revision', cached.get('result', {}).get('revision'))
+                            if not db.execute('SELECT 1 FROM versions WHERE project_id = ? AND revision = ?', (project['id'], revision)).fetchone():
+                                raise ValueError('Request refers to a missing revision')
+                            db.execute('UPDATE versions SET request_id = ?, fingerprint = ? WHERE project_id = ? AND revision = ?',
+                                       (request_id, cached['fingerprint'], project['id'], revision))
+                    except (KeyError, TypeError, ValueError, OSError) as exc:
+                        raise StoreError(f'Could not migrate experiment file: {path.name}. Original files were preserved.', 'migration_error', 500) from exc
+                db.execute("INSERT INTO settings VALUES ('json_migrated', '1')")
+        except BaseException:
+            for destination in installed:
+                destination.unlink(missing_ok=True)
+            raise
+
+    def _migrate_evidence(self, folder, project, installed):
+        for artifact in project['artifacts']:
+            if artifact.get('origin') != 'observed':
+                continue
+            original, encoded = evidence_names(artifact)
+            source = folder / 'evidence' / original
+            destination = self._dir(project['id']) / 'evidence' / encoded
+            if source == destination or not source.is_file():
+                continue
+            if destination.exists():
+                if identity(source) != identity(destination):
+                    raise StoreError('Evidence migration would overwrite a retained file.', 'migration_conflict', 409)
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix='.evidence-', dir=destination.parent)
             try:
-                yield
+                with os.fdopen(fd, 'wb') as target, source.open('rb') as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                        target.write(chunk)
+                    target.flush()
+                    os.fsync(target.fileno())
+                os.replace(temporary, destination)
+                installed.append(destination)
+                sync_directory(destination.parent)
             finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
 
     def _dir(self, project_id):
-        return self.root / valid_id(project_id)
+        return self.root / disk_name(valid_id(project_id))
 
-    def _load(self, project_id):
-        path = self._dir(project_id) / 'state.json'
-        try:
-            return json.loads(path.read_text(encoding='utf-8'))
-        except FileNotFoundError:
+    def _load(self, db, project_id):
+        row = db.execute('SELECT document, collections FROM projects WHERE id = ?', (valid_id(project_id),)).fetchone()
+        if row is None:
             raise StoreError('Experiment not found.', 'not_found', 404)
-        except (OSError, ValueError) as exc:
-            raise StoreError('Experiment file could not be read.', 'storage_error', 500) from exc
+        project = json.loads(row['document'])
+        project.update({name: [] for name in json.loads(row['collections'])})
+        for record in db.execute('SELECT collection, document FROM records WHERE project_id = ? ORDER BY collection, position', (project_id,)):
+            project[record['collection']].append(json.loads(record['document']))
+        return project
 
-    def _save(self, bundle):
-        folder = self._dir(bundle['project']['id'])
-        folder.mkdir(parents=True, exist_ok=True)
-        encoded = (canonical(bundle) + '\n').encode('utf-8')
-        handle, temporary = tempfile.mkstemp(prefix='.state-', dir=folder)
-        try:
-            with os.fdopen(handle, 'wb') as stream:
-                stream.write(encoded)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, folder / 'state.json')
-            directory_fd = os.open(folder, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+    def _sync_current(self, db, previous, project):
+        metadata = {key: value for key, value in project.items() if key not in COLLECTIONS}
+        names = [name for name in COLLECTIONS if name in project]
+        db.execute('INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET '
+                   'name=excluded.name, description=excluded.description, revision=excluded.revision, '
+                   'updated_at=excluded.updated_at, node_count=excluded.node_count, document=excluded.document, collections=excluded.collections',
+                   (project['id'], project['name'], project.get('description', ''), project['revision'], project['updatedAt'],
+                    len(project['nodes']), canonical(metadata), canonical(names)))
+        for name in COLLECTIONS:
+            before = {} if previous is None else {
+                str(index) if name == 'activity' else item['id']: (index, item)
+                for index, item in enumerate(previous.get(name, []))}
+            after = {str(index) if name == 'activity' else item['id']: (index, item)
+                     for index, item in enumerate(project.get(name, []))}
+            for key in before.keys() - after.keys():
+                db.execute('DELETE FROM records WHERE project_id = ? AND collection = ? AND record_id = ?', (project['id'], name, key))
+            for key, (index, item) in after.items():
+                encoded = canonical(item)
+                if key not in before or before[key][0] != index or canonical(before[key][1]) != encoded:
+                    db.execute('INSERT INTO records VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id, collection, record_id) '
+                               'DO UPDATE SET position=excluded.position, document=excluded.document',
+                               (project['id'], name, key, index, encoded))
+
+    def _insert_version(self, db, previous, project, operations, request_id=None, fingerprint=None):
+        checkpoint = canonical(project) if previous is None or project['revision'] % CHECKPOINT_INTERVAL == 0 else None
+        delta = [] if previous is None else changes(previous, project)
+        db.execute('INSERT INTO versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                   (project['id'], project['revision'], project['updatedAt'], canonical(operations), canonical(delta), checkpoint, request_id, fingerprint))
+
+    def _revision(self, db, project_id, revision):
+        if not db.execute('SELECT 1 FROM versions WHERE project_id = ? AND revision = ?', (project_id, revision)).fetchone():
+            raise StoreError('Revision not found.', 'not_found', 404)
+        row = db.execute('SELECT revision, checkpoint FROM versions WHERE project_id = ? AND revision <= ? '
+                         'AND checkpoint IS NOT NULL ORDER BY revision DESC LIMIT 1', (project_id, revision)).fetchone()
+        project = json.loads(row['checkpoint'])
+        for entry in db.execute('SELECT delta FROM versions WHERE project_id = ? AND revision > ? AND revision <= ? ORDER BY revision',
+                                (project_id, row['revision'], revision)):
+            project = apply_changes(project, json.loads(entry['delta']))
+        return project
 
     def _operation_metadata(self, operations):
         result = []
@@ -120,44 +324,32 @@ class Store:
             result.append(item)
         return result
 
-    def _record(self, bundle, project, operations, request_id=None, fingerprint=None):
-        project['revision'] = bundle['project']['revision'] + 1
+    def _record(self, db, previous, project, operations, request_id=None, fingerprint=None):
+        project['revision'] = previous['revision'] + 1
         project['updatedAt'] = now()
         metadata = self._operation_metadata(operations)
-        project['activity'] = copy.deepcopy(bundle['project'].get('activity', [])) + [
+        project['activity'] = previous.get('activity', []) + [
             {'id': uid('activity'), 'at': project['updatedAt'], 'revision': project['revision'], 'operations': metadata}]
-        bundle['project'] = project
-        entry = {'revision': project['revision'], 'at': project['updatedAt'],
-                 'operations': metadata, 'snapshot': copy.deepcopy(project)}
-        if request_id:
-            entry.update({'requestId': request_id, 'fingerprint': fingerprint})
-        bundle['history'].append(entry)
+        self._sync_current(db, previous, project)
+        self._insert_version(db, previous, project, metadata, request_id, fingerprint)
         return project
 
-    def _new_bundle(self, project, operation):
-        return {'project': project, 'history': [{'revision': project['revision'], 'at': project['updatedAt'],
-                'operations': [operation], 'snapshot': copy.deepcopy(project)}], 'requests': {}}
-
     def list_projects(self):
-        with self._lock():
-            result = []
-            for path in sorted(self.root.glob('*/state.json')):
-                p = self._load(path.parent.name)['project']
-                result.append({k: p.get(k, '') for k in ('id', 'name', 'description', 'revision', 'updatedAt')}
-                              | {'nodeCount': len(p['nodes'])})
-            return sorted(result, key=lambda p: p['updatedAt'], reverse=True)
+        with self._transaction() as db:
+            return [dict(row) for row in db.execute('SELECT id, name, description, revision, updated_at AS updatedAt, '
+                                                    'node_count AS nodeCount FROM projects ORDER BY updated_at DESC, id')]
 
     def get_project(self, project_id):
-        with self._lock():
-            return copy.deepcopy(self._load(project_id)['project'])
+        with self._transaction() as db:
+            return self._load(db, project_id)
 
     def create_project(self, data):
         object_value(data, 'Project')
         project_id = valid_id(data.get('id') or uid('study'))
         if not isinstance(data.get('name'), str) or not data['name'].strip():
             raise StoreError('Experiment name is required.')
-        with self._lock():
-            if (self._dir(project_id) / 'state.json').exists():
+        with self._transaction(write=True) as db:
+            if db.execute('SELECT 1 FROM projects WHERE id = ?', (project_id,)).fetchone():
                 raise StoreError('Experiment ID already exists.', 'conflict', 409)
             stamp = now()
             p = {'id': project_id, 'name': data['name'].strip(), 'description': data.get('description', ''),
@@ -166,21 +358,23 @@ class Store:
             if 'sourceRoots' in data:
                 p['sourceRoots'] = data['sourceRoots']
             self._validate(p)
-            self._save(self._new_bundle(p, {'op': 'project.create'}))
+            self._sync_current(db, None, p)
+            self._insert_version(db, None, p, [{'op': 'project.create'}])
             return copy.deepcopy(p)
 
     def import_project(self, project):
         p = copy.deepcopy(object_value(project, 'Project'))
         self._validate(p)
-        with self._lock():
+        with self._transaction(write=True) as db:
             base = p['id']
-            while (self._dir(p['id']) / 'state.json').exists():
+            while db.execute('SELECT 1 FROM projects WHERE id = ?', (p['id'],)).fetchone():
                 p['id'] = f'{base[:100]}-{uuid4().hex[:8]}'
             p['revision'] = 1
             p.setdefault('createdAt', now())
             p['updatedAt'] = now()
             p.setdefault('activity', [])
-            self._save(self._new_bundle(p, {'op': 'project.import'}))
+            self._sync_current(db, None, p)
+            self._insert_version(db, None, p, [{'op': 'project.import'}])
             return copy.deepcopy(p)
 
     def _expected(self, p, body):
@@ -199,30 +393,22 @@ class Store:
             valid_id(request_id)
         encoded_operations = canonical(operations)
         fingerprint = hashlib.sha256(encoded_operations.encode('utf-8')).hexdigest()
-        with self._lock():
-            bundle = self._load(project_id)
-            previous = bundle['requests'].get(request_id) if request_id else None
-            if request_id and previous is None:
-                previous = next((h for h in bundle['history'] if h.get('requestId') == request_id), None)
-            if previous is not None:
-                if previous['fingerprint'] not in (fingerprint, encoded_operations):
+        with self._transaction(write=True) as db:
+            project_id = valid_id(project_id)
+            previous_request = db.execute('SELECT revision, fingerprint FROM versions WHERE project_id = ? AND request_id = ?',
+                                          (project_id, request_id)).fetchone() if request_id else None
+            if previous_request is not None:
+                if previous_request['fingerprint'] not in (fingerprint, encoded_operations):
                     raise StoreError('requestId was already used for different operations.', 'idempotency_conflict', 409)
-                if 'result' in previous:
-                    return copy.deepcopy(previous['result'])
-                return copy.deepcopy(next(h['snapshot'] for h in bundle['history'] if h['revision'] == previous['revision']))
-            self._expected(bundle['project'], body)
-            p = copy.deepcopy(bundle['project'])
+                return self._revision(db, project_id, previous_request['revision'])
+            previous = self._load(db, project_id)
+            self._expected(previous, body)
+            p = copy.deepcopy(previous)
             for operation in operations:
                 object_value(operation, 'Operation')
                 self._apply(p, operation.get('op'), copy.deepcopy(object_value(operation.get('data', {}), 'Operation data')))
             self._validate(p)
-            self._record(bundle, p, operations, request_id, fingerprint)
-            if request_id:
-                bundle['requests'][request_id] = {'fingerprint': fingerprint, 'revision': p['revision']}
-                if len(bundle['requests']) > 256:
-                    recent = sorted(bundle['requests'].items(), key=lambda item: item[1].get('revision', 0), reverse=True)[:256]
-                    bundle['requests'] = dict(recent)
-            self._save(bundle)
+            self._record(db, previous, p, operations, request_id, fingerprint)
             return copy.deepcopy(p)
 
     def _find(self, p, collection, key):
@@ -347,7 +533,7 @@ class Store:
         if not isinstance(p.get('description', ''), str) or not isinstance(p.get('activity', []), list):
             raise StoreError('Project description must be text and activity must be an array.')
         roots = p.get('sourceRoots', [])
-        if not isinstance(roots, list) or any(not isinstance(r, str) or not Path(r).is_absolute() for r in roots):
+        if not isinstance(roots, list) or any(not isinstance(r, str) or not (Path(r).is_absolute() or PureWindowsPath(r).is_absolute()) for r in roots):
             raise StoreError('sourceRoots must contain absolute directory paths.')
         groups = {}
         for collection in ('nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations'):
@@ -510,24 +696,28 @@ class Store:
         if not isinstance(body.get('path'), str) or not body['path']:
             raise StoreError('Artifact path is required.')
         source = Path(body['path']).expanduser().resolve()
-        with self._lock():
-            bundle = self._load(project_id)
-            self._expected(bundle['project'], body)
-            p = copy.deepcopy(bundle['project'])
-            allowed = [self._dir(project_id).resolve()] + [Path(root).resolve() for root in p.get('sourceRoots', [])]
-            if not any(source.is_relative_to(root) for root in allowed):
-                raise StoreError('Source file is outside this experiment’s source roots.', 'path_not_allowed', 403)
-            if not source.is_file():
-                raise StoreError('Source file does not exist.', 'not_found', 404)
-            artifact_id = valid_id(body.get('id') or uid('artifact'))
-            if any(a['id'] == artifact_id for a in p['artifacts']):
-                raise StoreError('Artifact ID already exists.', 'conflict', 409)
-            destination_dir = self._dir(project_id) / 'evidence'
-            destination_dir.mkdir(exist_ok=True)
-            suffix = source.suffix[:20] if re.fullmatch(r'\.[A-Za-z0-9_-]{1,19}', source.suffix) else ''
-            destination = destination_dir / f'{artifact_id}{suffix}'
-            fd, temporary = tempfile.mkstemp(prefix='.evidence-', dir=destination_dir)
-            try:
+        destination = temporary = None
+        installed = False
+        try:
+            with self._transaction(write=True) as db:
+                previous = self._load(db, project_id)
+                self._expected(previous, body)
+                p = copy.deepcopy(previous)
+                allowed = [self._dir(project_id).resolve()] + [Path(root).resolve() for root in p.get('sourceRoots', []) if Path(root).is_absolute()]
+                if not any(source.is_relative_to(root) for root in allowed):
+                    raise StoreError('Source file is outside this experiment’s source roots.', 'path_not_allowed', 403)
+                if not source.is_file():
+                    raise StoreError('Source file does not exist.', 'not_found', 404)
+                artifact_id = valid_id(body.get('id') or uid('artifact'))
+                if any(a['id'] == artifact_id for a in p['artifacts']):
+                    raise StoreError('Artifact ID already exists.', 'conflict', 409)
+                destination_dir = self._dir(project_id) / 'evidence'
+                destination_dir.mkdir(parents=True, exist_ok=True)
+                suffix = source.suffix.lower() if re.fullmatch(r'\.[A-Za-z0-9_-]{1,19}', source.suffix) else ''
+                destination = destination_dir / f'{disk_name(artifact_id)}{suffix}'
+                if destination.exists():
+                    raise StoreError('Artifact ID already has retained evidence; use a new ID.', 'conflict', 409)
+                fd, temporary = tempfile.mkstemp(prefix='.evidence-', dir=destination_dir)
                 digest, size = hashlib.sha256(), 0
                 with os.fdopen(fd, 'wb') as target, open(source, 'rb') as stream:
                     for chunk in iter(lambda: stream.read(1024 * 1024), b''):
@@ -546,16 +736,17 @@ class Store:
                     self._find(p, 'runs', artifact['runId']).setdefault('artifactIds', []).append(artifact_id)
                 self._validate(p)
                 os.replace(temporary, destination)
-                self._record(bundle, p, [{'op': 'artifact.register', 'data': {'id': artifact_id, 'title': artifact['title']}}])
-                try:
-                    self._save(bundle)
-                except Exception:
-                    destination.unlink(missing_ok=True)
-                    raise
-                return copy.deepcopy(artifact)
-            finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
+                installed = True
+                sync_directory(destination_dir)
+                self._record(db, previous, p, [{'op': 'artifact.register', 'data': {'id': artifact_id, 'title': artifact['title']}}])
+            return copy.deepcopy(artifact)
+        except BaseException:
+            if installed:
+                destination.unlink(missing_ok=True)
+            raise
+        finally:
+            if temporary is not None and os.path.exists(temporary):
+                os.unlink(temporary)
 
     def _artifact_location(self, project_id, project, artifact):
         evidence = (self._dir(project_id) / 'evidence').resolve()
@@ -563,16 +754,14 @@ class Store:
         if artifact.get('origin') == 'observed':
             # The retained copy is addressed inside the current data directory.
             # An absolute path from an export is never followed outside it.
-            basename = recorded.name
-            if not re.fullmatch(re.escape(artifact['id']) + r'(\.[A-Za-z0-9_-]{1,19})?', basename):
-                basename = artifact['id']
+            _, basename = evidence_names(artifact)
             path = (evidence / basename).resolve()
             if not path.is_relative_to(evidence):
                 raise StoreError('This evidence has no registered local copy.', 'evidence_unavailable', 404)
             return path
         path = recorded.resolve()
         allowed_mock = artifact.get('origin') == 'mock' and any(
-            path.is_relative_to(Path(root).resolve()) for root in project.get('sourceRoots', []))
+            Path(root).is_absolute() and path.is_relative_to(Path(root).resolve()) for root in project.get('sourceRoots', []))
         if not path.is_relative_to(evidence) and not allowed_mock:
             raise StoreError('This evidence has no registered local copy.', 'evidence_unavailable', 404)
         return path
@@ -583,8 +772,8 @@ class Store:
             raise StoreError('Evidence content changed after registration.', 'evidence_changed', 409)
 
     def artifact_metadata(self, project_id, artifact_id):
-        with self._lock():
-            p = self._load(project_id)['project']
+        with self._transaction() as db:
+            p = self._load(db, project_id)
             artifact = self._find(p, 'artifacts', artifact_id)
             path = self._artifact_location(project_id, p, artifact)
             try:
@@ -601,8 +790,8 @@ class Store:
             limit = 262144 if limit is None else limit
             if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 1024 * 1024:
                 raise StoreError('Preview offset must be nonnegative and limit must be 1–1048576 bytes.', 'invalid_preview_range')
-        with self._lock():
-            p = self._load(project_id)['project']
+        with self._transaction() as db:
+            p = self._load(db, project_id)
             artifact = self._find(p, 'artifacts', artifact_id)
             path = self._artifact_location(project_id, p, artifact)
             try:
@@ -615,24 +804,29 @@ class Store:
             return raw, copy.deepcopy(artifact)
 
     def history(self, project_id):
-        with self._lock():
-            return [{key: copy.deepcopy(value) for key, value in entry.items() if key != 'snapshot'}
-                    for entry in self._load(project_id)['history']]
+        with self._transaction() as db:
+            if not db.execute('SELECT 1 FROM projects WHERE id = ?', (valid_id(project_id),)).fetchone():
+                raise StoreError('Experiment not found.', 'not_found', 404)
+            entries = []
+            for row in db.execute('SELECT revision, at, operations, request_id, fingerprint FROM versions WHERE project_id = ? ORDER BY revision', (project_id,)):
+                entry = {'revision': row['revision'], 'at': row['at'], 'operations': json.loads(row['operations'])}
+                if row['request_id'] is not None:
+                    entry.update({'requestId': row['request_id'], 'fingerprint': row['fingerprint']})
+                entries.append(entry)
+            return entries
 
     def restore(self, project_id, body):
         object_value(body, 'Restore')
         if 'expectedRevision' not in body:
             raise StoreError('expectedRevision is required for restore.')
-        with self._lock():
-            bundle = self._load(project_id)
-            self._expected(bundle['project'], body)
-            match = next((h for h in bundle['history'] if h['revision'] == body.get('revision')), None)
-            if match is None:
-                raise StoreError('Revision not found.', 'not_found', 404)
-            p = copy.deepcopy(match['snapshot'])
+        if type(body.get('revision')) is not int or body['revision'] < 1:
+            raise StoreError('revision must be a positive integer.')
+        with self._transaction(write=True) as db:
+            previous = self._load(db, project_id)
+            self._expected(previous, body)
+            p = self._revision(db, project_id, body['revision'])
             self._validate(p)
-            self._record(bundle, p, [{'op': 'project.restore', 'data': {'revision': body['revision']}}])
-            self._save(bundle)
+            self._record(db, previous, p, [{'op': 'project.restore', 'data': {'revision': body['revision']}}])
             return copy.deepcopy(p)
 
     def context(self, project_id, node_id=None):

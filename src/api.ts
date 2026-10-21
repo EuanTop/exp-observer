@@ -1,5 +1,11 @@
 import type { Artifact, Operation, Project, ProjectSummary } from "./model";
-export type AgentSetup = { skillPath: string; clientPath: string; url: string };
+export type AgentSetup = {
+  skillPath: string;
+  clientPath: string;
+  pythonPath: string;
+  shell: "powershell" | "posix";
+  url: string;
+};
 export class ApiError extends Error {
   constructor(
     message: string,
