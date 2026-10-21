@@ -5,7 +5,7 @@ description: Observe research in a local ExpObserver experiment with brief updat
 
 # ExpObserver
 
-Follow the user's research objective, budget and deliverables. Choose methods and next steps from the task and evidence. ExpObserver retains findings and existing results without prescribing research steps.
+Follow the user's research objective, budget and deliverables. Choose methods from evidence; recording adds no research phases.
 
 Use `scripts/exp_observer.py` relative to this Skill with Python 3.10+. Examples use `python3`; on Windows use `py -3` or the installed interpreter. The default address is `http://127.0.0.1:4317`; `EXP_OBSERVER_URL` or global `--url URL` selects another server.
 
@@ -23,15 +23,17 @@ Keep the returned ID across conversations. This works offline; `record --project
 
 ## Record at natural boundaries
 
-When the work establishes a finding, changes a judgment or reaches a decision, briefly record the facts already established. Reuse existing results and wording. Routine intermediate steps need no separate record.
+Briefly retain findings and changed judgments using existing results and wording. Routine steps need no separate record.
 
 ```sh
 python3 <skill>/scripts/exp_observer.py record --project ID --title "Observed finding" --summary "Evidence and implication"
 ```
 
-`record` supplies IDs and references. Keep a distinct finding separately; use `--node NODE` to revise the same finding. A batch comparison may remain one record. `--after NODE` optionally retains an actual continuation. Use `--status completed` when that work is complete. Record count is not a target; retain only supported relationships and chronology.
+Use the finding as the title; `--conclusion TEXT` retains its precise conclusion. `--node NODE` revises existing work. Completion is `--status completed`, not a separate status-only finding. A batch comparison can remain one finding.
 
-For an existing JSON result, add `--metrics-file results.json --artifact results.json`. Nested objects, arrays and nulls are accepted; non-object roots use `result`. Source files stay unchanged.
+Record order is automatic and implies no causality. For an actual scientific relationship, use `--after "Earlier finding title" --relation supports` (or `refutes`, `revises`); exact local titles or IDs work.
+
+Attach existing JSON with `--metrics-file results.json --artifact results.json`. Nested values are preserved; other root types use `result`. Files stay unchanged.
 
 For an existing command you want captured:
 
@@ -39,11 +41,11 @@ For an existing command you want captured:
 python3 <skill>/scripts/exp_observer.py execute --project ID --title "Actual command" -- python3 experiment.py
 ```
 
-This supplies a record ID and captures timing, exit code and stdout/stderr. Add `--artifact PATH` for result files, or `--node NODE` to attach an existing record.
+This captures timing, exit code and stdout/stderr. Add `--artifact PATH` for result files or `--node NODE` for existing work. Record this command's finding against its returned `nodeId`, keeping result and execution together.
 
 ## Let recording recover separately
 
-Call the client even when offline: saving result files alone does not queue a record. `init`, `record` and `execute` save pending work locally; the application automatically retries registered queues when running. A pending receipt means saved locally, awaiting registration. Continue research without polling.
+Call the client even offline: result files alone do not queue records. `init`, `record` and `execute` save locally; the application reads connected research directories, including new experiment subdirectories. No global-directory write is needed. Pending means saved locally, awaiting registration. Continue without polling.
 
 The command's exit status describes the experiment; `pending` and `recordingWarnings` describe recording. If the host blocks client execution or local saving fails, continue and report recording unavailable; do not claim it was queued.
 

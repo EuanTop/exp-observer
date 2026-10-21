@@ -6,6 +6,8 @@ export type AgentSetup = {
   shell: "powershell" | "posix";
   url: string;
 };
+export type ResearchWorkspace = { id: string; path: string; addedAt: string };
+type WorkspaceList = { workspaces: ResearchWorkspace[] };
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -31,6 +33,17 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json();
 }
 export const api = {
+  workspaces: () => request<WorkspaceList>("/api/workspaces"),
+  addWorkspace: (path: string) =>
+    request<WorkspaceList>("/api/workspaces", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
+  removeWorkspace: (id: string) =>
+    request<WorkspaceList>("/api/workspaces/remove", {
+      method: "POST",
+      body: JSON.stringify({ id }),
+    }),
   agentSetup: () => request<AgentSetup>("/api/agent-setup"),
   list: () => request<{ projects: ProjectSummary[] }>("/api/projects"),
   project: (id: string) =>

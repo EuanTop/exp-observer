@@ -32,6 +32,7 @@ import {
 import { Badge, date, IconButton, kindIcon } from "./Primitives";
 import { NodeUsagePanel } from "./NodeUsagePanel";
 import { MetricDetails } from "./MetricDetails";
+import { nodePresentation } from "../node-presentation";
 export function ProjectInspector({
   project,
   onAdd,
@@ -161,6 +162,7 @@ export function NodeInspector({
     if (!editing) setDraft({ ...node });
   }, [node]);
   const runs = project.runs.filter((r) => r.nodeId === node.id);
+  const presentation = nodePresentation(project, node);
   const relatedArtifacts = project.artifacts.filter(
     (a) =>
       a.nodeId === node.id ||
@@ -178,6 +180,7 @@ export function NodeInspector({
             id: node.id,
             title: draft.title,
             summary: draft.summary,
+            conclusion: draft.conclusion || "",
             notes: draft.notes,
             nextAction: draft.nextAction,
             parentId: draft.parentId,
@@ -346,6 +349,16 @@ export function NodeInspector({
                   </>
                 )}
                 <label>
+                  结论
+                  <textarea
+                    placeholder="用一句话说明这一步发现了什么"
+                    value={draft.conclusion || ""}
+                    onChange={(e) =>
+                      setDraft({ ...draft, conclusion: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
                   摘要
                   <textarea
                     value={draft.summary}
@@ -413,6 +426,12 @@ export function NodeInspector({
               </div>
             ) : (
               <>
+                {presentation.source && (
+                  <div className="node-context-note">
+                    <strong>{presentation.source}</strong>
+                    <p>{presentation.headline}</p>
+                  </div>
+                )}
                 <p className="inspector-summary">
                   {node.summary || "暂无摘要"}
                 </p>

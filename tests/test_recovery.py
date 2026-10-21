@@ -46,6 +46,7 @@ class RecoveryTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.store = Store(self.root / 'data')
+        self.store.add_workspace({'path': str(self.root)})
         self.server = Server(('127.0.0.1', 0), self.store, recovery=True, recovery_interval=0.08)
         self.addCleanup(self.server.server_close)
         self.url = f'http://127.0.0.1:{self.server.server_port}'
@@ -136,7 +137,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(len(self.store.list_projects()), 1)
         self.store.batch('lost-create', {'operations': [{'op': 'project.update', 'data': {'description': 'Changed remotely'}}]})
         before = self.store.get_project('lost-create')
-        recovery = Recovery(self.url, self.state)
+        recovery = Recovery(self.url, self.state, store=self.store)
         self.assertTrue(recovery.drain_once())
         self.assertEqual(self.store.get_project('lost-create'), before)
         self.assertEqual(recovery.drain_once(), [])
@@ -206,9 +207,11 @@ class RecoveryTests(unittest.TestCase):
         self.invoke('record', '--project', 'other-server', '--title', 'Other server', client=self.offline(other_url))
         _, remote = self.invoke('record', '--project', 'remote', '--title', 'Manual only',
                                 client=self.offline('https://example.invalid'))
-        self.assertTrue(any('loopback HTTP' in warning for warning in remote['recordingWarnings']))
-        self.start()
-        self.wait_for(lambda: len(self.store.get_project('included')['nodes']) == 1)
+        self.assertTrue(remote['pending'])
+        self.assertIn('loopback HTTP', cli.register_outbox(self.root / '.exp-observer-runs' / 'outbox', 'https://example.invalid'))
+        cli.register_outbox(self.root / '.exp-observer-runs' / 'outbox', self.url)
+        self.start(automatic=False)
+        Recovery(self.url, self.state).drain_once()
         self.assertEqual([project['id'] for project in self.store.list_projects()], ['included'])
         self.assertTrue(all(task['state'] != 'synced' for task in self.read_tasks(unregistered)))
         self.assertEqual(self.store.get_project('included')['nodes'][0]['id'], included['nodeId'])
@@ -252,7 +255,7 @@ class RecoveryTests(unittest.TestCase):
         self.addCleanup(redirect.shutdown)
         url = f'http://127.0.0.1:{redirect.server_port}'
         self.invoke('record', '--project', 'redirect', '--title', 'Keep local', client=self.offline(url))
-        recovery = Recovery(url, self.state)
+        recovery = Recovery(url, self.state, store=self.store)
         results = recovery.drain_once()
         self.assertTrue(results)
         self.assertTrue(all(result['pending'] for result in results))
@@ -269,7 +272,7 @@ class RecoveryTests(unittest.TestCase):
         for index in range(2):
             self.invoke('record', '--project', 'concurrent', '--title', f'Finding {index}', '--request-id', str(index), client=self.offline())
         self.start(automatic=False)
-        workers = [Recovery(self.url, self.state), Recovery(self.url, self.state)]
+        workers = [Recovery(self.url, self.state, store=self.store), Recovery(self.url, self.state, store=self.store)]
         with ThreadPoolExecutor(2) as pool:
             list(pool.map(lambda worker: worker.drain_once(), workers))
         workers[0].drain_once()
@@ -318,7 +321,7 @@ class RecoveryTests(unittest.TestCase):
         (self.root / 'large.json').write_text(json.dumps({'samples': list(range(60000))}), encoding='utf-8')
         self.invoke('record', '--project', 'cached', '--title', 'Large result', '--metrics-file', 'large.json', client=self.offline())
         self.start(automatic=False)
-        recovery = Recovery(self.url, self.state)
+        recovery = Recovery(self.url, self.state, store=self.store)
         recovery.drain_once()
         capture_path = next(path for path in self.task_paths() if not path.name.startswith('project-'))
         loads = json.loads
@@ -331,32 +334,32 @@ class RecoveryTests(unittest.TestCase):
             recovery.drain_once()
             self.assertTrue(any(len(call.args[0]) > 50000 for call in decode.call_args_list))
 
-    def test_registry_failure_retains_durable_init_and_capture(self):
+    def test_inaccessible_registry_does_not_affect_local_capture_or_enrolled_recovery(self):
         blocked_state = self.root / 'blocked-state'
         blocked_state.write_text('A file prevents creation of the registry directory')
-        with patch.dict(os.environ, {'EXP_OBSERVER_STATE_DIR': str(blocked_state)}):
+        with patch.dict(os.environ, {'EXP_OBSERVER_STATE_DIR': str(blocked_state)}), \
+                patch.object(cli, 'register_outbox', side_effect=AssertionError('Capture tried to write outside its workspace')):
             code, initialized = self.invoke('init', '--id', 'retained', '--name', 'Retained', client=self.offline())
             self.assertEqual(code, 0)
             self.assertTrue(initialized['pending'])
             _, captured = self.invoke('record', '--project', 'retained', '--title', 'Durable finding', client=self.offline())
-        self.assertTrue(captured['pending'])
-        self.assertTrue(any('registration is unavailable' in warning for warning in captured['recordingWarnings']))
-        self.assertEqual(len(self.read_tasks()), 2)
-        self.start(automatic=False)
-        code, result = self.invoke('sync')
-        self.assertEqual(code, 0, result)
+            self.assertTrue(captured['pending'])
+            self.assertEqual(len(self.read_tasks()), 2)
+            self.start()
+            self.wait_for(lambda: len(self.store.get_project('retained')['nodes']) == 1)
         self.assertEqual(self.store.get_project('retained')['nodes'][0]['title'], 'Durable finding')
 
     def test_malformed_queue_entry_does_not_block_context_or_other_records(self):
         self.invoke('record', '--project', 'healthy', '--title', 'Healthy record', client=self.offline())
         outbox = self.root / '.exp-observer-runs' / 'outbox'
         (outbox / 'malformed.json').write_text('[]', encoding='utf-8')
+        cli.register_outbox(outbox, self.url)
         (self.state / 'outboxes' / '000-malformed.json').write_text('[]', encoding='utf-8')
         code, context = self.invoke('context', '--project', 'healthy', client=self.offline())
         self.assertEqual(code, 0)
         self.assertEqual(context['localPendingCount'], 1)
         self.start(automatic=False)
-        results = Recovery(self.url, self.state).drain_once()
+        results = Recovery(self.url, self.state, store=self.store).drain_once()
         self.assertEqual(self.store.get_project('healthy')['nodes'][0]['title'], 'Healthy record')
         malformed = next(result for result in results if result.get('task') == 'malformed.json')
         self.assertTrue(malformed['pending'])

@@ -26,7 +26,7 @@ On Windows, double-click `start.bat` or run `py -3 start.py`. On macOS, you can 
 
 You only need **[Python 3.10 or newer](https://www.python.org/downloads/)**. No Node.js, npm, pip packages, account or model API key is needed. On Windows, use `python start.py` if Python is on `PATH` without the `py` launcher. Download `exp-observer.zip` from Releases; GitHub's “Source code” ZIP is for developers and does not contain the built interface.
 
-The default workspace includes a synthetic demo. Add `--no-demo` for an empty workspace, or `--no-browser` to start without opening a browser. The interface's **Connect Agent** button supplies the instruction for attaching an agent to your experiment. [Installation details](INSTALL.md) · [Build from source](CONTRIBUTING.md#development)
+The default workspace includes a synthetic demo. Add `--no-demo` for an empty workspace, or `--no-browser` to start without opening a browser. In **Connect Agent**, connect your research directory once, then copy the short instruction for the research agent. Future experiment subdirectories are included automatically. You can also connect a directory at startup with `--workspace /absolute/research/path`. [Installation details](INSTALL.md) · [Build from source](CONTRIBUTING.md#development)
 
 ## Work in the graph
 
@@ -80,7 +80,7 @@ python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
   --metrics-file results.json --artifact results.json
 ```
 
-Use `--node NODE_ID` to update an existing node, `--after NODE_ID` for a research continuation, or `--parent NODE_ID` to group related records. These options are optional. Nested metrics are stored intact, including arrays, nulls and empty containers. Non-object result JSON is wrapped under `result` automatically; the original file is unchanged. Text-only updates do not invent an experiment run.
+Use the actual finding as the title; `--conclusion TEXT` adds a precise conclusion displayed directly on its card. Use `--node NODE_ID` to revise the same work, including a finding from a captured command. Completion belongs to that work's status rather than a separate completion node. New records retain capture order automatically, clearly labeled as record order. For an actual scientific relationship, `--after 'Earlier finding title' --relation supports` accepts an exact local title or ID; `--independent` omits ordinary order. `--parent NODE_ID` groups related work. Nested metrics remain intact, including arrays, nulls and empty containers. Non-object result JSON uses `result`; files stay unchanged. Text-only updates create no run.
 
 Keep a distinct finding as its own record when useful, and revise the same finding with `--node`. A batch comparison can remain one record. Node count is not a target; a final summary does not establish an unrecorded research chronology.
 
@@ -94,9 +94,9 @@ python3 skills/exp-observer/scripts/exp_observer.py execute \
 
 The wrapper supplies a record ID and captures the actual command's exit code, wall time, stdout/stderr and requested files with **zero extra model calls**. Use `--node NODE_ID` to attach an existing record. Recording does not prescribe experimental phases, methods, measurements or deliverables. Agents leave brief updates when the research already changes a judgment or direction; coordinates, IDs and display formatting belong to the platform.
 
-`init`, `record` and `execute` save pending work locally. The application automatically retries registered queues while running, including when it starts after offline research. It checks only registered directories for its own loopback HTTP address. A successful experiment remains successful even when recording is unavailable. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths. `sync` remains an optional manual recovery command, run from the original working directory; recovery never reruns an experiment or rereads changed source evidence.
+`init`, `record` and `execute` save pending work inside the working directory. The application discovers queues within connected research directories, including newly created experiment subdirectories and when starting after offline research. Clients need no global-registry write. The application submits only queues for its own loopback address and never follows directory links outside the connected root. A successful experiment remains successful even when recording is unavailable. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths. Optional manual `sync` runs from the original working directory. Recovery never reruns an experiment or rereads changed source evidence.
 
-The client must run to queue a record: saving result files alone does not register them. If the host blocks client execution or local writes, the record cannot be queued. Keep the research moving and report that limitation accurately. For isolation, `EXP_OBSERVER_STATE_DIR` selects the recovery registry directory; use the same value for the client and application. Installing the Skill does not grant sandbox permissions or install a system service.
+The client must run to queue a record: result files alone are not queued. If the host blocks client execution or writes inside its working directory, recording is unavailable. Research continues. Connect directories during application setup, separately from the research task. The application still supports older clients' recovery registries (`EXP_OBSERVER_STATE_DIR` overrides their location); new clients do not depend on that registry. Installing the Skill grants no sandbox permissions or system service.
 
 Register existing files in bulk, inspect retained evidence, check the record or export the graph:
 

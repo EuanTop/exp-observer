@@ -12,6 +12,7 @@ import { agentCommand, agentPrompt } from "../agent-command";
 import {
   ancestry,
   kinds,
+  NODE_SIZE,
   relations,
   uid,
   type Artifact,
@@ -20,6 +21,7 @@ import {
 } from "../model";
 
 import { IconButton } from "./Primitives";
+import { WorkspaceEnrollment } from "./WorkspaceEnrollment";
 export type DialogState = {
   type: "node" | "project" | "artifact" | "branch" | "group" | "connect";
   parentId?: string | null;
@@ -270,6 +272,7 @@ export function SkillPanel({
       </div>
       <h2>让 Agent 接着探索</h2>
       <p>复制指令到 Agent 对话，再补充你的研究任务。</p>
+      <WorkspaceEnrollment />
       <div
         className="skill-prompt"
         style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
@@ -388,15 +391,27 @@ export function CreateDialog({
       const center = flowCenter();
       const source = project.nodes.find((n) => n.id === dialog.source);
       let position = source
-        ? { x: source.position.x + 330, y: source.position.y + 240 }
-        : { x: Math.round(center.x - 140), y: Math.round(center.y - 80) };
+        ? {
+            x: source.position.x + NODE_SIZE.w + 50,
+            y: source.position.y + NODE_SIZE.h + 60,
+          }
+        : {
+            x: Math.round(center.x - NODE_SIZE.w / 2),
+            y: Math.round(center.y - NODE_SIZE.h / 2),
+          };
       if (parentId) {
         const parent = project.nodes.find((n) => n.id === parentId);
         if (parent) {
           const siblings = project.nodes.filter((n) => n.parentId === parentId);
           position = {
-            x: parent.position.x + 30 + (siblings.length % 2) * 310,
-            y: parent.position.y + 85 + Math.floor(siblings.length / 2) * 210,
+            x:
+              parent.position.x +
+              30 +
+              (siblings.length % 2) * (NODE_SIZE.w + 30),
+            y:
+              parent.position.y +
+              85 +
+              Math.floor(siblings.length / 2) * (NODE_SIZE.h + 35),
           };
         }
       }

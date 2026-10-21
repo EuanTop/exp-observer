@@ -49,6 +49,7 @@ import {
   ancestry,
   descendants,
   kinds,
+  NODE_SIZE,
   isExecutionRun,
   toCanvas,
   uid,
@@ -406,7 +407,7 @@ export default function App() {
       });
       g.setDefaultEdgeLabel(() => ({}));
       for (const n of group) {
-        const d = dimensions.get(n.id) || { w: 280, h: 178 };
+        const d = dimensions.get(n.id) || NODE_SIZE;
         g.setNode(n.id, { width: d.w, height: d.h });
       }
       for (const e of project.edges)

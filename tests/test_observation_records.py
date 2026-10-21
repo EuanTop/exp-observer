@@ -58,7 +58,7 @@ class ObservationRecordTests(unittest.TestCase):
         self.assertEqual(len({(pos['x'], pos['y']) for pos in positions}), 10)
         for i, a in enumerate(positions):
             for b in positions[i + 1:]:
-                self.assertTrue(abs(a['x'] - b['x']) >= 308 or abs(a['y'] - b['y']) >= 206)
+                self.assertTrue(abs(a['x'] - b['x']) >= 328 or abs(a['y'] - b['y']) >= 278)
         self.assertEqual(self.store.batch('study', body), recorded)
 
     def test_children_can_precede_parent_without_agent_coordinates(self):

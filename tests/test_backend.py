@@ -87,6 +87,71 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.get_project('study'), before)
         self.assertEqual(len(self.store.history('study')), before['revision'])
 
+    def test_merge_preserves_observed_evidence_runs_and_history(self):
+        self.add_node('status-only')
+        self.add_node('related')
+        self.apply([
+            {'op': 'node.update', 'data': {'id': 'a', 'conclusion': 'The measured finding'}},
+            {'op': 'run.add', 'data': {'id': 'actual-run', 'nodeId': 'status-only', 'status': 'completed',
+                                     'metrics': {'nested': {'value': 24.13}}}},
+            {'op': 'decision.add', 'data': {'id': 'judgment', 'nodeId': 'status-only', 'runIds': ['actual-run']}},
+            {'op': 'observation.start', 'data': {'id': 'step', 'nodeId': 'status-only'}},
+            {'op': 'edge.add', 'data': {'id': 'self-after-merge', 'source': 'a', 'target': 'status-only'}},
+            {'op': 'edge.add', 'data': {'id': 'real-relation', 'source': 'status-only', 'target': 'related', 'relation': 'supports'}},
+        ])
+        evidence = self.root / 'original.txt'
+        evidence.write_bytes(b'actual evidence')
+        artifact = self.store.register_artifact('study', {'id': 'retained', 'path': str(evidence),
+                                                       'nodeId': 'status-only', 'runId': 'actual-run'})
+        before = self.store.get_project('study')
+        body = {'requestId': 'merge-existing-work', 'expectedRevision': before['revision'],
+                'operations': [{'op': 'node.merge', 'data': {'id': 'status-only', 'target': 'a'}}]}
+        result = self.store.batch('study', body)
+        self.assertEqual([node['id'] for node in result['nodes']], ['a', 'related'])
+        for collection in ('runs', 'artifacts', 'decisions', 'observations'):
+            self.assertEqual(result[collection][0]['nodeId'], 'a')
+            self.assertEqual({key: value for key, value in result[collection][0].items() if key != 'nodeId'},
+                             {key: value for key, value in before[collection][0].items() if key != 'nodeId'})
+        self.assertEqual([(edge['id'], edge['source'], edge['target']) for edge in result['edges']],
+                         [('real-relation', 'a', 'related')])
+        self.assertEqual(self.store.artifact_content('study', artifact['id'])[0], b'actual evidence')
+        self.assertEqual(self.store.batch('study', body), result)
+        restored = self.store.restore('study', {'revision': before['revision'], 'expectedRevision': result['revision']})
+        self.assertEqual(restored['runs'], before['runs'])
+        self.assertEqual(restored['artifacts'], before['artifacts'])
+        self.assertEqual(self.store.context('study', 'a')['nodes'][0]['conclusion'], 'The measured finding')
+
+    def test_merged_ids_keep_pending_references_and_context_working(self):
+        self.add_node('old')
+        self.add_node('third')
+        self.apply([{'op': 'node.merge', 'data': {'id': 'old', 'target': 'a'}},
+                    {'op': 'node.merge', 'data': {'id': 'a', 'target': 'third'}}])
+        result = self.apply([
+            {'op': 'node.update', 'data': {'id': 'old', 'conclusion': 'Updated through saved ID'}},
+            {'op': 'run.add', 'data': {'id': 'queued', 'nodeId': 'old', 'metrics': {'nested': {'value': 7}}}},
+        ])
+        self.assertEqual(result['nodeAliases'], {'old': 'third', 'a': 'third'})
+        self.assertEqual(result['runs'][0]['nodeId'], 'third')
+        self.assertEqual(self.store.context('study', 'old')['nodes'][0]['conclusion'], 'Updated through saved ID')
+        evidence = self.root / 'pending.txt'
+        evidence.write_bytes(b'pending evidence')
+        artifact = self.store.register_artifact('study', {'id': 'pending', 'path': str(evidence),
+                                                       'nodeId': 'old', 'runId': 'queued'})
+        self.assertEqual(artifact['nodeId'], 'third')
+        self.assertCode('conflict', self.apply, [{'op': 'node.add', 'data': {'id': 'old'}}])
+        self.apply([{'op': 'node.delete', 'data': {'id': 'old'}}])
+        self.assertEqual(self.store.get_project('study')['nodeAliases'], {})
+
+    def test_merge_rejects_container_or_self_and_conclusion_requires_text(self):
+        self.add_node('container')
+        self.add_node('child', 'container')
+        before = self.store.get_project('study')
+        for data in ({'id': 'a', 'target': 'a'}, {'id': 'container', 'target': 'a'}):
+            self.assertCode('invalid_merge', self.apply, [{'op': 'node.merge', 'data': data}])
+            self.assertEqual(self.store.get_project('study'), before)
+        self.assertCode('invalid_request', self.apply, [{'op': 'node.update', 'data': {'id': 'a', 'conclusion': 5}}])
+        self.assertEqual(self.store.get_project('study'), before)
+
     def test_containment_cycle_and_dangling_parent(self):
         self.add_node('b', 'a')
         self.assertCode('containment_cycle', self.apply, [{'op': 'node.update', 'data': {'id': 'a', 'parentId': 'b'}}])

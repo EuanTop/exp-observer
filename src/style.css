@@ -803,24 +803,66 @@ p {
   font-size: 14px;
   font-weight: 550;
   letter-spacing: 0.1px;
-  line-height: 1.6;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.node-context {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-results {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  text-align: left;
+  margin-top: 5px;
+  padding: 0;
+}
+.node-results > span {
+  min-width: 0;
+  flex: 1;
+}
+.node-results small,
+.node-results strong {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.node-results small {
+  font-size: 9px;
+  color: var(--muted);
+}
+.node-results strong {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text);
+}
+.node-results:hover strong {
+  color: var(--accent);
+}
 .node-content p {
-  margin-top: 7px;
-  font-size: 10px;
-  line-height: 1.8;
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--muted);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  max-width: 240px;
+  overflow-wrap: anywhere;
 }
 .node-footer {
   height: 37px;
+  min-height: 37px;
   border-top: 1px solid var(--line);
   margin: 9px 17px 0;
   display: flex;
@@ -1046,6 +1088,7 @@ p {
 .container-expanded > .node-content h3 {
   font-size: 13px;
   color: var(--text);
+  -webkit-line-clamp: 1;
 }
 .container-expanded .node-type {
   color: var(--muted);
@@ -2329,6 +2372,72 @@ p {
 }
 .skill-panel {
   padding: 27px;
+  max-height: calc(75vh - 60px);
+  overflow-y: auto;
+}
+.workspace-enrollment {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 0;
+}
+.workspace-enrollment h3 {
+  font-size: 13px;
+  font-weight: 550;
+}
+.workspace-enrollment > p {
+  margin-top: 6px;
+}
+.workspace-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.workspace-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+.workspace-list {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+}
+.workspace-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+}
+.workspace-list li > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.workspace-list button {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.workspace-list button:hover {
+  color: var(--text);
+}
+.workspace-empty,
+.workspace-enrollment > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.workspace-enrollment .inline-error {
+  margin-top: 10px;
+}
+.workspace-enrollment .inline-error button {
+  margin-left: 10px;
 }
 .skill-panel-icon {
   width: 46px;
