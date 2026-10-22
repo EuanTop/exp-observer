@@ -92,10 +92,12 @@ export function ResearchEdge(props: EdgeProps) {
         labelBgPadding={props.labelBgPadding}
         labelBgBorderRadius={props.labelBgBorderRadius}
       />
-      <path
-        d={path}
-        className={`research-edge-flow ${props.data?.active ? "is-active" : ""}`}
-      />
+      {!props.data?.orderOnly && (
+        <path
+          d={path}
+          className={`research-edge-flow ${props.data?.active ? "is-active" : ""}`}
+        />
+      )}
     </>
   );
 }

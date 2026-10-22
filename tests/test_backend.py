@@ -81,6 +81,40 @@ class StoreTests(unittest.TestCase):
                 self.assertCode('invalid_request', self.apply, [{'op': 'node.update', 'data': {'id': 'a', **data}}])
                 self.assertEqual(self.store.get_project('study'), before)
 
+    def test_question_ensure_is_atomic_and_never_replaces_existing_or_merged_work(self):
+        self.apply([{'op': 'node.update', 'data': {'id': 'a', 'status': 'completed', 'notes': 'Retained analysis'}}])
+        original = self.store.get_project('study')['nodes'][0]
+        self.apply([{'op': 'node.ensure', 'data': {'id': 'a', 'status': 'active', 'notes': 'Must not overwrite'}},
+                    {'op': 'node.ensure', 'data': {'id': 'new-q', 'kind': 'question', 'title': 'A new question'}}])
+        current = self.store.get_project('study')
+        self.assertEqual(current['nodes'][0], original)
+        self.assertNotEqual(current['nodes'][0]['position'], current['nodes'][1]['position'])
+        self.apply([{'op': 'node.merge', 'data': {'id': 'new-q', 'target': 'a'}},
+                    {'op': 'node.ensure', 'data': {'id': 'new-q', 'title': 'Must not reappear'}}])
+        self.assertEqual(len(self.store.get_project('study')['nodes']), 1)
+
+    def test_ordinary_parent_and_its_children_do_not_overlap_new_top_level_work(self):
+        self.apply([{'op': 'node.update', 'data': {'id': 'a', 'kind': 'question'}},
+                    {'op': 'node.add', 'data': {'id': 'child', 'parentId': 'a'}},
+                    {'op': 'node.add', 'data': {'id': 'other'}}])
+        nodes = self.store.get_project('study')['nodes']
+        self.assertGreaterEqual(nodes[1]['position']['y'], nodes[0]['position']['y'] + 230)
+        for i, first in enumerate(nodes):
+            for second in nodes[i + 1:]:
+                self.assertTrue(abs(first['position']['x'] - second['position']['x']) >= 368 or
+                                abs(first['position']['y'] - second['position']['y']) >= 230)
+        self.assertCode('invalid_request', self.apply, [{'op': 'node.update', 'data': {'id': 'a', 'isContainer': 'yes'}}])
+
+    def test_explicit_container_bounds_include_findings_below_an_ordinary_question(self):
+        self.apply([
+            {'op': 'node.update', 'data': {'id': 'a', 'kind': 'group', 'position': {'x': 0, 'y': 0}}},
+            {'op': 'node.add', 'data': {'id': 'q', 'kind': 'question', 'parentId': 'a', 'position': {'x': 30, 'y': 100}}},
+            {'op': 'node.add', 'data': {'id': 'f', 'kind': 'finding', 'parentId': 'q', 'position': {'x': 30, 'y': 800}}},
+        ])
+        self.add_node('outside')
+        outside = next(node for node in self.store.get_project('study')['nodes'] if node['id'] == 'outside')
+        self.assertGreaterEqual(outside['position']['y'], 800 + 230 + 28)
+
     def test_native_analysis_is_available_in_scoped_context_without_expanding_global_context(self):
         self.add_node('child', 'a')
         self.add_node('other')

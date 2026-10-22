@@ -80,7 +80,7 @@ def cli_calls(command):
             args = args[2:]
         elif args and args[0].startswith('--url='):
             url = args.pop(0).partition('=')[2]
-        if not args or args.pop(0) not in ('execute', 'record'):
+        if not args or args.pop(0) not in ('execute', 'record', 'event'):
             continue
         args = args[:args.index('--')] if '--' in args else args
         supplied = []
@@ -223,7 +223,7 @@ def native_outbox_roots(projects, outboxes, connected, url):
                     project = by_id.get(task.get('projectId'))
                     if project is None or type(task.get('version')) is not int or task['version'] != 1 or task.get('state') != 'synced':
                         continue
-                    if observer_origin(task.get('url')) != origin or task.get('intent', {}).get('command') not in ('record', 'execute'):
+                    if observer_origin(task.get('url')) != origin or task.get('intent', {}).get('command') not in ('record', 'execute', 'event'):
                         continue
                     expected = owner / '.exp-observer-runs' / project['id']
                     capture = Path(task.get('captureRoot', ''))
@@ -233,7 +233,7 @@ def native_outbox_roots(projects, outboxes, connected, url):
                     node_id = aliases.get(task.get('nodeId'), task.get('nodeId'))
                     if node_id not in {node['id'] for node in project['nodes']}:
                         continue
-                    if not any(op.get('op') in ('node.add', 'node.update') and
+                    if not any(op.get('op') in ('node.add', 'node.update', 'node.ensure') and
                                aliases.get(op.get('data', {}).get('id'), op.get('data', {}).get('id')) == node_id
                                for op in task.get('operations', [])):
                         continue
@@ -272,21 +272,28 @@ def active_intervals(project, outboxes, url=None):
             intent = task.get('intent', {}).get('command')
             for operation in task.get('operations', []):
                 data = operation.get('data', {})
-                if operation.get('op') not in ('node.add', 'node.update') or 'status' not in data:
+                operation_kind = operation.get('op')
+                if operation_kind not in ('node.add', 'node.update', 'node.ensure') or 'status' not in data:
                     continue
                 original_id = data.get('id')
                 if aliases.get(original_id, original_id) not in nodes:
                     continue
                 # A completed execute capture does not prove the node was active
                 # during model work before/after the subprocess. Do not invent it.
-                at = task.get('capturedAt') if intent == 'record' else task.get('finishedAt') if intent == 'execute' else None
+                at = task.get('capturedAt') if intent in ('record', 'event') else task.get('finishedAt') if intent == 'execute' else None
                 if at is not None:
-                    events[original_id].append((timestamp(at), data['status']))
+                    events[original_id].append((timestamp(at), operation_kind, data['status']))
     intervals = defaultdict(list)
     for original_id, transitions in events.items():
         node_id = aliases.get(original_id, original_id)
         start = None
-        for at, status in sorted(set(transitions)):
+        seen = False
+        for at, operation_kind, status in sorted(set(transitions)):
+            # Ensure creates once. Later ensures carry frozen creation defaults,
+            # not evidence that an existing/completed question became active.
+            if operation_kind == 'node.ensure' and seen:
+                continue
+            seen = True
             if status == 'active':
                 if start is None:
                     start = at
@@ -322,7 +329,10 @@ def attribute(record, intervals):
 class HostUsageImporter:
     def __init__(self, store, adapters=None, *, interval=5, url=None):
         self.store = store
-        self.adapters = adapters if adapters is not None else [HappySQLiteAdapter(url=url or 'http://127.0.0.1:4317')]
+        if adapters is None:
+            from .execution_usage import CapturedUsageAdapter
+            adapters = [HappySQLiteAdapter(url=url or 'http://127.0.0.1:4317'), CapturedUsageAdapter(store)]
+        self.adapters = adapters
         self.interval = interval
         self.url = url
         self.next_poll = 0
@@ -359,17 +369,22 @@ class HostUsageImporter:
         for adapter in self.adapters:
             try:
                 records = adapter.read(projects)
+                results.extend(getattr(adapter, 'warnings', []))
                 for project in projects:
                     if project['id'] not in records:
                         continue
                     # Recovery supplies only outboxes inside its connected roots.
-                    try:
-                        intervals = active_intervals(project, outboxes, self.url)
-                    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-                        intervals = []
-                        results.append({'projectId': project['id'], 'source': adapter.source, 'pending': True,
-                                        'recordingWarnings': ['Node activity evidence is unavailable; host usage remains unassigned.']})
-                    result = self.store.import_usage_records(project['id'], [attribute(r, intervals) for r in records[project['id']]])
+                    if getattr(adapter, 'direct_attribution', False):
+                        measured = records[project['id']]
+                    else:
+                        try:
+                            intervals = active_intervals(project, outboxes, self.url)
+                        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                            intervals = []
+                            results.append({'projectId': project['id'], 'source': adapter.source, 'pending': True,
+                                            'recordingWarnings': ['Node activity evidence is unavailable; host usage remains unassigned.']})
+                        measured = [attribute(r, intervals) for r in records[project['id']]]
+                    result = self.store.import_usage_records(project['id'], measured)
                     if result['imported'] or result['updated']:
                         results.append({'projectId': project['id'], 'source': adapter.source, **result, 'pending': False})
             except (OSError, sqlite3.Error, StoreError, ValueError, KeyError, TypeError, AttributeError, OverflowError) as exc:

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NodeHostUsage } from "./components/HostUsage";
 import type {
   HostUsageRecord,
   Observation,
@@ -9,6 +12,7 @@ import type {
 import {
   formatDuration,
   formatTokens,
+  formatUsageTime,
   getNodeUsage,
   getProjectHostUsage,
 } from "./usage";
@@ -115,6 +119,97 @@ function hostUsage(
 }
 
 describe("host usage attribution", () => {
+  it("separates scopes even for the same provider/model and prefers agent counters including zero", () => {
+    const p = project([node("a")]);
+    p.usageRecords = [
+      hostUsage("agent", "a", { inputTokens: 0, outputTokens: 0 }),
+      hostUsage("execution", "a", {
+        scope: "execution",
+        inputTokens: 900,
+        outputTokens: 50,
+      }),
+    ];
+    expect(getNodeUsage(p, "a")).toMatchObject({
+      tokenScope: "agent",
+      totalTokens: 0,
+      cacheReadTokens: 80,
+      tokensPartial: false,
+    });
+    expect(getNodeUsage(p, "a").hostUsage).toHaveLength(2);
+    expect(getProjectHostUsage(p)).toMatchObject({
+      inputTokens: 0,
+      outputTokens: 0,
+      models: [
+        { scope: "agent", inputTokens: 0, outputTokens: 0 },
+        { scope: "execution", inputTokens: 900, outputTokens: 50 },
+      ],
+    });
+  });
+
+  it("uses execution counters only when no actual agent counters exist, and retains unknown model/time", () => {
+    const p = project(
+      [node("a")],
+      [
+        observation("timer", "a", 0, 1000, {
+          inputTokens: null,
+          outputTokens: null,
+        }),
+      ],
+    );
+    p.usageRecords = [
+      hostUsage("exec", "a", {
+        scope: "execution",
+        model: "",
+        startedAt: null,
+        finishedAt: null,
+      }),
+    ];
+    expect(getNodeUsage(p, "a")).toMatchObject({
+      tokenScope: "execution",
+      totalTokens: 120,
+      tokensPartial: false,
+      elapsedMs: 1000,
+    });
+    expect(getProjectHostUsage(p)).toMatchObject({
+      inputTokens: null,
+      outputTokens: null,
+      models: [{ scope: "execution", model: "" }],
+    });
+    const html = renderToStaticMarkup(
+      createElement(NodeHostUsage, { records: p.usageRecords }),
+    );
+    expect(html).toContain("被测任务用量，非主研究Agent完整成本");
+    expect(html).toContain("未知模型");
+    expect(html.match(/未提供/g)).toHaveLength(2);
+    expect(html).toContain("exec");
+    expect(html).toContain("缓存读取");
+    expect(html).not.toContain("1970");
+  });
+
+  it("treats manual observations as agent and does not deduplicate against an execution source reference", () => {
+    const p = project(
+      [node("a")],
+      [
+        observation("manual", "a", 0, 1000, {
+          usageSource: "host",
+          usageRef: "same",
+        }),
+      ],
+    );
+    p.usageRecords = [
+      hostUsage("exec", "a", { scope: "execution", sourceRef: "same" }),
+    ];
+    expect(getNodeUsage(p, "a")).toMatchObject({
+      tokenScope: "agent",
+      totalTokens: 15,
+    });
+    p.usageRecords.push(hostUsage("agent", "a", { sourceRef: "same" }));
+    expect(getNodeUsage(p, "a")).toMatchObject({
+      tokenScope: "agent",
+      totalTokens: 120,
+    });
+    expect(getProjectHostUsage(p).recordCount).toBe(2);
+  });
   it("keeps unassigned inferences in project totals and never distributes them to nodes", () => {
     const p = project([node("parent"), node("child", "parent"), node("other")]);
     p.usageRecords = [
@@ -466,6 +561,12 @@ describe("getNodeUsage", () => {
 });
 
 describe("usage formatting", () => {
+  it("keeps absent and invalid host timestamps unknown instead of inventing epoch times", () => {
+    expect([null, undefined, "", "invalid"].map(formatUsageTime)).toEqual(
+      Array(4).fill("未提供"),
+    );
+    expect(formatUsageTime("2026-10-21T10:00:00Z")).not.toBe("未提供");
+  });
   it("formats measured duration with compact units and preserves zero", () => {
     expect([null, 0, 12.25, 1200, 90000, 5400000].map(formatDuration)).toEqual([
       "—",

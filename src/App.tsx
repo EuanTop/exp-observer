@@ -51,6 +51,8 @@ import {
   kinds,
   NODE_SIZE,
   isExecutionRun,
+  isVisualContainer,
+  visualParent,
   toCanvas,
   uid,
   type Artifact,
@@ -318,7 +320,9 @@ export default function App() {
     const n = project?.nodes.find((n) => n.id === id);
     if (!n) return;
     const ancestors = ancestry(project!.nodes, n.id);
-    const hiddenAncestor = ancestors.slice(0, -1).find((a) => a.collapsed);
+    const hiddenAncestor = ancestors
+      .slice(0, -1)
+      .find((a) => isVisualContainer(a) && a.collapsed);
     if (hiddenAncestor) {
       setScope(n.parentId || null);
       setSelected([n.id]);
@@ -378,7 +382,7 @@ export default function App() {
       (n) =>
         !ancestry(p.nodes, n.id)
           .slice(0, -1)
-          .some((a) => movingIds.has(a.id)),
+          .some((a) => movingIds.has(a.id) && isVisualContainer(a)),
     );
     const changes = new Map<string, Operation>();
     for (const root of roots) {
@@ -387,7 +391,10 @@ export default function App() {
       const pos = absolute(root);
       const dx = pos.x - original.position.x,
         dy = pos.y - original.position.y;
-      for (const id of [root.id, ...descendants(p.nodes, root.id)]) {
+      for (const id of [
+        root.id,
+        ...(isVisualContainer(original) ? descendants(p.nodes, root.id) : []),
+      ]) {
         const existing = p.nodes.find((n) => n.id === id)!;
         changes.set(id, {
           op: "node.update",
@@ -409,9 +416,20 @@ export default function App() {
     const dagre = (module.default || module) as any;
     const positions = new Map<string, { x: number; y: number }>();
     const dimensions = new Map<string, { w: number; h: number }>();
+    const layoutNodes = scope
+      ? project.nodes.filter((n) =>
+          descendants(project.nodes, scope).includes(n.id),
+        )
+      : project.nodes;
+    const layoutIds = new Set(layoutNodes.map((n) => n.id));
     const arrange = (parentId: string | null) => {
-      const group = project.nodes.filter((n) => n.parentId === parentId);
-      for (const n of group) arrange(n.id);
+      const group = layoutNodes.filter((n) => {
+        const container = visualParent(project.nodes, n);
+        const parent =
+          container && layoutIds.has(container.id) ? container.id : scope;
+        return parent === parentId;
+      });
+      for (const n of group) if (isVisualContainer(n)) arrange(n.id);
       const g = new dagre.graphlib.Graph();
       g.setGraph({
         rankdir: "TB",
@@ -430,7 +448,9 @@ export default function App() {
           group.some((n) => n.id === e.source) &&
           group.some((n) => n.id === e.target)
         )
-          g.setEdge(e.source, e.target);
+          g.setEdge(e.source, e.target, {
+            weight: e.relation === "recorded_after" ? 0.1 : 2,
+          });
       if (!group.length) return;
       dagre.layout(g);
       for (const n of group) {
@@ -448,8 +468,9 @@ export default function App() {
     const absolute = (id: string): { x: number; y: number } => {
       const n = project.nodes.find((n) => n.id === id)!;
       const pos = positions.get(id) || n.position;
-      if (!n.parentId || n.parentId === scope) return pos;
-      const parent = absolute(n.parentId);
+      const container = visualParent(project.nodes, n);
+      if (!container || !positions.has(container.id)) return pos;
+      const parent = absolute(container.id);
       return { x: parent.x + pos.x, y: parent.y + pos.y };
     };
     const ops = project.nodes
@@ -811,7 +832,10 @@ export default function App() {
                           setEdgeId(null);
                         }}
                         onNodeDoubleClick={(_, n) => {
-                          if (project.nodes.some((c) => c.parentId === n.id))
+                          if (
+                            isVisualContainer(n.data.node) &&
+                            project.nodes.some((c) => c.parentId === n.id)
+                          )
                             enter(n.id);
                         }}
                         onNodeDragStart={() => {

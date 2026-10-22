@@ -28,6 +28,7 @@ export type ResearchNode = {
   tags: string[];
   position: { x: number; y: number };
   collapsed: boolean;
+  isContainer?: boolean;
   createdAt?: string;
   updatedAt?: string;
   [key: string]: unknown;
@@ -114,8 +115,10 @@ export type HostUsageRecord = {
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
-  startedAt: string;
-  finishedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  scope?: "agent" | "execution";
+  timestampScope?: "inference" | "execution";
   attribution?: string;
 };
 export type Project = {
@@ -165,6 +168,8 @@ export const kinds: Record<string, string> = {
   experiment: "实验",
   algorithm: "算法",
   finding: "发现",
+  correction: "纠正",
+  direction: "转向",
   decision: "决策",
   group: "容器",
   reference: "资料",
@@ -181,6 +186,10 @@ export const relations: Record<string, string> = {
   uses: "复用",
   motivates: "触发",
   compares: "对比",
+  has_finding: "发现",
+  has_correction: "纠正",
+  has_direction: "转向",
+  related_to: "关联",
   recorded_after: "后续记录",
 };
 export function descendants(nodes: ResearchNode[], id: string): string[] {
@@ -225,6 +234,25 @@ export type CanvasData = {
   [key: string]: unknown;
 };
 export const NODE_SIZE = { w: 368, h: 230 };
+export function isVisualContainer(node: ResearchNode): boolean {
+  return node.isContainer ?? node.kind === "group";
+}
+
+export function visualParent(
+  nodes: ResearchNode[],
+  node: ResearchNode,
+): ResearchNode | undefined {
+  const seen = new Set<string>();
+  let id = node.parentId;
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    const parent = nodes.find((candidate) => candidate.id === id);
+    if (!parent) return;
+    if (isVisualContainer(parent)) return parent;
+    id = parent.parentId;
+  }
+}
+
 export function toCanvas(
   project: Project,
   scope: string | null,
@@ -241,7 +269,7 @@ export function toCanvas(
   );
   const hidden = new Set<string>();
   for (const n of project.nodes)
-    if (within.has(n.id) && n.collapsed)
+    if (within.has(n.id) && isVisualContainer(n) && n.collapsed)
       for (const id of descendants(project.nodes, n.id)) hidden.add(id);
   const visible = project.nodes.filter(
     (n) => within.has(n.id) && !hidden.has(n.id),
@@ -250,9 +278,11 @@ export function toCanvas(
   const dimensions = new Map<string, { w: number; h: number }>();
   function size(n: ResearchNode): { w: number; h: number } {
     if (dimensions.has(n.id)) return dimensions.get(n.id)!;
-    const children = visible.filter((c) => c.parentId === n.id);
+    const children = visible.filter(
+      (c) => visualParent(project.nodes, c)?.id === n.id,
+    );
     let { w, h } = NODE_SIZE;
-    if (children.length && !n.collapsed) {
+    if (isVisualContainer(n) && children.length && !n.collapsed) {
       w = Math.max(
         330,
         ...children.map((c) => c.position.x - n.position.x + size(c).w + 28),
@@ -274,10 +304,10 @@ export function toCanvas(
     )
     .map((n) => {
       const children = project.nodes.filter((c) => c.parentId === n.id);
+      const ancestor = visualParent(project.nodes, n);
       const parent =
-        n.parentId && visibleIds.has(n.parentId)
-          ? byId.get(n.parentId)
-          : undefined;
+        ancestor && visibleIds.has(ancestor.id) ? ancestor : undefined;
+      const container = isVisualContainer(n);
       const runs = project.runs.filter(
         (r) => r.nodeId === n.id && isExecutionRun(r),
       );
@@ -293,16 +323,17 @@ export function toCanvas(
         selected: selected.includes(n.id),
         dragHandle: ".node-grip",
         style: { width: d.w, height: d.h },
-        zIndex: children.length && !n.collapsed ? 0 : 2,
+        zIndex: container && children.length && !n.collapsed ? 0 : 2,
         data: {
           node: n,
           presentation: nodePresentation(project, n),
           processing: isNodeProcessing(project, n),
           children: children.length,
+          container,
           runs: runs.length,
           latest: project.runs.filter((run) => run.nodeId === n.id).at(-1),
           usage: getNodeUsage(project, n.id),
-          expanded: !!children.length && !n.collapsed,
+          expanded: container && !!children.length && !n.collapsed,
           ...actions,
         },
       } as Node<CanvasData>;
@@ -342,11 +373,20 @@ export function toCanvas(
       type: "research",
       sourceHandle,
       targetHandle,
-      label: e.label || relations[e.relation] || e.relation,
+      label:
+        e.relation === "recorded_after"
+          ? ""
+          : e.label || relations[e.relation] || e.relation,
       style: {
         stroke: e.basis === "hypothesis" ? "#94a3b8" : "#71717a",
-        strokeWidth: 1.4,
-        strokeDasharray: e.basis === "hypothesis" ? "5 5" : undefined,
+        strokeWidth: e.relation === "recorded_after" ? 1 : 1.4,
+        opacity: e.relation === "recorded_after" ? 0.35 : 1,
+        strokeDasharray:
+          e.relation === "recorded_after"
+            ? "3 6"
+            : e.basis === "hypothesis"
+              ? "5 5"
+              : undefined,
       },
       labelStyle: { fill: "var(--muted)", fontSize: 10, fontWeight: 500 },
       labelBgStyle: { fill: "var(--panel)", fillOpacity: 0.95 },
@@ -360,6 +400,7 @@ export function toCanvas(
       },
       data: {
         original: e,
+        orderOnly: e.relation === "recorded_after",
         active:
           project.runs.some(
             (r) =>

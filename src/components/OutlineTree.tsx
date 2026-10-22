@@ -1,6 +1,6 @@
 import { Box, ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useState } from "react";
-import { type ResearchNode } from "../model";
+import { isVisualContainer, type ResearchNode } from "../model";
 
 import { kindIcon, StatusMark } from "./Primitives";
 export function OutlineTree({
@@ -23,7 +23,7 @@ export function OutlineTree({
         .filter((n) => n.parentId === parentId)
         .map((n) => {
           const children = nodes.some((c) => c.parentId === n.id);
-          const Icon = children ? Layers : kindIcon[n.kind] || Box;
+          const Icon = isVisualContainer(n) ? Layers : kindIcon[n.kind] || Box;
           return (
             <div key={n.id}>
               <div

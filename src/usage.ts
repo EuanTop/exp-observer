@@ -6,6 +6,7 @@ import {
 } from "./model";
 
 export type NodeUsage = {
+  tokenScope: "agent" | "execution" | null;
   elapsedMs: number | null;
   elapsedPartial: boolean;
   isRunning: boolean;
@@ -44,7 +45,7 @@ export function hostUsageRecords(project: Project): HostUsageRecord[] {
   return [
     ...new Map(
       (project.usageRecords ?? []).map((record) => [
-        `${record.source}\u0000${record.sourceRef}`,
+        `${record.scope ?? "agent"}\u0000${record.source}\u0000${record.sourceRef}`,
         record,
       ]),
     ).values(),
@@ -73,16 +74,18 @@ export function getProjectHostUsage(project: Project) {
   });
   const groups = new Map<string, HostUsageRecord[]>();
   for (const record of records) {
-    const key = `${record.provider}\u0000${record.model}`;
+    const key = `${record.scope ?? "agent"}\u0000${record.provider}\u0000${record.model}`;
     const group = groups.get(key);
     if (group) group.push(record);
     else groups.set(key, [record]);
   }
   return {
-    ...totals(records),
+    // Legacy top-level counters retain the agent scope, never a mixed cost.
+    ...totals(records.filter((record) => record.scope !== "execution")),
     recordCount: records.length,
     unassignedCount: records.filter((record) => !record.nodeId).length,
     models: [...groups.values()].map((entries) => ({
+      scope: entries[0].scope ?? "agent",
       provider: entries[0].provider,
       model: entries[0].model,
       ...totals(entries),
@@ -93,6 +96,18 @@ export function getProjectHostUsage(project: Project) {
 
 function timestamp(value: unknown): number {
   return typeof value === "string" && value.trim() ? Date.parse(value) : NaN;
+}
+
+export function formatUsageTime(value: string | null | undefined): string {
+  const time = timestamp(value);
+  return Number.isFinite(time)
+    ? new Date(time).toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "未提供";
 }
 
 function intervalUnion(observations: Observation[]): number | null {
@@ -154,28 +169,48 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
     (observation) =>
       !hostUsage.some(
         (record) =>
+          record.scope !== "execution" &&
           record.source === observation.usageSource &&
           record.sourceRef === observation.usageRef,
       ),
   );
+  const agentRecords = hostUsage.filter(
+    (record) => record.scope !== "execution",
+  );
+  const hasAgentCounters = [...tokenObservations, ...agentRecords].some(
+    (record) => counter(record.inputTokens) || counter(record.outputTokens),
+  );
+  const executionRecords = hostUsage.filter(
+    (record) => record.scope === "execution",
+  );
+  const tokenScope =
+    hasAgentCounters || !executionRecords.length
+      ? tokenObservations.length || agentRecords.length
+        ? "agent"
+        : null
+      : "execution";
+  const selectedRecords =
+    tokenScope === "execution" ? executionRecords : agentRecords;
+  const selectedObservations =
+    tokenScope === "execution" ? [] : tokenObservations;
   const inputTokens = sumKnown(
     [
-      ...tokenObservations.map((o) => o.inputTokens),
-      ...hostUsage.map((record) => record.inputTokens),
+      ...selectedObservations.map((o) => o.inputTokens),
+      ...selectedRecords.map((record) => record.inputTokens),
     ],
     counter,
   );
   const outputTokens = sumKnown(
     [
-      ...tokenObservations.map((o) => o.outputTokens),
-      ...hostUsage.map((record) => record.outputTokens),
+      ...selectedObservations.map((o) => o.outputTokens),
+      ...selectedRecords.map((record) => record.outputTokens),
     ],
     counter,
   );
   const totalTokens = sumKnown([inputTokens, outputTokens], counter);
   const observedNodes = new Set([
-    ...observations.map((o) => o.nodeId),
-    ...hostUsage.map((record) => record.nodeId),
+    ...selectedObservations.map((o) => o.nodeId),
+    ...selectedRecords.map((record) => record.nodeId),
   ]);
   const parents = new Set(nodes.map((node) => node.parentId));
   const unobservedWorkedLeaf = nodes.some(
@@ -188,6 +223,7 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
   );
   const isRunning = observations.some((o) => o.status === "running");
   return {
+    tokenScope,
     elapsedMs: intervalUnion(observations),
     elapsedPartial: isRunning,
     isRunning,
@@ -197,10 +233,10 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
     outputTokens,
     totalTokens,
     tokensPartial:
-      tokenObservations.some(
+      selectedObservations.some(
         (o) => !counter(o.inputTokens) || !counter(o.outputTokens),
       ) ||
-      hostUsage.some(
+      selectedRecords.some(
         (record) =>
           !counter(record.inputTokens) || !counter(record.outputTokens),
       ) ||
@@ -208,11 +244,11 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
     observations,
     hostUsage,
     cacheReadTokens: sumKnown(
-      hostUsage.map((record) => record.cacheReadTokens),
+      selectedRecords.map((record) => record.cacheReadTokens),
       counter,
     ),
     cacheWriteTokens: sumKnown(
-      hostUsage.map((record) => record.cacheWriteTokens),
+      selectedRecords.map((record) => record.cacheWriteTokens),
       counter,
     ),
   };

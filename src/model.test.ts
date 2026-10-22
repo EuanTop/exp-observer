@@ -4,6 +4,7 @@ import {
   effectiveAssessments,
   toCanvas,
   validateProject,
+  NODE_SIZE,
   type Project,
   type ResearchNode,
 } from "./model";
@@ -41,6 +42,71 @@ const p = (nodes: ResearchNode[], edges: any[] = []): Project => ({
 });
 const actions = { onToggle: () => {}, onEnter: () => {} };
 describe("nested research graph", () => {
+  it("keeps ordinary questions as cards even when they have logical children", () => {
+    const question = { ...n("q"), kind: "question", collapsed: true };
+    const finding = {
+      ...n("f", "q"),
+      kind: "finding",
+      position: { x: 10, y: 350 },
+    };
+    const project = p([question, finding]);
+    const canvas = toCanvas(project, null, [], actions);
+    expect(canvas.nodes[0].data).toMatchObject({
+      container: false,
+      expanded: false,
+      children: 1,
+    });
+    expect(canvas.nodes[0].style).toMatchObject({
+      width: NODE_SIZE.w,
+      height: NODE_SIZE.h,
+    });
+    expect(canvas.nodes[1].parentId).toBeUndefined();
+    expect(canvas.nodes[1].position).toEqual(finding.position);
+    expect(project.nodes[1].parentId).toBe("q");
+  });
+  it("uses only explicit containers for visual parents and preserves custom node kinds", () => {
+    const group = { ...n("group"), kind: "question", isContainer: true };
+    const question = { ...n("q", "group"), kind: "question" };
+    const finding = { ...n("f", "q"), kind: "finding" };
+    const canvas = toCanvas(p([group, question, finding]), null, [], actions);
+    expect(
+      canvas.nodes.find((node) => node.id === "group")?.data.expanded,
+    ).toBe(true);
+    expect(canvas.nodes.find((node) => node.id === "f")?.parentId).toBe(
+      "group",
+    );
+    expect(canvas.nodes.find((node) => node.id === "q")?.data.container).toBe(
+      false,
+    );
+    const plainGroup = toCanvas(
+      p([{ ...n("a"), isContainer: false }, n("b", "a")]),
+      null,
+      [],
+      actions,
+    );
+    expect(plainGroup.nodes[0].data.expanded).toBe(false);
+    expect(plainGroup.nodes[1].parentId).toBeUndefined();
+  });
+  it("keeps capture order faint and unlabelled without inventing scientific relationships", () => {
+    const project = p(
+      [n("a"), n("b")],
+      [
+        {
+          id: "order",
+          source: "a",
+          target: "b",
+          relation: "recorded_after",
+          label: "记录顺序",
+          basis: "observed",
+        },
+      ],
+    );
+    const edge = toCanvas(project, null, [], actions).edges[0];
+    expect(edge.label).toBe("");
+    expect(edge.style?.opacity).toBeLessThan(0.5);
+    expect(edge.data?.orderOnly).toBe(true);
+    expect(project.edges[0].relation).toBe("recorded_after");
+  });
   it("folds descendants while preserving cross-boundary relationships", () => {
     const project = p(
       [n("a", null, true), n("b", "a"), n("c", "b"), n("d")],

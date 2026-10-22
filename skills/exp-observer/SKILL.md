@@ -19,29 +19,27 @@ For a new experiment without an ID, prepare it once:
 python3 <skill>/scripts/exp_observer.py init --name "Research task"
 ```
 
-Keep the returned ID across conversations. This works offline; `record --project ID` can also prepare a missing project without `init`.
+Keep the returned ID across conversations. This works offline; `event --project ID` can also prepare a missing project without `init`.
 
 ## Record at natural boundaries
 
-Briefly retain findings and changed judgments using existing results and wording. Routine steps need no separate record.
+Use `event` to retain actual research changes in the research's own wording. The client manages identities and references; no node numbering or predetermined script-to-finding mapping is needed.
 
 ```sh
-python3 <skill>/scripts/exp_observer.py record --project ID --title "Observed finding" --summary "Evidence and implication"
+python3 <skill>/scripts/exp_observer.py event --project ID --question "What affects confirmation time?" --finding "Navigation backtracking offsets part of the gain"
 ```
 
-Use a short title for the question, work or finding. In the summary, briefly retain why the work mattered, what was tried or what changed, when known. Reuse the research's own wording; no fixed template is required. `--conclusion TEXT` retains a distinct conclusion when one exists; omitting it preserves any existing conclusion. `--kind TYPE` can identify a question, experiment, finding or decision naturally. `--node NODE` revises the same research question; completion is `--status completed`, not a separate status-only finding.
+`--question` alone opens a meaningful question as active; optional `--reason` explains why it matters. Its exact title or a retained ID reuses that question, including across ancestor queues and retained context. Titles are not matched approximately. Findings need no prior opening call: the same invocation can retain both a new question and its first finding.
 
-Retain substantially different research questions, findings and follow-up judgments separately, even when one script or batch produced them. Command boundaries do not define research units. Repeated measurements or added evidence for the same question can update its existing record; routine chatter needs no record. Do not invent phases or fill a node quota.
+Use `--finding`, `--correction` or `--direction` for a substantive discovery, corrected judgment or changed direction. Each is a separate ordinary node linked to the stated question; earlier findings remain intact. `--after "Earlier finding title"` relates a change to a retained finding, defaulting to `revises` for a correction, `leads_to` for a direction or `related_to` for a finding; `--relation supports` can explicitly state support. No causal relationships are inferred from prose or recording order.
 
-When turning to a substantially new research question, briefly retain that question and the reason for pursuing it as `active`. When evidence returns, update the same question's conclusion and actual status; mark finished work `completed` or deliberately parked work `paused` when appropriate. These are changes in the research itself, not check-ins before and after every tool call.
+Retain different discoveries even when one script produced them. Repeat measurements of the same question reuse its identity; routine steps need no event. Use `event --question "Exact question" --status completed` or `paused` for actual question status. Do not invent stages, fill a node quota or create completion-only findings.
 
 ## Keep analysis in the experiment
 
 When using Observer, the default home for conclusions and analysis is the platform's native `summary`, `conclusion` and `notes` fields. Do not also create `REPORT.md`, a summary-style README or a separate conclusion report unless the user explicitly asks for that document. Scripts, original data and images remain local evidence.
 
-Use `record --notes TEXT` for full reasoning, comparisons and limitations. `--notes-file PATH` loads existing UTF-8 analysis verbatim into native node notes; `--notes-file -` reads stdin, so long analysis needs no separate report file. These options retain metadata, not an extra evidence attachment. Omitted notes preserve existing notes.
-
-Record order is automatic and implies no causality. For an actual scientific relationship, use `--after "Earlier finding title" --relation supports` (or `refutes`, `revises`); exact local titles or IDs work.
+Use `event --notes TEXT` for full reasoning, comparisons and limitations. `--notes-file PATH` loads existing UTF-8 analysis verbatim; `--notes-file -` reads stdin. Notes belong to the supplied change, or to the question when no change is supplied. They supplement the visible finding rather than hiding distinct discoveries in a shared script node. Omitted notes preserve existing notes.
 
 Attach existing JSON with `--metrics-file results.json --artifact results.json`. Nested values are preserved; other root types use `result`. Files stay unchanged.
 
@@ -51,11 +49,13 @@ For an existing command you want captured:
 python3 <skill>/scripts/exp_observer.py execute --project ID --title "Actual command" -- python3 experiment.py
 ```
 
-This captures timing, exit code and stdout/stderr. Add `--artifact PATH` for result files or `--node NODE` for existing work. Update its returned `nodeId` for that same question's finding. If the command also answers distinct questions, record those separately using the existing outputs; never rerun it just to split the records.
+This captures timing, exit code and stdout/stderr independently of future findings. Add `--artifact PATH` for results. `event --evidence "Actual command"` links an actual finding to that captured evidence; several findings can reuse it. For repeated measurements, `execute --question "Exact question" --title "Actual measurement" -- COMMAND...` retains another run of the same question. Never rerun work just to split its findings.
+
+The older `record` entry remains available for direct edits. Its `--node` option replaces supplied fields on that node; use `event` for a new finding or correction.
 
 ## Let recording recover separately
 
-Call the client even offline: result files alone do not queue records. `init`, `record` and `execute` save locally; the application reads connected research directories, including new experiment subdirectories. No global-directory write is needed. Pending means saved locally, awaiting registration. Continue without polling.
+Call the client even offline: result files alone do not queue records. `init`, `event`, `record` and `execute` save locally; the application reads connected research directories, including new experiment subdirectories. No global-directory write is needed. Pending means saved locally, awaiting registration. Continue without polling.
 
 The command's exit status describes the experiment; `pending` and `recordingWarnings` describe recording. If the host blocks client execution or local saving fails, continue and report recording unavailable; do not claim it was queued.
 

@@ -648,62 +648,60 @@ p {
     0 0 0 1px #2563eb20,
     0 8px 25px #0002;
 }
-@property --processing-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
 @keyframes processing-border-flow {
   to {
-    --processing-angle: 360deg;
+    stroke-dashoffset: -100;
   }
 }
 .research-node.is-processing {
-  border-color: transparent;
   isolation: isolate;
 }
-.research-node.is-processing::before,
-.research-node.is-processing::after {
-  content: "";
+.processing-outline {
   position: absolute;
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  overflow: visible;
   pointer-events: none;
-  background: conic-gradient(
-    from var(--processing-angle),
-    #7acddd4d 0deg,
-    #419ce1 55deg,
-    #42c8d0 110deg,
-    #32bb99 165deg,
-    #68d6b4 215deg,
-    #50add9 270deg,
-    #7acddd4d 325deg,
-    #7acddd4d 360deg
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: processing-border-flow 7s linear infinite;
+  border-radius: inherit;
+  z-index: 1;
 }
-.research-node.is-processing::before {
-  inset: -1.5px;
-  border-radius: 15px;
-  padding: 1.8px;
+.processing-outline rect {
+  x: 1px;
+  y: 1px;
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
+  rx: 12px;
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
 }
-.research-node.is-processing::after {
-  inset: -6px;
-  border-radius: 19px;
-  padding: 6px;
-  opacity: 0.32;
-  filter: blur(7px);
+.processing-outline-track {
+  stroke: #58bdc54d;
+}
+.processing-outline-blue,
+.processing-outline-green {
+  stroke-linecap: round;
+  animation: processing-border-flow 4s linear infinite;
+}
+.processing-outline-blue {
+  stroke: #419ce1;
+  stroke-dasharray: 16 84;
+  filter: drop-shadow(0 0 3px #419ce199);
+}
+.processing-outline-green {
+  stroke: #32bb99;
+  stroke-dasharray: 12 88;
+  animation-delay: -2s;
+  filter: drop-shadow(0 0 3px #32bb9999);
 }
 @media (prefers-reduced-motion: reduce) {
-  .research-node.is-processing::before,
-  .research-node.is-processing::after {
+  .processing-outline-blue,
+  .processing-outline-green {
     animation: none;
+  }
+  .processing-outline-green {
+    stroke-dashoffset: -50;
   }
 }
 .research-node.is-critical {

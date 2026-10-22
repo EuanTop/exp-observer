@@ -1,7 +1,11 @@
 import { Clock3, Play, Square } from "lucide-react";
-import { getNodeUsage, formatDuration, formatTokens } from "../usage";
+import {
+  getNodeUsage,
+  formatDuration,
+  formatTokens,
+  formatUsageTime,
+} from "../usage";
 import { uid, type Operation, type Project, type ResearchNode } from "../model";
-import { date } from "./Primitives";
 import { NodeHostUsage } from "./HostUsage";
 
 export function NodeUsagePanel({
@@ -39,6 +43,11 @@ export function NodeUsagePanel({
           <strong>{formatTokens(usage.outputTokens)}</strong>
         </div>
       </div>
+      <p className="usage-scope">
+        {usage.tokenScope === "execution"
+          ? "被测任务用量，非主研究Agent完整成本"
+          : "关联会话用量（含手工记录）；与被测任务用量分开列示，不相加"}
+      </p>
       <div className="usage-scope">
         <span>
           {children
@@ -96,8 +105,9 @@ export function NodeUsagePanel({
             <span>输出 {formatTokens(o.outputTokens)}</span>
           </div>
           <div className="observation-meta">
-            <time>{date(o.startedAt)}</time>
+            <time>{formatUsageTime(o.startedAt)}</time>
             <span>{o.usageSource || "Token 未采集"}</span>
+            {o.usageRef && <span>{o.usageRef}</span>}
           </div>
           {o.nodeId === node.id && o.status === "running" && (
             <button

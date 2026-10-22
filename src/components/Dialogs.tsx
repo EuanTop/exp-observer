@@ -440,6 +440,7 @@ export function CreateDialog({
               id,
               title,
               kind: "group",
+              isContainer: true,
               status: "active",
               summary,
               parentId: commonParent,

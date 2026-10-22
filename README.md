@@ -30,7 +30,7 @@ The default workspace includes a synthetic demo. Add `--no-demo` for an empty wo
 
 ## Work in the graph
 
-- **Compose research.** Any node kind can contain child nodes. Collapse, expand, focus, group, move and connect them. Containment and research relationships are separate.
+- **Compose research.** Any node kind can have child nodes. Ordinary parents remain cards; explicit containers frame nested work (`isContainer: true`, default for `group`). Collapse, expand, focus, group, move and connect them. Containment and research relationships are separate.
 - **Keep execution and interpretation together.** Runs retain configuration, events, metrics and outputs. Assessments and decisions link back to evidence; revised interpretations preserve earlier records.
 - **Compare alternatives.** Inspect configuration differences and effective or historical assessments under a selected rubric.
 - **Read the evidence.** Register local files, retain verified copies, and inspect images, JSON, CSV or text alongside the graph.
@@ -72,19 +72,21 @@ python3 skills/exp-observer/scripts/exp_observer.py context --project my-study -
 
 `init` saves the experiment's identity locally before contacting the service, so a new experiment can begin offline. `context` distinguishes available records, dated cached context and an unavailable service. Reading context is not a condition for continuing research. Use `projects` to list experiments when the service is running.
 
-Record an existing result with one call. An explicit project ID can also prepare a missing project without a separate `init`. The client supplies IDs and references; the platform places the node:
+Retain an actual finding with one call. An explicit project ID can also prepare a missing project without a separate `init`. The client supplies IDs and references; the platform places the nodes:
 
 ```sh
-python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
-  --title 'Observed result' --summary 'Evidence and implication' \
+python3 skills/exp-observer/scripts/exp_observer.py event --project my-study \
+  --question 'What affects delivery time?' --finding 'Verification adds to delivery time' \
   --metrics-file results.json --artifact results.json
 ```
 
-Use a short title for the question, work or finding; `--conclusion TEXT` adds a distinct conclusion displayed on its card. Use `--node NODE_ID` to revise the same work, including a finding from a captured command. Completion belongs to that work's status rather than a separate completion node. New records retain capture order automatically, clearly labeled as record order. For an actual scientific relationship, `--after 'Earlier finding title' --relation supports` accepts an exact local title or ID; `--independent` omits ordinary order. `--parent NODE_ID` groups related work. Nested metrics remain intact, including arrays, nulls and empty containers. Non-object result JSON uses `result`; files stay unchanged. Text-only updates create no run.
+`event --question TEXT` alone opens an active question; optional `--reason` explains why it matters. Its exact title or retained ID reuses that question from local and ancestor queues or retained context. Each `--finding`, `--correction` or `--direction` creates a separate ordinary node, preserving earlier outcomes. The same call can create a question and its first finding. Titles are matched exactly, not approximately; ambiguous titles require an ID.
 
-Retain substantially different questions and findings separately, even when one script answers them together. Record a new question as `active` when pursuing it, then update its evidence, conclusion and actual status. Repeated measurements of that question can revise the same record. Node count is not a target; a final summary does not establish an unrecorded research chronology.
+Use `--after 'Earlier finding title'` to relate a change to an existing finding: defaults are `related_to`, `revises` for a correction and `leads_to` for a direction; `--relation supports` can state support explicitly. Repeated `--evidence 'Captured command title'` links retained evidence to the finding. Question associations do not imply causality, and `event` adds no record-order edges. Legacy `record` and standalone captures can retain `recorded_after`: the graph shows these as faint dashed lines, without scientific labels or flow animation. Scientific relationships remain explicit.
 
-Full analysis belongs in native `notes`: use `--notes TEXT` or `--notes-file -` to read UTF-8 text from stdin. The Skill defaults to retaining analysis in the experiment, with no separate Markdown report unless the user requests one. Original data, scripts and images remain local evidence.
+Retain substantially different discoveries separately, even when one script produces them. Repeated measurements reuse the question. Use `event --question 'Exact question' --status completed` or `paused` for its actual status; completion needs no separate finding. Node count is not a target. The older `record --node NODE_ID` remains available for deliberate field edits.
+
+Full analysis belongs in native `notes`: use `--notes TEXT` or `--notes-file -` to read UTF-8 text from stdin. Notes attach to the supplied change, or to the question when no change is supplied. The Skill defaults to retaining analysis in the experiment, with no separate Markdown report unless the user requests one. Nested metrics remain intact, including arrays, nulls and empty containers; non-object result JSON uses `result`. Original data, scripts and images remain local evidence. Text-only events create no run.
 
 Capture a real command and its result files with one call:
 
@@ -94,9 +96,9 @@ python3 skills/exp-observer/scripts/exp_observer.py execute \
   --artifact results.json --artifact timing.csv -- python3 experiment.py
 ```
 
-The wrapper supplies a record ID and captures the actual command's exit code, wall time, stdout/stderr and requested files with **zero extra model calls**. Use `--node NODE_ID` to attach an existing record. Recording does not prescribe experimental phases, methods, measurements or deliverables. Agents leave brief updates when the research already changes a judgment or direction; coordinates, IDs and display formatting belong to the platform.
+The wrapper supplies a record ID and captures the actual command's exit code, wall time, stdout/stderr and requested files with **zero extra model calls**. Use `event --evidence 'Evaluate candidate A'` with each actual finding to reuse this evidence. For repeated measurements, `execute --question 'Exact question' --title 'Actual measurement' -- COMMAND...` adds a run to the same question without creating a finding. `--node NODE_ID` also attaches an existing record. Never rerun work just to split its findings. Recording does not prescribe experimental phases, methods, measurements or deliverables. Agents leave brief updates when the research already changes a judgment or direction; coordinates, IDs and display formatting belong to the platform.
 
-`init`, `record` and `execute` save pending work inside the working directory. The application discovers queues within connected research directories, including newly created experiment subdirectories and when starting after offline research. Clients need no global-registry write. The application submits only queues for its own loopback address and never follows directory links outside the connected root. A successful experiment remains successful even when recording is unavailable. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths. Optional manual `sync` runs from the original working directory. Recovery never reruns an experiment or rereads changed source evidence.
+`init`, `event`, `record` and `execute` save pending work inside the working directory. The application discovers queues within connected research directories, including newly created experiment subdirectories and when starting after offline research. Clients need no global-registry write. The application submits only queues for its own loopback address and never follows directory links outside the connected root. A successful experiment remains successful even when recording is unavailable. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths. Optional manual `sync` runs from the original working directory. Recovery never reruns an experiment or rereads changed source evidence.
 
 The client must run to queue a record: result files alone are not queued. If the host blocks client execution or writes inside its working directory, recording is unavailable. Research continues. Connect directories during application setup, separately from the research task. The application still supports older clients' recovery registries (`EXP_OBSERVER_STATE_DIR` overrides their location); new clients do not depend on that registry. Installing the Skill grants no sandbox permissions or system service.
 
@@ -127,6 +129,10 @@ The server records start/finish times and elapsed wall time, including waits. An
 The interface aggregates a node and its contained descendants. Finished time intervals are combined by union, so parent timers and parallel work do not double-count elapsed time; running steps remain marked in progress. Command execution wall time is shown separately. Token totals include known counters and show partial coverage when counters or worked leaf observations are missing; semantic links and reused decision evidence do not add usage.
 
 When running under Happy, an optional read-only adapter can import measured inference usage from the local host database. It associates actual client invocations with research records and attributes an inference to a node only when its measured interval fits one unambiguous recorded active interval. Unassigned usage stays at the associated-conversation level. Input, output and cache counts retain the host's raw values; cache counts are displayed separately. Agents need not maintain counters. This adapter depends on an internal host format; missing or unsupported host data leaves usage unknown and does not block recording.
+
+Captured tasks can also supply measured usage automatically. For a Codex task already needed by the research, `execute ... -- codex exec --json 'Task prompt'` retains its native JSONL stdout. The importer reads completed-turn counters from a valid stream beginning with `thread.started`, tied to the observed command run. Alternatively, a tool can emit the explicit `expObserverUsage` v1 protocol in retained JSON, stream events or run metrics. Arbitrary nested `tokens` or `usage` metrics are never mined for counters. See the [execution usage contract](docs/contract.md#captured-execution-usage) for framing, identities and limits.
+
+The interface lists **captured task usage** (`execution`) separately from **associated agent usage** (`agent`); it does not add the two scopes. Captured task counters do not measure the main research agent's full cost. Native Codex logs leave model identity unknown; displayed timestamps are the containing execution's bounds, not measured turn times. Missing model, timestamps or counters stay unknown rather than being inferred from prompts, command arguments or registration time.
 
 ## Your records stay local
 

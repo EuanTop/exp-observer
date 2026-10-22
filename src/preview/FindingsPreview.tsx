@@ -144,6 +144,7 @@ const edges: Edge[] = links.map(
 );
 
 const mockUsage: NodeUsage = {
+  tokenScope: "agent",
   elapsedMs: 42_000,
   elapsedPartial: false,
   isRunning: false,

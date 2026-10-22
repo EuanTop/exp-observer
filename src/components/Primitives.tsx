@@ -3,9 +3,11 @@ import {
   CheckCircle2,
   FileText,
   FlaskConical,
+  GitBranch,
   Layers,
   Lightbulb,
   ListTree,
+  RotateCcw,
   Target,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -17,6 +19,8 @@ export const kindIcon: Record<string, typeof Target> = {
   experiment: FlaskConical,
   algorithm: Braces,
   finding: Lightbulb,
+  correction: RotateCcw,
+  direction: GitBranch,
   decision: CheckCircle2,
   group: Layers,
   reference: FileText,

@@ -186,6 +186,7 @@ export function NodeInspector({
             notes: draft.notes,
             nextAction: draft.nextAction,
             parentId: draft.parentId,
+            isContainer: draft.isContainer ?? draft.kind === "group",
             tags:
               typeof draft.tags === "string"
                 ? (draft.tags as string).split(",")
@@ -302,6 +303,25 @@ export function NodeInspector({
           <>
             {editing ? (
               <div className="edit-fields">
+                <label>
+                  显示方式
+                  <select
+                    value={
+                      (draft.isContainer ?? draft.kind === "group")
+                        ? "container"
+                        : "node"
+                    }
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        isContainer: e.target.value === "container",
+                      })
+                    }
+                  >
+                    <option value="node">普通节点</option>
+                    <option value="container">容器分组</option>
+                  </select>
+                </label>
                 <label>
                   节点重要性
                   <select

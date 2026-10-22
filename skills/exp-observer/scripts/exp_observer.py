@@ -112,6 +112,25 @@ def parser():
     record.add_argument('--metrics-file', help='UTF-8 JSON; nested objects are preserved and other root values use a result key')
     record.add_argument('--artifact', action='append', default=[])
     record.add_argument('--request-id', help='Stable identifier for retries of this record')
+    event = commands.add_parser('event', help='Retain a question, finding, correction or change of direction; manage identities automatically')
+    event.add_argument('--project', required=True)
+    event.add_argument('--question', required=True, help='Natural question, or an exact retained question title/ID; the same wording reuses its identity')
+    event.add_argument('--reason', help='Why pursue this question or retain this change')
+    change = event.add_mutually_exclusive_group()
+    change.add_argument('--finding', help='A substantive finding, retained as its own event')
+    change.add_argument('--correction', help='A corrected judgment, retained separately from the earlier finding')
+    change.add_argument('--direction', help='A change in research direction, retained as its own event')
+    event.add_argument('--after', help='Earlier finding title or ID that this event relates to')
+    event.add_argument('--relation', help='Meaning of --after (default: revises for correction, leads_to for direction, related_to for finding)')
+    event.add_argument('--evidence', action='append', default=[], help='Execution/evidence node title or ID supporting this event; repeat as needed')
+    analysis = event.add_mutually_exclusive_group()
+    analysis.add_argument('--notes', help='Full native analysis for this event, or for the question when no event is supplied')
+    analysis.add_argument('--notes-file', help='UTF-8 native analysis; - reads stdin')
+    event.add_argument('--status', help='Actual question status; omitted status preserves an existing question')
+    event.add_argument('--metrics-file', help='Existing measurement JSON; retain its values without rerunning work')
+    event.add_argument('--artifact', action='append', default=[])
+    event.add_argument('--request-id', help='Stable retry identity; reuse for delivery retries of this same event')
+    event.set_defaults(node=None)
     sync = commands.add_parser('sync', help='Retry local pending records without executing experiments')
     sync.add_argument('--project', help='Only sync this project')
     status_command = commands.add_parser('status', help='Read current durable queue receipts locally, without HTTP or polling')
@@ -154,6 +173,7 @@ def parser():
             cmd.add_argument('--output', help='Save original range bytes to this file instead of printing text')
         if command == 'execute':
             cmd.add_argument('--title', required=True)
+            cmd.add_argument('--question', help='Exact research question title/ID; retain a run of that question without creating a finding')
             cmd.add_argument('--after', help='Related node ID or exact locally recorded title')
             cmd.add_argument('--relation', default='leads_to')
             cmd.add_argument('--independent', action='store_true', help='Omit the automatic record-order connection')
@@ -418,7 +438,7 @@ def local_context(outbox, client, project_id, node_id=None):
                 project = {'metadata': task['project'], 'preparedAt': task['preparedAt'], 'state': task['state']}
             else:
                 record = {key: task[key] for key in
-                          ('requestId', 'nodeId', 'runId', 'state', 'capturedAt', 'startedAt', 'finishedAt') if key in task}
+                          ('requestId', 'nodeId', 'questionId', 'eventType', 'runId', 'state', 'capturedAt', 'startedAt', 'finishedAt') if key in task}
                 record['localTaskPath'] = str(path.resolve())
                 record['operations'] = []
                 for index, operation in enumerate(task.get('operations', [])):
@@ -432,10 +452,10 @@ def local_context(outbox, client, project_id, node_id=None):
                                 detail[field + 'Truncated'] = True
                     if isinstance(data.get('notes'), str):
                         detail.update({'notes': data['notes'], 'hasNotes': bool(data['notes'])})
-                    if operation['op'] in ('node.add', 'node.update') and isinstance(data.get('id'), str):
+                    if operation['op'] in ('node.add', 'node.update', 'node.ensure') and isinstance(data.get('id'), str):
                         fields = ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'notes')
                         node_updates.append(((task.get('capturedAt') or task.get('startedAt') or '', path.name, index),
-                                             {key: data[key] for key in fields if key in data}))
+                                             operation['op'], {key: data[key] for key in fields if key in data}))
                     record['operations'].append(detail)
                 record['artifactCount'] = len(task.get('artifacts', []))
                 records.append(record)
@@ -445,8 +465,11 @@ def local_context(outbox, client, project_id, node_id=None):
     # Fold all local updates before applying the receipt window: an old notes
     # operation can remain current after many later summary-only revisions.
     nodes = {}
-    for _, update in sorted(node_updates, key=lambda entry: entry[0]):
-        nodes.setdefault(update['id'], {}).update(update)
+    for _, operation, update in sorted(node_updates, key=lambda entry: entry[0]):
+        if operation == 'node.ensure':
+            nodes.setdefault(update['id'], update)
+        else:
+            nodes.setdefault(update['id'], {}).update(update)
     scoped = {node_id} if node_id else set()
     if node_id:
         changed = True
@@ -517,6 +540,7 @@ def context(client, args):
         result['localPending'] = pending[-20:]
         result['localPendingCount'] = len(pending)
         pending_ids = {record.get('nodeId') for record in pending}
+        pending_ids.update(record['questionId'] for record in pending if record.get('questionId'))
         result['localPendingNodes'] = [node for node in local_nodes if node['id'] in pending_ids]
     emit(result)
     return 0
@@ -579,7 +603,7 @@ def local_nodes(client, outbox, project_id, exclude=None):
                     continue
                 at = task.get('capturedAt') or task.get('finishedAt') or task.get('startedAt') or ''
                 for operation in task.get('operations', []):
-                    if operation.get('op') not in ('node.add', 'node.update'):
+                    if operation.get('op') not in ('node.add', 'node.update', 'node.ensure'):
                         continue
                     data = operation['data']
                     entry = {'id': data['id'], 'title': data.get('title', ''), 'at': at}
@@ -752,6 +776,9 @@ def task_result(task, warnings=()):
     for field in ('exitCode', 'wallTimeMs', 'startedAt', 'finishedAt', 'capturedAt'):
         if field in task:
             result[field] = task[field]
+    for field in ('questionId', 'eventType'):
+        if field in task:
+            result[field] = task[field]
     if task['intent']['command'] == 'execute' and task.get('captureAvailable', True):
         directory = Path(task['captureRoot']) / task['taskId']
         result['stdoutPath'] = str(directory / 'stdout.txt')
@@ -762,7 +789,7 @@ def task_result(task, warnings=()):
     return result
 
 
-def record(client, args):
+def capture_inputs(args):
     notes = args.notes
     notes_error = None
     if args.notes_file is not None:
@@ -784,6 +811,11 @@ def record(client, args):
         except (OSError, ValueError) as exc:
             metrics = {}
             metrics_warning = f'Metrics could not be decoded; retaining the original file as evidence when available: {exc}'
+    return notes, notes_error, metrics, metrics_warning
+
+
+def record(client, args):
+    notes, notes_error, metrics, metrics_warning = capture_inputs(args)
     intent = {'command': 'record', **{key: getattr(args, key) for key in
               ('title', 'summary', 'conclusion', 'kind', 'node', 'after', 'relation', 'independent', 'parent', 'status', 'artifact')},
               'notes': notes, 'notesFile': args.notes_file,
@@ -829,6 +861,143 @@ def record(client, args):
             task['operations'].append({'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
                 'title': args.title, 'status': 'completed', 'startedAt': None, 'finishedAt': None, 'capturedAt': at,
                 'metrics': metrics, 'origin': 'observed', 'configuration': {'capturedExternalResult': True}}})
+        persist_task(path, task)
+        artifacts = list(args.artifact)
+        if metrics_warning and args.metrics_file not in artifacts:
+            artifacts.append(args.metrics_file)
+        for index, requested in enumerate(artifacts):
+            stage_artifact(task, requested, Path(requested).name, directory / (str(index) + '-' + Path(requested).name))
+        task['state'] = 'ready'
+        persist_task(path, task)
+        emit(sync_task(client, path, task))
+    return 0
+
+
+def semantic_nodes(client, outbox, project_id, exclude=None):
+    """Resolve exact references from retained context and ancestor queues only."""
+    nodes = {}
+    key = hashlib.sha256(json.dumps([client.url, project_id, None], ensure_ascii=False).encode('utf-8')).hexdigest()
+    for directory in reversed(list(ancestor_outboxes(outbox, client.queue_root))):
+        try:
+            cached = json.loads((directory.parent / 'context' / (key + '.json')).read_text(encoding='utf-8'))
+            for node in cached['context']['nodes']:
+                if isinstance(node.get('id'), str) and isinstance(node.get('title'), str):
+                    nodes[node['id']] = {'id': node['id'], 'title': node['title']}
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+    for node in local_nodes(client, outbox, project_id, exclude=exclude):
+        nodes[node['id']] = node
+    return list(nodes.values())
+
+
+def exact_reference(nodes, value):
+    by_id = [node for node in nodes if node['id'] == value]
+    if by_id:
+        return by_id[0]
+    matches = [node for node in nodes if node['title'] == value]
+    if len(matches) > 1:
+        raise ClientError('Reference title is ambiguous; use an existing ID: ' + value)
+    return matches[0] if matches else None
+
+
+def semantic_question(client, outbox, project_id, text, exclude=None):
+    title = text.strip()
+    if not title:
+        raise ClientError('A research question must be nonempty.')
+    nodes = semantic_nodes(client, outbox, project_id, exclude=exclude)
+    existing = exact_reference(nodes, title)
+    if existing is None:
+        key = hashlib.sha256(json.dumps([client.url, project_id, title], ensure_ascii=False).encode('utf-8')).hexdigest()[:32]
+        existing = {'id': 'question-' + key, 'title': title}
+    question = {key: existing[key] for key in ('id', 'title')}
+    return question | {'kind': 'question', 'status': 'active'}, nodes
+
+
+def event(client, args):
+    question_text = args.question.strip()
+    if not question_text:
+        raise ClientError('event requires a nonempty research question.')
+    event_type = next((kind for kind in ('finding', 'correction', 'direction') if getattr(args, kind) is not None), None)
+    change = getattr(args, event_type) if event_type else None
+    if change is not None and not change.strip():
+        raise ClientError('A research change must contain its actual finding, correction or direction.')
+    if args.relation and not args.after:
+        raise ClientError('--relation requires an explicit --after reference.')
+    if args.after and not event_type:
+        raise ClientError('--after relates a finding, correction or direction; supply that change.')
+    notes, notes_error, metrics, metrics_warning = capture_inputs(args)
+    intent = {'command': 'event', **{key: getattr(args, key) for key in
+              ('question', 'reason', 'finding', 'correction', 'direction', 'after', 'relation', 'evidence', 'status', 'artifact')},
+              'notes': notes, 'notesFile': args.notes_file,
+              'metrics': metrics, 'hasMetrics': args.metrics_file is not None and metrics_warning is None,
+              'metricsFile': args.metrics_file}
+    path, task = task_identity(client, args, intent)
+    if notes_error is not None and (not args.request_id or not path.is_file()):
+        raise notes_error
+    if not intent['hasMetrics']:
+        task['runId'] = None
+    with task_lock(path):
+        existing = load_existing(path, task, frozen_notes=notes_error is not None)
+        if existing:
+            emit(sync_task(client, path, existing))
+            return 0
+        if notes_error is not None:
+            raise notes_error
+        question, nodes = semantic_question(client, path.parent, args.project, question_text, exclude=path)
+        if args.reason is not None:
+            question['summary'] = args.reason
+        task.update(questionId=question['id'], eventType=event_type or 'question', capturedAt=stamp(), status='recorded')
+        if metrics_warning:
+            task['recordingWarnings'].append(metrics_warning)
+        task['operations'] = [{'op': 'node.ensure', 'data': question}]
+        if event_type:
+            node = {'id': task['nodeId'], 'title': change, 'kind': event_type, 'status': 'completed',
+                    'conclusion': change, 'createdAt': task['capturedAt']}
+            if args.reason is not None:
+                node['summary'] = args.reason
+            if notes is not None:
+                node['notes'] = notes
+            task['operations'].append({'op': 'node.add', 'data': node})
+            task['operations'].append({'op': 'edge.add', 'data': {
+                'id': 'edge-' + task['taskId'] + '-question', 'source': question['id'], 'target': task['nodeId'],
+                'relation': 'has_' + event_type, 'label': {'finding': '发现', 'correction': '纠正', 'direction': '转向'}[event_type],
+                'basis': 'observed'}})
+        else:
+            task['nodeId'] = question['id']
+        update = {'id': question['id']}
+        if args.status is not None:
+            update['status'] = args.status
+        if not event_type and notes is not None:
+            update['notes'] = notes
+        if len(update) > 1:
+            task['operations'].append({'op': 'node.update', 'data': update})
+        links = [(value, 'supports', 'evidence-' + str(index)) for index, value in enumerate(args.evidence)]
+        if args.after:
+            relation = args.relation or {'finding': 'related_to', 'correction': 'revises', 'direction': 'leads_to'}[event_type]
+            links.append((args.after, relation, 'after'))
+        for value, relation, suffix in links:
+            try:
+                referenced = exact_reference(nodes, value)
+            except ClientError as exc:
+                task['recordingWarnings'].append(str(exc) + '; the finding is retained without that relationship.')
+                continue
+            source = referenced['id'] if referenced else value
+            if not referenced and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value):
+                task['recordingWarnings'].append('Reference title was not found locally or in retained context: ' + value
+                                                 + '; the finding is retained without that relationship.')
+                continue
+            if source == task['nodeId']:
+                continue
+            task['operations'].append({'op': 'edge.add', 'data': {
+                'id': 'edge-' + task['taskId'] + '-' + suffix, 'source': source, 'target': task['nodeId'],
+                'relation': relation, 'basis': 'observed'}})
+        if intent['hasMetrics']:
+            task['operations'].append({'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
+                'title': change or question['title'], 'status': 'completed', 'startedAt': None, 'finishedAt': None,
+                'capturedAt': task['capturedAt'], 'metrics': metrics, 'origin': 'observed',
+                'configuration': {'capturedExternalResult': True}}})
+        directory = Path(task['captureRoot']) / task['taskId']
+        ensure_directory(directory)
         persist_task(path, task)
         artifacts = list(args.artifact)
         if metrics_warning and args.metrics_file not in artifacts:
@@ -977,9 +1146,13 @@ def execute(client, args):
     command = args.argv[1:] if args.argv[:1] == ['--'] else args.argv
     if not command:
         raise ClientError('execute requires -- COMMAND [ARG ...].')
+    if args.node is not None and args.question is not None:
+        raise ClientError('Use either --question or --node for an existing research unit.')
     intent = {'command': 'execute', 'argv': command, 'cwd': str(Path.cwd()), 'node': args.node,
               'title': args.title, 'artifact': args.artifact, 'after': args.after,
               'relation': args.relation, 'independent': args.independent}
+    if args.question is not None:
+        intent['question'] = args.question
     path, task = task_identity(client, args, intent)
     with ExitStack() as stack:
         durable = True
@@ -993,6 +1166,10 @@ def execute(client, args):
         if existing:
             emit(sync_task(client, path, existing))
             return existing.get('exitCode', 1)
+        question = None
+        if args.question is not None:
+            question, _ = semantic_question(client, path.parent, args.project, args.question, exclude=path)
+            task['nodeId'] = task['questionId'] = question['id']
         directory = Path(task['captureRoot']) / task['taskId']
         stdout = stderr = None
         try:
@@ -1027,13 +1204,16 @@ def execute(client, args):
             'events': [{'id': 'start-' + task['taskId'], 'type': 'started', 'message': 'Command started', 'at': task['startedAt']},
                        {'id': 'finish-' + task['taskId'], 'type': 'finished', 'message': error or f'Process exited with code {task["exitCode"]}',
                         'at': task['finishedAt'], 'exitCode': task['exitCode'], 'elapsedMs': task['wallTimeMs']}]}}]
-        if args.node is None:
+        if question:
+            task['operations'].insert(0, {'op': 'node.ensure', 'data': question})
+        elif args.node is None:
             node = {'id': task['nodeId'], 'title': args.title, 'createdAt': task['startedAt'],
                     'status': 'paused' if task['status'] == 'cancelled' else task['status']}
             if task['status'] == 'cancelled':
                 node['pauseReason'] = 'Command interrupted'
             task['operations'].insert(0, {'op': 'node.add', 'data': node})
-        capture_relationship(client, args, path, task)
+        if question is None or args.after:
+            capture_relationship(client, args, path, task)
         if durable:
             for filename, title in (('stdout.txt', 'Standard output'), ('stderr.txt', 'Standard error')):
                 stage_artifact(task, directory / filename, title, directory / filename)
@@ -1079,7 +1259,7 @@ def main(argv=None):
             stream.reconfigure(encoding='utf-8-sig' if stream is sys.stdin else 'utf-8',
                                errors='backslashreplace' if stream is sys.stderr else 'strict')
     args = parser().parse_args(argv)
-    client = Client(args.url, timeout=2 if args.command in ('init', 'context', 'record', 'execute', 'sync') else 30)
+    client = Client(args.url, timeout=2 if args.command in ('init', 'context', 'record', 'event', 'execute', 'sync') else 30)
     try:
         if args.command == 'projects':
             result = client.request('/api/projects')
@@ -1148,6 +1328,8 @@ def main(argv=None):
             return execute(client, args)
         elif args.command == 'record':
             return record(client, args)
+        elif args.command == 'event':
+            return event(client, args)
         elif args.command == 'sync':
             return sync(client, args)
         elif args.command == 'status':

@@ -506,6 +506,8 @@ class Store:
             value = record.get(field)
             if value is not None and (type(value) is not int or value < 0):
                 raise StoreError('Usage counters must be nonnegative integers or unknown.', 'invalid_token_counter')
+        if record.get('startedAt') is None and record.get('finishedAt') is None and record.get('scope') == 'execution':
+            return
         if self._observation_time(record.get('finishedAt')) < self._observation_time(record.get('startedAt')):
             raise StoreError('Usage finish must not precede its start.')
 
@@ -534,8 +536,9 @@ class Store:
             for operation in operations:
                 object_value(operation, 'Operation')
                 data = copy.deepcopy(object_value(operation.get('data', {}), 'Operation data'))
+                node_count = len(p['nodes'])
                 self._apply(p, operation.get('op'), data)
-                if operation.get('op') == 'node.add' and 'position' not in data:
+                if operation.get('op') in ('node.add', 'node.ensure') and len(p['nodes']) > node_count and 'position' not in data:
                     unplaced.add(p['nodes'][-1]['id'])
             self._validate(p)
             if unplaced:
@@ -544,6 +547,10 @@ class Store:
             self._record(db, previous, p, operations, request_id, fingerprint)
             return copy.deepcopy(p)
 
+    @staticmethod
+    def _is_visual_container(node):
+        return node.get('isContainer', node.get('kind') == 'group') is True
+
     def _place_nodes(self, p, unplaced):
         """Assign initial positions; callers need only describe research and containment."""
         children = {}
@@ -551,11 +558,18 @@ class Store:
         for node in p['nodes']:
             children.setdefault(node.get('parentId'), []).append(node)
 
+        def visual_parent(node):
+            parent = by_id.get(node.get('parentId'))
+            while parent and not self._is_visual_container(parent):
+                parent = by_id.get(parent.get('parentId'))
+            return parent['id'] if parent else None
+
         def bounds(node):
             x, y = node['position']['x'], node['position']['y']
-            nested = [child for child in children.get(node['id'], []) if child['id'] not in unplaced]
+            nested = [child for child in p['nodes']
+                      if child['id'] not in unplaced and visual_parent(child) == node['id']]
             width, height = 368, 230
-            if nested and not node.get('collapsed', False):
+            if nested and self._is_visual_container(node) and not node.get('collapsed', False):
                 rectangles = [bounds(child) for child in nested]
                 width = max(330, *(cx + cw - x + 28 for cx, cy, cw, ch in rectangles))
                 height = max(230, *(cy + ch - y + 28 for cx, cy, cw, ch in rectangles))
@@ -568,9 +582,10 @@ class Store:
                 if node['id'] in unplaced:
                     parent = by_id.get(parent_id)
                     origin_x = parent['position']['x'] + 30 if parent else 40
-                    origin_y = parent['position']['y'] + 100 if parent else 40
-                    occupied = [bounds(other) for other in siblings
-                                if other['id'] != node['id'] and other['id'] not in unplaced]
+                    origin_y = parent['position']['y'] + (100 if self._is_visual_container(parent) else 282) if parent else 40
+                    occupied = [bounds(other) for other in p['nodes']
+                                if other['id'] != node['id'] and other['id'] not in unplaced
+                                and visual_parent(other) == visual_parent(node)]
                     # Candidate rows jump over occupied containers rather than scanning pixels.
                     rows = sorted({origin_y, *(max(origin_y, y + height + 52) for x, y, width, height in occupied)})
                     for y in rows:
@@ -596,6 +611,12 @@ class Store:
     def _apply(self, p, op, d):
         stamp = now()
         aliases = p.get('nodeAliases', {})
+        if op == 'node.ensure':
+            key = valid_id(d.get('id'))
+            d['id'] = aliases.get(key, key)
+            if any(node['id'] == d['id'] for node in p['nodes']):
+                return
+            op = 'node.add'
         if op in ('node.update', 'node.delete', 'node.merge') and isinstance(d.get('id'), str):
             d['id'] = aliases.get(d['id'], d['id'])
         if op == 'node.add' and isinstance(d.get('id'), str) and d['id'] in aliases:
@@ -792,6 +813,8 @@ class Store:
                 raise StoreError('Node importance must be normal or critical.')
             if not isinstance(node.get('tags', []), list) or any(not isinstance(tag, str) for tag in node.get('tags', [])):
                 raise StoreError('Node tags must be an array of text values.')
+            if 'isContainer' in node and type(node['isContainer']) is not bool:
+                raise StoreError('Node isContainer must be a boolean.')
             if type(node.get('collapsed', False)) is not bool:
                 raise StoreError('Node collapsed must be a boolean.')
             seen, current = {node['id']}, node.get('parentId')

@@ -148,7 +148,7 @@ describe("research card content", () => {
     ).toMatchObject({ headline: "未命名节点", summary: "", conclusion: "" });
   });
 
-  it("keeps temporal links labelled as sequence rather than causal evidence", () => {
+  it("keeps temporal links as faint sequence without a competing causal label", () => {
     const p = project();
     p.nodes.push({ ...node, id: "next", position: { x: 400, y: 0 } });
     p.edges.push({
@@ -157,9 +157,10 @@ describe("research card content", () => {
       target: "next",
       relation: "recorded_after",
     });
-    expect(
-      toCanvas(p, null, [], { onToggle() {}, onEnter() {} }).edges[0].label,
-    ).toBe("后续记录");
+    const edge = toCanvas(p, null, [], { onToggle() {}, onEnter() {} }).edges[0];
+    expect(edge.label).toBe("");
+    expect(edge.data?.orderOnly).toBe(true);
+    expect(p.edges[0].relation).toBe("recorded_after");
   });
 });
 

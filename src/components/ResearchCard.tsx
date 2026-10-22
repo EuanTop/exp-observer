@@ -13,7 +13,7 @@ function UsageStats({ data }: { data: CanvasData }) {
       : usage?.runMs != null
         ? `执行 ${formatDuration(usage.runMs)}`
         : "计时 —";
-  const tokens = `Token ${formatTokens(usage?.totalTokens)}${usage?.totalTokens != null && usage.tokensPartial ? "+" : ""}`;
+  const tokens = `${usage?.tokenScope === "execution" ? "执行 Token" : "Token"} ${formatTokens(usage?.totalTokens)}${usage?.totalTokens != null && usage.tokensPartial ? "+" : ""}`;
   return (
     <>
       <button
@@ -30,9 +30,11 @@ function UsageStats({ data }: { data: CanvasData }) {
       <button
         className="node-stat nodrag"
         title={
-          usage?.tokensPartial
-            ? "部分用量未采集；查看已记录的输入与输出 Token"
-            : "查看输入与输出 Token 来源"
+          usage?.tokenScope === "execution"
+            ? "被测任务用量，非主研究Agent完整成本；查看输入与输出 Token 来源"
+            : usage?.tokensPartial
+              ? "部分用量未采集；查看已记录的输入与输出 Token"
+              : "关联会话用量（含手工记录）；查看输入与输出 Token 来源"
         }
         onClick={(e) => {
           e.stopPropagation();
@@ -47,7 +49,8 @@ function UsageStats({ data }: { data: CanvasData }) {
 
 export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
   const { node: n, children, expanded } = data;
-  const Icon = children ? Layers : kindIcon[n.kind] || Box;
+  const container = data.container === true;
+  const Icon = container ? Layers : kindIcon[n.kind] || Box;
   const presentation = data.presentation ?? {
     headline: n.title || "未命名节点",
     summary: n.summary || "",
@@ -57,9 +60,16 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
   const processing = data.processing === true;
   return (
     <div
-      className={`research-node ${selected ? "is-selected" : ""} ${processing ? "is-processing" : ""} ${n.importance === "critical" ? "is-critical" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${children ? "is-container" : ""}`}
+      className={`research-node ${selected ? "is-selected" : ""} ${processing ? "is-processing" : ""} ${n.importance === "critical" ? "is-critical" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${container ? "is-container" : ""}`}
       aria-label={processing ? `${presentation.headline}，处理中` : undefined}
     >
+      {processing && (
+        <svg className="processing-outline" aria-hidden="true">
+          <rect className="processing-outline-track" pathLength="100" />
+          <rect className="processing-outline-blue" pathLength="100" />
+          <rect className="processing-outline-green" pathLength="100" />
+        </svg>
+      )}
       {(
         [Position.Top, Position.Right, Position.Bottom, Position.Left] as const
       ).map((position) => (
@@ -75,7 +85,7 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
           <span className="node-kind-icon">
             <Icon size={13} />
           </span>
-          {children ? "探索容器" : kinds[n.kind] || n.kind || "研究节点"}
+          {container ? "探索容器" : kinds[n.kind] || n.kind || "研究节点"}
           {n.importance === "critical" && (
             <span
               className="node-critical-mark"
@@ -130,7 +140,7 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
         </>
       ) : (
         <div className="node-footer">
-          {children ? (
+          {container && children ? (
             <button
               className="expand-link nodrag"
               onClick={(e) => {

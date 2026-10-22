@@ -234,6 +234,40 @@ class HostUsageTests(unittest.TestCase):
         self.importer.drain_once([outbox])
         self.assertIsNone(self.store.get_project('study')['usageRecords'][0]['nodeId'])
 
+    def test_event_cli_binds_and_ensure_only_creates_first_activity_interval(self):
+        self.call(cmd='python3 /installed/exp_observer.py event --project study --question Question')
+        self.inference()
+        self.inference('before-real-finish', start=16000, end=17000)
+        self.inference('after-completed', start=31000, end=32000)
+        outbox = self.capture('create', 'a', 'active', 10000, command='event')
+        self.capture('premature-ensure', 'a', 'completed', 15000, command='event')
+        self.capture('finish', 'a', 'completed', 20000)
+        self.capture('later-ensure', 'a', 'active', 30000, command='event')
+        self.capture('still-completed', 'a', 'completed', 40000)
+        for name in ('create', 'premature-ensure', 'later-ensure'):
+            path = outbox / (name + '.json')
+            task = json.loads(path.read_text())
+            task['operations'][0]['op'] = 'node.ensure'
+            path.write_text(json.dumps(task))
+        self.importer.drain_once([outbox])
+        self.assertEqual({r['sourceRef']: r['nodeId'] for r in self.store.get_project('study')['usageRecords']},
+                         {'response-1': 'a', 'before-real-finish': 'a', 'after-completed': None})
+
+    def test_synced_event_ensure_proves_text_only_workspace_owner(self):
+        self.store.batch('study', {'operations': [{'op': 'project.update', 'data': {'sourceRoots': []}}]})
+        self.store.add_workspace({'path': str(self.research)})
+        self.call(cmd='python3 /installed/exp_observer.py event --project study --question Question')
+        self.inference()
+        outbox = self.capture('ensure', 'a', 'completed', 20000, command='event')
+        path = outbox / 'ensure.json'
+        task = json.loads(path.read_text())
+        task['operations'][0]['op'] = 'node.ensure'
+        path.write_text(json.dumps(task))
+        self.assertEqual(self.importer.drain_once([outbox])[0]['imported'], 1)
+        record = self.store.get_project('study')['usageRecords'][0]
+        self.assertIsNone(record['nodeId'])
+        self.assertEqual(record['scope'], 'agent')
+
     def test_foreign_observer_urls_and_other_source_directories_cannot_attribute(self):
         self.call()
         self.inference()

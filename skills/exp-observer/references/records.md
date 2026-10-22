@@ -1,33 +1,37 @@
 # Record reference
 
-For routine recording, prefer the high-level client:
+For routine recording, prefer the semantic entry:
 
 ```sh
-python3 <skill>/scripts/exp_observer.py record --project ID --title "Result already reached" --metrics-file result.json --artifact result.json
-python3 <skill>/scripts/exp_observer.py record --project ID --node NODE --title "Updated finding" --summary "New evidence and implication"
+python3 <skill>/scripts/exp_observer.py event --project ID --question "Is the measurement boundary complete?" --finding "Verification contributes to delivery time"
+python3 <skill>/scripts/exp_observer.py event --project ID --question "Is the measurement boundary complete?" --correction "Include verification in delivery time" --after "Verification contributes to delivery time"
 ```
 
-IDs, run/evidence references and idempotent retries are handled by the client. New records automatically retain their local capture order with `recorded_after` ("记录顺序"); this is chronology, not scientific causality. `--independent` omits that automatic connection. Explicit `--after ID_OR_EXACT_TITLE --relation supports` (or `refutes`, `revises`, another relation) retains an actual scientific relationship. Exact titles resolve from local records without a service lookup; an ambiguous title leaves a warning and does not invent a relationship. `--parent NODE` groups related records.
+`event --question TEXT` retains an active question; optional `--reason` supplies context. The question can be a retained ID or exact title from this directory, its ancestor queues or a previously fetched compact context. An unseen title receives a stable identity derived from URL, project and the title with surrounding whitespace removed. Internal whitespace and case remain significant; ambiguous titles require an existing ID. There is no approximate matching or lookup inferred from analysis prose.
 
-Use a short title identifying the question or work, with concise context in `--summary`. Use `--conclusion TEXT` for a distinct result when available; omitting it preserves any existing conclusion and never converts a question into a conclusion. `--kind TYPE` accepts a natural type such as `question`, `experiment`, `finding` or `decision`; new records default to `finding`, while omitted types preserve existing nodes. Completion belongs to the existing record's status.
+One optional `--finding TEXT`, `--correction TEXT` or `--direction TEXT` creates a separate ordinary node with that actual change as its title and conclusion. It is linked to the question by `has_finding`, `has_correction` or `has_direction`; these associations claim no scientific causality. Neither question nor event is wrapped in a parent container. Existing questions and earlier findings retain their metadata. Only an explicit `--status` changes question status; supplied notes without a change update that question's native analysis.
 
-A single execution can investigate distinct questions, such as a tie-breaking rule, a tolerance's effect and a boundary counterexample. Preserve their different findings or follow-up judgments as separate records, reusing the original outputs. For the same question's repeated measurements or additional evidence, revise its existing node instead. Neither a script count nor a fixed node quota determines the research structure. Do not create an extra completion-only finding.
+`--after ID_OR_EXACT_TITLE` states a relationship to an earlier finding: defaults are `related_to` for a finding, `revises` for a correction and `leads_to` for a direction. `--relation supports` or another explicit relation overrides that meaning. Repeated `--evidence ID_OR_EXACT_TITLE` adds `supports` links from captured evidence to this event. Exact titles resolve locally or from retained context; missing or ambiguous optional relationship titles produce warnings while retaining the finding without those links. Explicit IDs are validated at delivery. No order-only edges are added by `event`.
 
-At a real change of research question, record the new question and why it matters with an appropriate kind and `active` status. As evidence arrives, update that question's conclusion and real status; completed or intentionally parked work need not stay active. This does not require per-tool start/finish records, a predetermined sequence or an artificial limit on parallel research.
+A single captured execution can support several discoveries. Use its exact title in `--evidence` for each actual change, without rerunning it. Repeated measurements use `execute --question "Exact question" --title "Actual measurement" -- COMMAND...`; this adds a run to the same question, without creating a discovery. Existing JSON can be captured with `event --question "Exact question" --metrics-file result.json`. No per-tool start/finish events, fixed phases or node quotas are required.
 
-Keep conclusions and analysis in native platform fields by default. Do not create an additional `REPORT.md`, summary README or conclusion report unless the user explicitly requests a document. `record --notes TEXT` retains full analysis in `node.notes`. `--notes-file PATH` loads existing UTF-8 text, preserving its line breaks; `--notes-file -` reads stdin without requiring a new file. For example, in a POSIX shell:
+IDs, evidence references and idempotent delivery are handled by the client. `--request-id` reuses the frozen event when retrying the same call; changed findings, reasons, references or analysis conflict with an existing request ID. Offline directories can independently retain the same question: atomic `node.ensure` creates it once while preserving existing metadata, together with each distinct event's frozen operations. Recovery performs no reclassification or source reread. Receipts expose `questionId`, `nodeId` and `eventType`.
+
+The older `record --title TITLE` still creates a node; `record --node NODE` replaces only the fields supplied. Use it for deliberate edits, rather than a new discovery. `--conclusion`, `--kind`, `--parent` and explicit relationships remain available. New legacy records keep their automatic `recorded_after` connection unless `--independent` is supplied; this means recording order, not causality.
+
+Keep conclusions and analysis in native platform fields by default. Do not create an additional `REPORT.md`, summary README or conclusion report unless the user explicitly requests a document. `event --notes TEXT` retains full analysis in `node.notes`. `--notes-file PATH` loads existing UTF-8 text, preserving its line breaks; `--notes-file -` reads stdin without requiring a new file. For example, in a POSIX shell:
 
 ```sh
-python3 <skill>/scripts/exp_observer.py record --project ID --node NODE --title "Research question" --notes-file - <<'ANALYSIS'
+python3 <skill>/scripts/exp_observer.py event --project ID --question "Research question" --finding "Actual discovery" --notes-file - <<'ANALYSIS'
 Retain the actual reasoning, alternatives and limitations here.
 ANALYSIS
 ```
 
-Notes are frozen metadata in the queued operation; they are not automatically attached as evidence. Omit notes to preserve the previous value, or supply an empty value to clear it. Reusing a request ID with changed notes or type is a conflict; use a new request ID for a deliberate revision. Background recovery and `sync` use the frozen notes without rereading the source analysis file. Repeating `record` validates the supplied intent: if its notes file is missing or unreadable, the same explicit request ID, file path and other arguments can reuse the frozen analysis; a readable file with changed text remains a conflict. Missing notes cannot create a new record. Keep scripts, original measurements and images as local evidence. Metrics retain their original JSON structure, including nested objects, arrays, empty containers and nulls. Non-object roots use `result` while the original file is preserved.
+Notes are frozen metadata in the queued operation; they are not automatically attached as evidence. Omit notes to preserve the previous value, or supply an empty value to clear it. Reusing a request ID with changed notes or type is a conflict; use a new request ID for a deliberate revision. Background recovery and `sync` use the frozen notes without rereading the source analysis file. Repeating `event` or `record` validates the supplied intent: if its notes file is missing or unreadable, the same explicit request ID, file path and other arguments can reuse the frozen analysis; a readable file with changed text remains a conflict. Missing notes cannot create a new record. Keep scripts, original measurements and images as local evidence. Metrics retain their original JSON structure, including nested objects, arrays, empty containers and nulls. Non-object roots use `result` while the original file is preserved.
 
 ## Availability and recovery
 
-`init --name NAME [--id ID]` saves a project plan before contacting the service. Keep the returned ID, including when the receipt is pending. An explicit project passed to `record` can also prepare a missing project. Recovery creates the project only if absent; it never replaces an existing project's metadata.
+`init --name NAME [--id ID]` saves a project plan before contacting the service. Keep the returned ID, including when the receipt is pending. An explicit project passed to `event` or `record` can also prepare a missing project. Recovery creates the project only if absent; it never replaces an existing project's metadata.
 
 `context` returns an explicitly unavailable response when the service cannot be reached, together with any dated remote cache and a summary of local pending work. An unavailable response is not an empty remote experiment. Continue from research files when context is unavailable; preserve the supplied experiment ID.
 
@@ -100,6 +104,7 @@ Operations:
 | Operation | Data |
 |---|---|
 | `node.add` | id?, title, kind?, status?, parentId?, summary?, conclusion?, notes?, nextAction?, importance?, importanceReason?, pauseReason?, resumeWhen?, tags? |
+| `node.ensure` | explicit id plus creation fields; existing ID or alias preserves all metadata |
 | `node.update` | id plus changed fields; omitted fields preserved |
 | `node.merge` | id, target; folds a leaf into existing work, preserving runs, evidence, observations and decisions; original metadata remains in history |
 | `node.delete` | id; removes subtree and associated execution records; recoverable from history |
