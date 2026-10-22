@@ -1,6 +1,7 @@
 """Offline onboarding and application recovery use isolated user state and research data."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, ExitStack
+from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -91,6 +92,47 @@ class RecoveryTests(unittest.TestCase):
 
     def read_tasks(self, cwd=None):
         return [json.loads(path.read_text(encoding='utf-8')) for path in self.task_paths(cwd)]
+
+    def test_background_acknowledgement_replaces_stale_pending_without_http(self):
+        _, original = self.invoke('record', '--project', 'authoritative', '--title', 'Actual finding',
+                                  '--request-id', 'authoritative', client=self.offline())
+        path = next(path for path in self.task_paths() if not path.name.startswith('project-'))
+        stale = cli.read_queue_task(path)
+        self.assertEqual(stale['state'], 'ready')
+        self.start(automatic=False)
+        Recovery(self.url, self.state, store=self.store).drain_once()
+        authoritative = cli.read_queue_task(path)
+        self.assertEqual(authoritative['state'], 'synced')
+        authoritative['recordingWarnings'].append('Historical HTTP permission error before background reception')
+        cli.save_task(path, authoritative)
+        before = path.read_bytes()
+        with patch.object(cli.Client, 'request', side_effect=AssertionError('Acknowledged task attempted HTTP')), \
+             patch.object(cli, 'save_task', side_effect=AssertionError('Acknowledged task was rewritten')):
+            receipt = cli.sync_task(self.client, path, stale)
+            _, result = self.invoke('status', '--project', 'authoritative', client=self.client)
+        self.assertTrue(original['pending'])
+        self.assertEqual(receipt, cli.task_result(authoritative))
+        self.assertFalse(receipt['pending'])
+        self.assertEqual((result['syncedCount'], result['pendingCount']), (1, 0))
+        self.assertEqual(result['deliveryState'], 'synced')
+        self.assertFalse(result['transportChecked'])
+        self.assertIn('Historical HTTP permission error', result['records'][0]['recordingWarnings'][0])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_stale_queue_identity_conflict_never_submits_or_overwrites(self):
+        self.invoke('record', '--project', 'identity', '--title', 'Original question', client=self.offline())
+        path = next(path for path in self.task_paths() if not path.name.startswith('project-'))
+        stale = cli.read_queue_task(path)
+        current = cli.read_queue_task(path)
+        current['requestId'] = 'different-identity'
+        current['state'] = 'synced'
+        cli.save_task(path, current)
+        before = path.read_bytes()
+        with patch.object(cli.Client, 'request', side_effect=AssertionError('Identity conflict attempted HTTP')):
+            with self.assertRaises(cli.ClientError) as raised:
+                cli.sync_task(self.client, path, stale)
+        self.assertEqual(raised.exception.code, 'queue_identity_conflict')
+        self.assertEqual(path.read_bytes(), before)
 
     def test_init_offline_freezes_metadata_and_keeps_existing_remote_project(self):
         arguments = ('init', '--name', 'Original project', '--description', 'Original description', '--source-root', 'results')
@@ -316,6 +358,48 @@ class RecoveryTests(unittest.TestCase):
         code, pending = self.invoke('context', '--project', 'pending-project')
         self.assertEqual(code, 0)
         self.assertEqual((pending['availability'], pending['remoteError']['code']), ('pending', 'not_found'))
+
+    def test_native_notes_are_compact_by_default_and_complete_in_scoped_local_context(self):
+        notes = '完整分析与边界条件。\r\n' * 1000
+        conclusion = '在本次条件下有效，但不能外推。' * 100
+        _, root = self.invoke('record', '--project', 'native-context', '--title', '主研究问题',
+            '--kind', 'question', '--notes', notes, '--conclusion', conclusion, client=self.offline())
+        _, child = self.invoke('record', '--project', 'native-context', '--title', '子问题',
+            '--parent', root['nodeId'], '--notes', '子问题完整分析', client=self.offline())
+        _, other = self.invoke('record', '--project', 'native-context', '--title', '另一个方向',
+            '--independent', '--notes', '其他方向的完整分析', client=self.offline())
+        root_task = next(task for task in self.read_tasks() if task.get('nodeId') == root['nodeId'])
+        # Keep enough later summary-only updates to push the original notes out
+        # of the 20-receipt window. These are local fixture snapshots only.
+        for index in range(21):
+            revision = deepcopy(root_task)
+            revision.update({'taskId': f'revision-{index}', 'requestId': f'revision-{index}',
+                             'capturedAt': f'9999-01-01T00:00:00.{index:03d}Z'})
+            revision['operations'] = [{'op': 'node.update', 'data': {
+                'id': root['nodeId'], 'summary': f'同一问题的补充证据 {index}'}}]
+            cli.save_task(self.root / '.exp-observer-runs' / 'outbox' / f'revision-{index}.json', revision)
+        _, compact = self.invoke('context', '--project', 'native-context', client=self.offline())
+        compact_root = next(node for node in compact['localNodes'] if node['id'] == root['nodeId'])
+        self.assertTrue(compact_root['hasNotes'])
+        self.assertNotIn('notes', compact_root)
+        self.assertEqual(compact_root['kind'], 'question')
+        self.assertEqual(compact_root['conclusion'], conclusion[:512])
+        self.assertTrue(compact_root['conclusionTruncated'])
+        self.assertNotIn(notes, json.dumps(compact, ensure_ascii=False))
+        self.assertEqual(len(compact['localRecords']), 20)
+        _, scoped = self.invoke('context', '--project', 'native-context', '--node', root['nodeId'], client=self.offline())
+        scoped_nodes = {node['id']: node for node in scoped['localNodes']}
+        self.assertEqual(set(scoped_nodes), {root['nodeId'], child['nodeId']})
+        self.assertEqual(scoped_nodes[root['nodeId']]['notes'], notes)
+        self.assertEqual(scoped_nodes[child['nodeId']]['notes'], '子问题完整分析')
+        self.assertNotIn('其他方向的完整分析', json.dumps(scoped, ensure_ascii=False))
+        self.assertNotIn(other['nodeId'], scoped_nodes)
+        # Available remote context must expose the same native pending view.
+        with patch.object(self.client, 'request', return_value={'projectId': 'native-context', 'nodes': []}):
+            _, online = self.invoke('context', '--project', 'native-context', '--node', root['nodeId'])
+        self.assertEqual(online['availability'], 'available')
+        pending_nodes = {node['id']: node for node in online['localPendingNodes']}
+        self.assertEqual(pending_nodes[root['nodeId']]['notes'], notes)
 
     def test_worker_does_not_reparse_acknowledged_large_tasks_until_the_file_changes(self):
         (self.root / 'large.json').write_text(json.dumps({'samples': list(range(60000))}), encoding='utf-8')

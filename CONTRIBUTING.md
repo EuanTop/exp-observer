@@ -26,6 +26,8 @@ npm run dev
 
 Open [127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies API requests to the local backend. Add `--data-dir /absolute/scratch/directory --no-demo` to the backend command to work with an isolated, empty data directory.
 
+The development-only `?preview=findings` page shows fixed presentation examples with simulated usage and no API calls. Production builds omit this preview and its fixtures.
+
 ## Checks
 
 Before submitting a change:

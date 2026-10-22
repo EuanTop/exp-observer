@@ -33,6 +33,7 @@ import { Badge, date, IconButton, kindIcon } from "./Primitives";
 import { NodeUsagePanel } from "./NodeUsagePanel";
 import { MetricDetails } from "./MetricDetails";
 import { nodePresentation } from "../node-presentation";
+import { ProjectHostUsage } from "./HostUsage";
 export function ProjectInspector({
   project,
   onAdd,
@@ -74,6 +75,7 @@ export function ProjectInspector({
             <span>原始证据</span>
           </div>
         </div>
+        <ProjectHostUsage project={project} />
         <div className="inspector-section-title">
           <span>正在探索</span>
           <span>{active.length}</span>
@@ -429,7 +431,11 @@ export function NodeInspector({
                 {presentation.source && (
                   <div className="node-context-note">
                     <strong>{presentation.source}</strong>
-                    <p>{presentation.headline}</p>
+                    <p>
+                      {presentation.conclusion ||
+                        node.conclusion ||
+                        node.summary}
+                    </p>
                   </div>
                 )}
                 <p className="inspector-summary">

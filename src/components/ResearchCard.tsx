@@ -1,7 +1,6 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { Box, ChevronDown, Clock3, Diamond, Layers, Minus } from "lucide-react";
-import { formatMetric, kinds, type CanvasData } from "../model";
-import { metricLeaves, metricPathLabel } from "../metrics";
+import { kinds, type CanvasData } from "../model";
 import { formatDuration, formatTokens } from "../usage";
 import { Badge, kindIcon } from "./Primitives";
 
@@ -49,21 +48,17 @@ function UsageStats({ data }: { data: CanvasData }) {
 export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
   const { node: n, children, expanded } = data;
   const Icon = children ? Layers : kindIcon[n.kind] || Box;
-  const presentation = data.presentation;
-  const metrics = metricLeaves(data.latest?.metrics || {})
-    .filter(
-      ({ path, value }) =>
-        !["wallTimeMs", "exitCode", "stdoutBytes", "stderrBytes"].includes(
-          String(path[0]),
-        ) &&
-        (typeof value === "number" ||
-          typeof value === "boolean" ||
-          typeof value === "string"),
-    )
-    .slice(0, 2);
+  const presentation = data.presentation ?? {
+    headline: n.title || "未命名节点",
+    summary: n.summary || "",
+    conclusion: "",
+    source: "",
+  };
+  const processing = data.processing === true;
   return (
     <div
-      className={`research-node ${selected ? "is-selected" : ""} ${n.importance === "critical" ? "is-critical" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${children ? "is-container" : ""}`}
+      className={`research-node ${selected ? "is-selected" : ""} ${processing ? "is-processing" : ""} ${n.importance === "critical" ? "is-critical" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${children ? "is-container" : ""}`}
+      aria-label={processing ? `${presentation.headline}，处理中` : undefined}
     >
       {(
         [Position.Top, Position.Right, Position.Bottom, Position.Left] as const
@@ -80,7 +75,7 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
           <span className="node-kind-icon">
             <Icon size={13} />
           </span>
-          {children ? "探索容器" : kinds[n.kind] || n.kind}
+          {children ? "探索容器" : kinds[n.kind] || n.kind || "研究节点"}
           {n.importance === "critical" && (
             <span
               className="node-critical-mark"
@@ -91,41 +86,19 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
             </span>
           )}
         </div>
-        <Badge status={n.status} />
+        <Badge status={n.status || "未记录"} />
       </div>
-      <div className="node-content">
-        {!expanded && (presentation.context || presentation.source) && (
-          <div className="node-context" title={presentation.context}>
-            {[presentation.context, presentation.source]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-        )}
-        <h3 title={presentation.headline}>
-          {presentation.headline}
-        </h3>
+      <div
+        className={`node-content ${presentation.conclusion ? "has-conclusion" : ""}`}
+      >
+        <h3 title={presentation.headline}>{presentation.headline}</h3>
         {!expanded && presentation.summary && (
           <p title={presentation.summary}>{presentation.summary}</p>
         )}
-        {!expanded && !!metrics.length && (
-          <button
-            className="node-results nodrag"
-            title={`查看原始指标 · ${data.latest?.title}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              data.onInspect?.(n.id, "runs");
-            }}
-          >
-            {metrics.map(({ key, path, value }) => (
-              <span
-                key={key}
-                title={`${metricPathLabel(path)}：${formatMetric(value)}`}
-              >
-                <small>{metricPathLabel(path)}</small>
-                <strong>{formatMetric(value)}</strong>
-              </span>
-            ))}
-          </button>
+        {!expanded && presentation.conclusion && (
+          <p className="node-conclusion" title={presentation.conclusion}>
+            {presentation.source || "结论"}：{presentation.conclusion}
+          </p>
         )}
       </div>
       {expanded ? (
@@ -170,18 +143,16 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
               <ChevronDown size={10} />
             </button>
           ) : (
-            !!data.usage?.runCount && (
-              <button
-                className="node-stat nodrag"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  data.onInspect?.(n.id, "runs");
-                }}
-                title="查看该节点的运行记录"
-              >
-                {data.usage.runCount} 次运行
-              </button>
-            )
+            <button
+              className="node-stat nodrag"
+              onClick={(e) => {
+                e.stopPropagation();
+                data.onInspect?.(n.id, "runs");
+              }}
+              title="查看该节点的运行记录"
+            >
+              {data.usage?.runCount ?? data.runs ?? 0} 次运行
+            </button>
           )}
           <UsageStats data={data} />
         </div>

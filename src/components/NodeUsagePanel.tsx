@@ -2,6 +2,7 @@ import { Clock3, Play, Square } from "lucide-react";
 import { getNodeUsage, formatDuration, formatTokens } from "../usage";
 import { uid, type Operation, type Project, type ResearchNode } from "../model";
 import { date } from "./Primitives";
+import { NodeHostUsage } from "./HostUsage";
 
 export function NodeUsagePanel({
   project,
@@ -70,9 +71,12 @@ export function NodeUsagePanel({
         <Play size={12} />
         开始计时
       </button>
-      {!usage.observations.length && (
-        <div className="small-empty">暂无步骤计时或 Token 数据</div>
+      {!usage.observations.length && !usage.hostUsage.length && (
+        <div className="small-empty">
+          该节点尚无可确认归属的步骤计时或 Token 数据
+        </div>
       )}
+      <NodeHostUsage records={usage.hostUsage} />
       {usage.observations.map((o) => (
         <div className="observation-card" key={o.id}>
           <div className="observation-title">

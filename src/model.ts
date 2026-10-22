@@ -1,7 +1,11 @@
 import type { Edge, Node } from "@xyflow/react";
 import { getNodeUsage } from "./usage";
 import { facingSides } from "./edge-routing";
-import { nodePresentation, type NodePresentation } from "./node-presentation";
+import {
+  isNodeProcessing,
+  nodePresentation,
+  type NodePresentation,
+} from "./node-presentation";
 export type NodeTab = "overview" | "runs" | "evidence" | "usage";
 export type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -98,6 +102,22 @@ export type Observation = {
   usageRef?: string;
   origin: string;
 };
+export type HostUsageRecord = {
+  id: string;
+  nodeId: string | null;
+  source: string;
+  sourceRef: string;
+  agentId?: string;
+  provider: string;
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  startedAt: string;
+  finishedAt: string;
+  attribution?: string;
+};
 export type Project = {
   id: string;
   name: string;
@@ -112,6 +132,7 @@ export type Project = {
   assessments: Assessment[];
   decisions: Decision[];
   observations?: Observation[];
+  usageRecords?: HostUsageRecord[];
   activity: {
     id: string;
     at: string;
@@ -192,6 +213,7 @@ export function ancestry(
 export type CanvasData = {
   node: ResearchNode;
   presentation: NodePresentation;
+  processing?: boolean;
   children: number;
   runs: number;
   latest?: Run;
@@ -202,7 +224,7 @@ export type CanvasData = {
   onEnter: (id: string) => void;
   [key: string]: unknown;
 };
-export const NODE_SIZE = { w: 300, h: 250 };
+export const NODE_SIZE = { w: 368, h: 230 };
 export function toCanvas(
   project: Project,
   scope: string | null,
@@ -275,6 +297,7 @@ export function toCanvas(
         data: {
           node: n,
           presentation: nodePresentation(project, n),
+          processing: isNodeProcessing(project, n),
           children: children.length,
           runs: runs.length,
           latest: project.runs.filter((run) => run.nodeId === n.id).at(-1),

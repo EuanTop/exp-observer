@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { Observation, Project, ResearchNode, Run } from "./model";
-import { formatDuration, formatTokens, getNodeUsage } from "./usage";
+import type {
+  HostUsageRecord,
+  Observation,
+  Project,
+  ResearchNode,
+  Run,
+} from "./model";
+import {
+  formatDuration,
+  formatTokens,
+  getNodeUsage,
+  getProjectHostUsage,
+} from "./usage";
 
 function node(
   id: string,
@@ -80,6 +91,103 @@ function project(
     activity: [],
   };
 }
+
+function hostUsage(
+  id: string,
+  nodeId: string | null,
+  fields: Partial<HostUsageRecord> = {},
+): HostUsageRecord {
+  return {
+    id,
+    nodeId,
+    source: "host",
+    sourceRef: id,
+    provider: "provider",
+    model: "model",
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 80,
+    cacheWriteTokens: 0,
+    startedAt: new Date(0).toISOString(),
+    finishedAt: new Date(1000).toISOString(),
+    ...fields,
+  };
+}
+
+describe("host usage attribution", () => {
+  it("keeps unassigned inferences in project totals and never distributes them to nodes", () => {
+    const p = project([node("parent"), node("child", "parent"), node("other")]);
+    p.usageRecords = [
+      hostUsage("known", "child"),
+      hostUsage("unassigned", null),
+      hostUsage("external", "other"),
+    ];
+    expect(getNodeUsage(p, "parent")).toMatchObject({
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+      cacheReadTokens: 80,
+    });
+    expect(getNodeUsage(p, "child").totalTokens).toBe(120);
+    expect(getProjectHostUsage(p)).toMatchObject({
+      inputTokens: 300,
+      outputTokens: 60,
+      cacheReadTokens: 240,
+      unassignedCount: 1,
+      recordCount: 3,
+    });
+    p.usageRecords = [hostUsage("unassigned", null)];
+    expect(getNodeUsage(p, "child").totalTokens).toBeNull();
+  });
+
+  it("deduplicates host references and explicit observations of the same measurement", () => {
+    const p = project(
+      [node("a")],
+      [
+        observation("manual", "a", 0, 1000, {
+          usageSource: "host",
+          usageRef: "ref",
+        }),
+      ],
+    );
+    p.usageRecords = [
+      hostUsage("old", "a", { sourceRef: "ref" }),
+      hostUsage("new", "a", { sourceRef: "ref", inputTokens: 150 }),
+    ];
+    expect(getNodeUsage(p, "a")).toMatchObject({
+      inputTokens: 150,
+      outputTokens: 20,
+      totalTokens: 170,
+      elapsedMs: 1000,
+    });
+    expect(getProjectHostUsage(p)).toMatchObject({
+      recordCount: 1,
+      inputTokens: 150,
+    });
+  });
+
+  it("keeps provider/model totals separate and unknown values partial", () => {
+    const p = project([node("a")]);
+    p.usageRecords = [
+      hostUsage("one", "a"),
+      hostUsage("two", "a", {
+        model: "other",
+        inputTokens: null,
+        outputTokens: 5,
+      }),
+    ];
+    expect(getProjectHostUsage(p).models.map((model) => model.model)).toEqual([
+      "model",
+      "other",
+    ]);
+    expect(getNodeUsage(p, "a")).toMatchObject({
+      inputTokens: 100,
+      outputTokens: 25,
+      totalTokens: 125,
+      tokensPartial: true,
+    });
+  });
+});
 
 describe("getNodeUsage", () => {
   it("does not count captured external results as executions or execution time", () => {

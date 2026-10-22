@@ -270,7 +270,8 @@ class WorkspaceTests(unittest.TestCase):
             self.assertLessEqual(len(scans), 8)
             for _ in range(4):
                 recovery.drain_once()
-        self.assertEqual(scans.count(self.root), 1)
+        # One initial direct-child priority scan plus the retained tree scan.
+        self.assertEqual(scans.count(self.root), 2)
         self.assertIsNotNone(recovery.discovery[self.root].cursor)
 
     def test_new_root_child_is_recovered_while_old_font_cursor_keeps_progressing(self):
@@ -351,6 +352,168 @@ class WorkspaceTests(unittest.TestCase):
         self.assertFalse(old_cursor.closed)
         self.assertGreater(sum(directory == fonts for operation, directory in operations if operation == 'next'), 0)
         self.assertLess(sum(directory == fonts for operation, directory in operations if operation == 'next'), 256)
+
+    def test_known_experiment_child_is_recovered_without_finishing_old_font_cursor(self):
+        self.store.add_workspace({'path': str(self.root)})
+        owner = self.root / 'known experiment'
+        self.offline(owner, 'record', '--project', 'nested-priority', '--title', 'Existing experiment')
+        for index in range(20):
+            (owner / f'old-directory-{index:02}').mkdir()
+        fonts = self.root / 'fonts'
+        fonts.mkdir()
+        for index in range(512):
+            (fonts / f'font-{index}.ttf').touch()
+        recovery = Recovery(self.url, self.state, store=self.store, discovery_budget=4, discovery_interval=60)
+        self.addCleanup(recovery.stop)
+        scanner = WorkspaceDiscovery(self.root, 60)
+        scanner.refresh_root()
+        root_mtime = scanner.root_mtime
+        scanner.probe(owner)
+        # Finish its initial direct-child probe before creating the new child:
+        # only a later owner mtime check can trigger timely discovery now.
+        while scanner.priority_queue or scanner.priority_cursor is not None:
+            scanner.step()
+        if scanner.cursor is not None:
+            scanner.cursor.close()
+            scanner.cursor = None
+        scanner.queue.clear()
+        recovery.discovery[self.root] = scanner
+        child = owner / 'zz-new directory after app startup'
+        captured = self.offline(child, 'record', '--project', 'nested-priority', '--title', 'New nested experiment')
+        self.assertEqual(self.root.stat().st_mtime_ns, root_mtime)
+        self.start(automatic=False)
+        operations, owner_cursors = [], []
+        scandir = os.scandir
+        with scandir(owner) as entries:
+            owner_entries = sorted(entries, key=lambda entry: entry.name)
+        class ObservedCursor:
+            def __init__(self, entries, directory, owner=None):
+                self.entries, self.directory, self.owner = iter(entries), directory, owner
+                self.closed = self.exhausted = False
+            def __next__(self):
+                operations.append(('next', self.directory))
+                try:
+                    return next(self.entries)
+                except StopIteration:
+                    self.exhausted = True
+                    raise
+            def close(self):
+                self.closed = True
+                if self.owner is not None:
+                    self.owner.close()
+        original_fonts = scandir(fonts)
+        old_cursor = ObservedCursor(original_fonts, fonts, original_fonts)
+        scanner.cursor = old_cursor
+        def observe(directory):
+            directory = Path(directory)
+            if directory in (self.root, owner, fonts):
+                operations.append(('open', directory))
+            if directory == owner:
+                if owner_cursors:
+                    self.assertTrue(owner_cursors[-1].exhausted, 'Owner mtime changes reset its unfinished cursor')
+                cursor = ObservedCursor(owner_entries, directory)
+                owner_cursors.append(cursor)
+                return cursor
+            return scandir(directory)
+        watch_owner = scanner._watch_directory
+        def observe_watch():
+            operations.append(('watch', scanner.watched[0]))
+            return watch_owner()
+        baseline = owner.stat().st_mtime_ns
+        with patch('backend.recovery.os.scandir', side_effect=observe), patch.object(scanner, '_watch_directory', side_effect=observe_watch):
+            for tick in range(80):
+                info = owner.stat()
+                os.utime(owner, ns=(info.st_atime_ns, baseline + (tick + 1) * 1_000_000))
+                before = len(operations)
+                recovery.drain_once()
+                self.assertLessEqual(len(operations) - before, recovery.discovery_budget)
+                if any(node['id'] == captured['nodeId'] for node in self.store.get_project('nested-priority')['nodes']):
+                    break
+            else:
+                self.fail('The new child remained behind the unrelated old font traversal')
+        self.assertIs(scanner.cursor, old_cursor)
+        self.assertFalse(old_cursor.closed)
+        font_steps = sum(operation == 'next' and directory == fonts for operation, directory in operations)
+        self.assertGreater(font_steps, 0)
+        self.assertLess(font_steps, 512)
+        self.assertTrue(owner_cursors)
+        self.assertTrue(all(cursor.exhausted for cursor in owner_cursors[:-1]))
+
+    def _assert_empty_child_later_init_recovers(self, *, nested):
+        self.store.add_workspace({'path': str(self.root)})
+        owner = self.root
+        if nested:
+            owner = self.root / 'known experiment'
+            self.offline(owner, 'record', '--project', 'owner', '--title', 'Existing owner')
+        child = owner / 'empty directory prepared before init'
+        child.mkdir()
+        fonts = self.root / 'fonts'
+        fonts.mkdir()
+        for index in range(512):
+            (fonts / f'font-{index}.ttf').touch()
+        recovery = Recovery(self.url, self.state, store=self.store, discovery_budget=4, discovery_interval=60)
+        self.addCleanup(recovery.stop)
+        scanner = WorkspaceDiscovery(self.root, 60)
+        recovery.discovery[self.root] = scanner
+        scanner.queue.clear()
+        original_fonts = os.scandir(fonts)
+        class ObservedCursor:
+            def __init__(self):
+                self.steps = 0
+                self.closed = False
+            def __next__(self):
+                self.steps += 1
+                return next(original_fonts)
+            def close(self):
+                self.closed = True
+                original_fonts.close()
+        old_cursor = ObservedCursor()
+        scanner.cursor = old_cursor
+        scanner.refresh_root()
+        # The initial priority scan must find an empty direct child even while
+        # the ordinary walk is stuck elsewhere. Empty children are watched,
+        # but their children must not be recursively scheduled for scanning.
+        if nested:
+            scanner.probe(owner)
+        for _ in range(100):
+            scanner.step()
+            if not scanner.root_dirty and not scanner.priority_queue and scanner.priority_cursor is None:
+                break
+        else:
+            self.fail('Initial direct-child discovery did not finish')
+        self.assertIn(child, scanner.directory_mtimes)
+        self.assertNotIn(child / '.exp-observer-runs' / 'outbox', scanner.outboxes)
+        self.assertFalse(scanner.priority_queue)
+        root_mtime = self.root.stat().st_mtime_ns
+        owner_mtime = owner.stat().st_mtime_ns
+        self.offline(child, 'init', '--id', 'prepared-child', '--name', 'Prepared directory project')
+        captured = self.offline(child, 'record', '--project', 'prepared-child', '--title', 'Later capture')
+        self.assertEqual(self.root.stat().st_mtime_ns, root_mtime)
+        self.assertEqual(owner.stat().st_mtime_ns, owner_mtime)
+        self.start(automatic=False)
+        previous_steps = old_cursor.steps
+        for _ in range(30):
+            recovery.drain_once()
+            try:
+                project = self.store.get_project('prepared-child')
+            except StoreError as exc:
+                self.assertEqual(exc.code, 'not_found')
+                continue
+            if any(node['id'] == captured['nodeId'] for node in project['nodes']):
+                break
+        else:
+            self.fail('An already-probed empty directory was not discovered after init')
+        self.assertEqual(project['name'], 'Prepared directory project')
+        self.assertIs(scanner.cursor, old_cursor)
+        self.assertFalse(old_cursor.closed)
+        self.assertGreater(old_cursor.steps, previous_steps)
+        self.assertLess(old_cursor.steps, 512)
+
+    def test_preexisting_empty_root_child_is_discovered_after_later_init(self):
+        self._assert_empty_child_later_init_recovers(nested=False)
+
+    def test_preexisting_empty_owner_child_is_discovered_after_later_init(self):
+        self._assert_empty_child_later_init_recovers(nested=True)
 
     def test_unenrollment_suppresses_legacy_registry_until_reenrolled(self):
         workspace = self.store.add_workspace({'path': str(self.root)})[0]

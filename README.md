@@ -80,9 +80,11 @@ python3 skills/exp-observer/scripts/exp_observer.py record --project my-study \
   --metrics-file results.json --artifact results.json
 ```
 
-Use the actual finding as the title; `--conclusion TEXT` adds a precise conclusion displayed directly on its card. Use `--node NODE_ID` to revise the same work, including a finding from a captured command. Completion belongs to that work's status rather than a separate completion node. New records retain capture order automatically, clearly labeled as record order. For an actual scientific relationship, `--after 'Earlier finding title' --relation supports` accepts an exact local title or ID; `--independent` omits ordinary order. `--parent NODE_ID` groups related work. Nested metrics remain intact, including arrays, nulls and empty containers. Non-object result JSON uses `result`; files stay unchanged. Text-only updates create no run.
+Use a short title for the question, work or finding; `--conclusion TEXT` adds a distinct conclusion displayed on its card. Use `--node NODE_ID` to revise the same work, including a finding from a captured command. Completion belongs to that work's status rather than a separate completion node. New records retain capture order automatically, clearly labeled as record order. For an actual scientific relationship, `--after 'Earlier finding title' --relation supports` accepts an exact local title or ID; `--independent` omits ordinary order. `--parent NODE_ID` groups related work. Nested metrics remain intact, including arrays, nulls and empty containers. Non-object result JSON uses `result`; files stay unchanged. Text-only updates create no run.
 
-Keep a distinct finding as its own record when useful, and revise the same finding with `--node`. A batch comparison can remain one record. Node count is not a target; a final summary does not establish an unrecorded research chronology.
+Retain substantially different questions and findings separately, even when one script answers them together. Record a new question as `active` when pursuing it, then update its evidence, conclusion and actual status. Repeated measurements of that question can revise the same record. Node count is not a target; a final summary does not establish an unrecorded research chronology.
+
+Full analysis belongs in native `notes`: use `--notes TEXT` or `--notes-file -` to read UTF-8 text from stdin. The Skill defaults to retaining analysis in the experiment, with no separate Markdown report unless the user requests one. Original data, scripts and images remain local evidence.
 
 Capture a real command and its result files with one call:
 
@@ -97,6 +99,8 @@ The wrapper supplies a record ID and captures the actual command's exit code, wa
 `init`, `record` and `execute` save pending work inside the working directory. The application discovers queues within connected research directories, including newly created experiment subdirectories and when starting after offline research. Clients need no global-registry write. The application submits only queues for its own loopback address and never follows directory links outside the connected root. A successful experiment remains successful even when recording is unavailable. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths. Optional manual `sync` runs from the original working directory. Recovery never reruns an experiment or rereads changed source evidence.
 
 The client must run to queue a record: result files alone are not queued. If the host blocks client execution or writes inside its working directory, recording is unavailable. Research continues. Connect directories during application setup, separately from the research task. The application still supports older clients' recovery registries (`EXP_OBSERVER_STATE_DIR` overrides their location); new clients do not depend on that registry. Installing the Skill grants no sandbox permissions or system service.
+
+Before its final reply, the Skill reads `status --project my-study` once from the research directory. This uses local receipts without HTTP and reflects acknowledgments from background recovery. A past network error does not mean an acknowledged record is still pending. The returned scope and delivery state distinguish registered records, pending work and unknown status.
 
 Register existing files in bulk, inspect retained evidence, check the record or export the graph:
 
@@ -121,6 +125,8 @@ python3 skills/exp-observer/scripts/exp_observer.py observe finish --project my-
 The server records start/finish times and elapsed wall time, including waits. An observation belongs to a node, with no session binding. If the runtime or provider exposes counters for this step, pass `--input-tokens N`, `--output-tokens N` and `--usage-source SOURCE` when finishing; `--usage-ref REF` identifies the source record. Omit unavailable counters: **unknown stays `null`, while measured zero stays zero**. Use step-specific counters rather than repeating cumulative usage across observations.
 
 The interface aggregates a node and its contained descendants. Finished time intervals are combined by union, so parent timers and parallel work do not double-count elapsed time; running steps remain marked in progress. Command execution wall time is shown separately. Token totals include known counters and show partial coverage when counters or worked leaf observations are missing; semantic links and reused decision evidence do not add usage.
+
+When running under Happy, an optional read-only adapter can import measured inference usage from the local host database. It associates actual client invocations with research records and attributes an inference to a node only when its measured interval fits one unambiguous recorded active interval. Unassigned usage stays at the associated-conversation level. Input, output and cache counts retain the host's raw values; cache counts are displayed separately. Agents need not maintain counters. This adapter depends on an internal host format; missing or unsupported host data leaves usage unknown and does not block recording.
 
 ## Your records stay local
 

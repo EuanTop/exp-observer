@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { nodePresentation } from "./node-presentation";
+import { isNodeProcessing, nodePresentation } from "./node-presentation";
 import { NODE_SIZE, toCanvas, type Project, type ResearchNode } from "./model";
 
 const node: ResearchNode = {
   id: "step",
-  title: "研究完成",
+  title: "追加更新会改变输出吗？",
   kind: "finding",
   status: "completed",
   parentId: null,
@@ -31,17 +31,19 @@ const project = (): Project => ({
   activity: [],
 });
 
-describe("conclusions on research nodes", () => {
-  it("exposes the recorded finding instead of a generic completion title", () => {
+describe("research card content", () => {
+  it("keeps the research question as title and recorded context/finding in the body", () => {
     const p = project();
     expect(nodePresentation(p, node)).toEqual({
-      headline: node.summary,
-      context: "研究完成",
-      summary: "",
+      headline: node.title,
+      context: "",
+      summary: node.summary,
+      conclusion: "",
       source: "",
     });
     const canvas = toCanvas(p, null, [], { onToggle() {}, onEnter() {} });
-    expect(canvas.nodes[0].data.presentation.headline).toBe(node.summary);
+    expect(canvas.nodes[0].data.presentation.headline).toBe(node.title);
+    expect(canvas.nodes[0].data.presentation.summary).toBe(node.summary);
     expect(canvas.nodes[0].style).toMatchObject({
       width: NODE_SIZE.w,
       height: NODE_SIZE.h,
@@ -70,11 +72,15 @@ describe("conclusions on research nodes", () => {
         conclusion: "另一个节点的结论",
       },
     ];
-    expect(nodePresentation(p, node).headline).toBe("更新频繁时保留扫描方案。");
+    expect(nodePresentation(p, node)).toMatchObject({
+      headline: node.title,
+      conclusion: "更新频繁时保留扫描方案。",
+    });
     expect(
       nodePresentation(p, { ...node, conclusion: "仅追加数据时使用索引。" }),
     ).toMatchObject({
-      headline: "仅追加数据时使用索引。",
+      headline: node.title,
+      conclusion: "仅追加数据时使用索引。",
       source: "结论",
       summary: node.summary,
     });
@@ -114,14 +120,32 @@ describe("conclusions on research nodes", () => {
       },
     ];
     expect(nodePresentation(p, node)).toMatchObject({
-      headline: "边界输入仍有差异。",
+      headline: node.title,
+      conclusion: "边界输入仍有差异。",
       source: "评估 · 正确性",
     });
     p.assessments = [];
     expect(nodePresentation(p, { ...node, summary: "" })).toMatchObject({
-      headline: "研究完成",
+      headline: node.title,
+      conclusion: "",
+      summary: "",
       source: "",
     });
+  });
+
+  it("omits repeated conclusions and tolerates absent optional text/history", () => {
+    expect(
+      nodePresentation(project(), { ...node, conclusion: node.summary }),
+    ).toMatchObject({ summary: node.summary, conclusion: "", source: "" });
+    expect(
+      nodePresentation(project(), { ...node, conclusion: node.title }),
+    ).toMatchObject({ headline: node.title, conclusion: "" });
+    expect(
+      nodePresentation(
+        {} as Project,
+        { id: "empty", title: "" } as ResearchNode,
+      ),
+    ).toMatchObject({ headline: "未命名节点", summary: "", conclusion: "" });
   });
 
   it("keeps temporal links labelled as sequence rather than causal evidence", () => {
@@ -136,5 +160,65 @@ describe("conclusions on research nodes", () => {
     expect(
       toCanvas(p, null, [], { onToggle() {}, onEnter() {} }).edges[0].label,
     ).toBe("后续记录");
+  });
+});
+
+describe("recorded node processing state", () => {
+  it("lights active/running nodes, but never a completed node merely because it is selected", () => {
+    const p = project();
+    expect(isNodeProcessing(p, node)).toBe(false);
+    expect(isNodeProcessing(p, { ...node, status: "active" })).toBe(true);
+    expect(isNodeProcessing(p, { ...node, status: "running" })).toBe(true);
+    const canvas = toCanvas(p, null, [node.id], {
+      onToggle() {},
+      onEnter() {},
+    });
+    expect(canvas.nodes[0].selected).toBe(true);
+    expect(canvas.nodes[0].data.processing).toBe(false);
+  });
+
+  it("uses any running run on this node, even when a more recent run finished", () => {
+    const p = project();
+    const run = {
+      id: "running",
+      nodeId: node.id,
+      title: "测量",
+      status: "running",
+      configuration: {},
+      metrics: {},
+      startedAt: null,
+      events: [],
+      artifactIds: [],
+      origin: "observed",
+    };
+    p.runs = [run, { ...run, id: "done", status: "completed" }];
+    expect(isNodeProcessing(p, node)).toBe(true);
+    p.runs[0].nodeId = "other";
+    expect(isNodeProcessing(p, node)).toBe(false);
+  });
+
+  it("uses ongoing observations and stops when they finish, without inferring activity from usage totals", () => {
+    const p = project();
+    p.observations = [
+      {
+        id: "step",
+        nodeId: node.id,
+        title: "检查",
+        status: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        finishedAt: null,
+        durationMs: null,
+        inputTokens: 40,
+        outputTokens: 20,
+        usageSource: "test",
+        origin: "observed",
+      },
+    ];
+    expect(isNodeProcessing(p, node)).toBe(true);
+    p.observations[0].finishedAt = "2026-01-01T00:00:01Z";
+    expect(isNodeProcessing(p, node)).toBe(false);
+    p.observations[0].status = "finished";
+    expect(isNodeProcessing(p, node)).toBe(false);
+    expect(isNodeProcessing({} as Project, node)).toBe(false);
   });
 });

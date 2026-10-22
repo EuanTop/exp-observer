@@ -81,6 +81,24 @@ class StoreTests(unittest.TestCase):
                 self.assertCode('invalid_request', self.apply, [{'op': 'node.update', 'data': {'id': 'a', **data}}])
                 self.assertEqual(self.store.get_project('study'), before)
 
+    def test_native_analysis_is_available_in_scoped_context_without_expanding_global_context(self):
+        self.add_node('child', 'a')
+        self.add_node('other')
+        analysis = 'Evidence comparison\n\nCounterexample and limitations: α ≠ β.'
+        self.apply([
+            {'op': 'node.update', 'data': {'id': 'a', 'notes': analysis}},
+            {'op': 'node.update', 'data': {'id': 'child', 'notes': 'Follow-up reasoning'}},
+            {'op': 'node.update', 'data': {'id': 'other', 'notes': 'Outside selected scope'}},
+        ])
+        global_context = self.store.context('study')
+        self.assertTrue(all(node['hasNotes'] for node in global_context['nodes']))
+        self.assertTrue(all('notes' not in node for node in global_context['nodes']))
+        scoped = self.store.context('study', 'a')
+        self.assertEqual({node['id'] for node in scoped['nodes']}, {'a', 'child'})
+        self.assertEqual(scoped['nodes'][0]['notes'], analysis)
+        self.assertEqual(scoped['nodes'][1]['notes'], 'Follow-up reasoning')
+        self.assertNotIn('Outside selected scope', json.dumps(scoped))
+
     def test_atomic_batch_rollback(self):
         before = self.store.get_project('study')
         self.assertCode('invalid_reference', self.apply, [{'op': 'node.add', 'data': {'id': 'b'}}, {'op': 'edge.add', 'data': {'source': 'b', 'target': 'missing'}}])

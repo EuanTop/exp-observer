@@ -178,7 +178,22 @@ export default function App() {
         setProjects(ps);
         const p = pRef.current;
         const revision = ps.find((x) => x.id === p?.id)?.revision;
-        if (p && revision !== undefined && revision !== p.revision) {
+        if ((!p || revision === undefined) && ps.length) {
+          const saved = localStorage.getItem("exp-observer-project");
+          await load(
+            ps.find((candidate) => candidate.id === saved)?.id || ps[0].id,
+          );
+        } else if (p && !ps.length) {
+          loadedId.current = "";
+          pRef.current = null;
+          setProject(null);
+          setNodes([]);
+          setEdges([]);
+          setSelected([]);
+          setScope(null);
+          setEdgeId(null);
+          setInspector(false);
+        } else if (p && revision !== undefined && revision !== p.revision) {
           const updated = await api.project(p.id);
           if (
             pRef.current?.id === p.id &&
@@ -195,7 +210,7 @@ export default function App() {
       }
     }, 1800);
     return () => clearInterval(t);
-  }, []);
+  }, [load]);
   const mutate = useCallback(
     async (operations: Operation[]) => {
       const p = pRef.current;

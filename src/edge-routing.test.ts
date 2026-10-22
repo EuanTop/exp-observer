@@ -18,7 +18,12 @@ describe("card edge routing", () => {
       "left",
       "right",
     ]);
-    expect(forward.points[0].y).not.toBe(backward.points[0].y);
+    expect(forward.points[0]).toEqual({ x: a.width, y: a.height / 2 });
+    expect(backward.points.at(-1)).toEqual(forward.points[0]);
+    expect(forward.points.at(-1)).toEqual({ x: b.x, y: b.height / 2 });
+    expect(backward.points[0]).toEqual(forward.points.at(-1));
+    expect(forward.points.some((p) => p.y < a.height / 2)).toBe(true);
+    expect(backward.points.some((p) => p.y > a.height / 2)).toBe(true);
     for (const route of [forward, backward]) {
       expect(
         route.points
@@ -51,6 +56,11 @@ describe("card edge routing", () => {
     const moved = { ...b, x: 0, y: 350 };
     expect(facingSides(a, moved)).toEqual(["bottom", "top"]);
     const route = routeEdge(a, moved, [], -18)!;
+    expect(route.points[0]).toEqual({ x: a.width / 2, y: a.height });
+    expect(route.points.at(-1)).toEqual({
+      x: moved.x + moved.width / 2,
+      y: moved.y,
+    });
     expect(route.points.at(-1)!.y).toBe(moved.y);
     const expanded = { ...a, width: 600, height: 400 };
     const outside = { ...b, x: 820 };

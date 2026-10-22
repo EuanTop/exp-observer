@@ -42,23 +42,68 @@ def scoped_path(path, root, allow_missing=False):
 
 
 class WorkspaceDiscovery:
-    """Retain tree progress and budget root-change probes alongside ordinary traversal."""
+    """Budget root/experiment change probes without losing ordinary tree progress."""
     def __init__(self, root, rescan_interval):
         self.root = root
         self.rescan_interval = rescan_interval
         self.queue = deque([root])
         self.cursor = None
         self.priority_cursor = None
+        self.priority_directory = None
+        self.priority_queue = deque()
+        self.priority_pending = set()
+        self.priority_dirty = set()
         self.priority_turn = False
+        self.watched = deque()
+        self.directory_mtimes = {}
+        self.watch_turn = 0
         self.root_mtime = None
         self.root_dirty = False
         self.next_scan = 0
         self.outboxes = set()
 
-    def probe(self, directory):
+    def probe(self, directory, *, watch=False):
         outbox = directory / '.exp-observer-runs' / 'outbox'
-        if scoped_path(outbox, self.root) and outbox.is_dir():
+        found = scoped_path(outbox, self.root) and outbox.is_dir()
+        new_outbox = found and outbox not in self.outboxes
+        if found:
             self.outboxes.add(outbox)
+        if directory != self.root and (watch or found) and directory not in self.directory_mtimes:
+            try:
+                if not scoped_path(directory, self.root):
+                    return
+                self.directory_mtimes[directory] = directory.stat().st_mtime_ns
+            except OSError:
+                return
+            self.watched.append(directory)
+        if new_outbox and directory != self.root:
+            # Children may already exist when this owner is first discovered.
+            self._prioritize(directory)
+
+    def _prioritize(self, directory):
+        if directory in self.priority_pending:
+            self.priority_dirty.add(directory)
+        else:
+            self.priority_pending.add(directory)
+            self.priority_queue.append(directory)
+
+    def _watch_directory(self):
+        directory = self.watched.popleft()
+        try:
+            if not scoped_path(directory, self.root):
+                raise FileNotFoundError
+            modified = directory.stat().st_mtime_ns
+        except OSError:
+            self.directory_mtimes.pop(directory, None)
+            return True
+        if modified != self.directory_mtimes[directory]:
+            known_outbox = directory / '.exp-observer-runs' / 'outbox' in self.outboxes
+            self.directory_mtimes[directory] = modified
+            self.probe(directory)
+            if known_outbox:
+                self._prioritize(directory)
+        self.watched.append(directory)
+        return True
 
     def refresh_root(self):
         try:
@@ -67,7 +112,7 @@ class WorkspaceDiscovery:
             modified = self.root.stat().st_mtime_ns
         except OSError:
             return
-        if self.root_mtime is not None and modified != self.root_mtime:
+        if modified != self.root_mtime:
             self.root_dirty = True
         self.root_mtime = modified
 
@@ -79,14 +124,24 @@ class WorkspaceDiscovery:
         return None
 
     def step(self):
-        if self.priority_cursor is None and self.root_dirty:
+        if self.root_dirty:
             self.root_dirty = False
-            if scoped_path(self.root, self.root):
+            self._prioritize(self.root)
+        self.watch_turn = (self.watch_turn + 1) % 4
+        if self.watched and self.watch_turn == 0:
+            return self._watch_directory()
+        if self.priority_cursor is None and self.priority_queue:
+            directory = self.priority_queue.popleft()
+            if scoped_path(directory, self.root):
                 try:
-                    self.priority_cursor = os.scandir(self.root)
+                    self.priority_cursor = os.scandir(directory)
+                    self.priority_directory = directory
                     self.priority_turn = False
                 except OSError:
                     pass
+            if self.priority_cursor is None:
+                self.priority_pending.discard(directory)
+                self.priority_dirty.discard(directory)
             return True  # Opening a priority scan consumes the same budget as a tree scan.
         if self.priority_cursor is not None and self.priority_turn:
             self.priority_turn = False
@@ -96,18 +151,23 @@ class WorkspaceDiscovery:
         if not progressed and self.priority_cursor is not None:
             self.priority_turn = False
             return self._priority_step()
-        return progressed
+        # Keep spending the fixed budget on watch rotation even when the tree
+        # is idle; otherwise the first idle step would defer all remaining watches.
+        return progressed or bool(self.watched)
 
     def _priority_step(self):
         try:
             directory = self._child(next(self.priority_cursor))
             if directory is not None:
-                self.probe(directory)
-        except StopIteration:
+                self.probe(directory, watch=True)
+        except (StopIteration, OSError):
             self.priority_cursor.close()
             self.priority_cursor = None
-        except OSError:
-            pass
+            directory, self.priority_directory = self.priority_directory, None
+            self.priority_pending.discard(directory)
+            if directory in self.priority_dirty:
+                self.priority_dirty.discard(directory)
+                self._prioritize(directory)
         return True
 
     def _tree_step(self):
@@ -119,7 +179,7 @@ class WorkspaceDiscovery:
             directory = self.queue.popleft()
             if not scoped_path(directory, self.root):
                 return True
-            self.probe(directory)
+            self.probe(directory, watch=directory.parent == self.root)
             try:
                 self.cursor = os.scandir(directory)
             except OSError:
@@ -176,6 +236,8 @@ class Recovery:
         self.last_results = []
         self.acknowledged = {}
         self.project_plans = {}
+        from .host_usage import HostUsageImporter
+        self.host_usage = HostUsageImporter(store, url=self.url) if store is not None else None
 
     def _targets(self, results):
         targets, active, disabled = {}, [], []
@@ -330,7 +392,8 @@ class Recovery:
         results = []
         if self.origin is None:
             return results
-        candidates = self._read_candidates(self._targets(results), results)
+        targets = self._targets(results)
+        candidates = self._read_candidates(targets, results)
         groups = defaultdict(list)
         for item in candidates:
             groups[item[2]['projectId']].append(item)
@@ -350,6 +413,8 @@ class Recovery:
                 if authoritative is not None and item[0] == authoritative[0]:
                     continue
                 results.append(self._submit(item))
+        if self.host_usage is not None and not self.stopped.is_set():
+            results.extend(self.host_usage.drain_once(targets))
         self.last_results = results
         return results
 

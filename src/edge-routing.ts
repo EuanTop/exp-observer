@@ -42,16 +42,12 @@ export function facingSides(source: Rect, target: Rect): [Side, Side] {
       : ["top", "bottom"];
 }
 
-function port(rect: Rect, side: Side, lane: number): Point {
+function port(rect: Rect, side: Side): Point {
   const c = center(rect);
   const horizontal = side === "left" || side === "right";
-  const offset = Math.max(
-    -((horizontal ? rect.height : rect.width) / 2 - 18),
-    Math.min((horizontal ? rect.height : rect.width) / 2 - 18, lane),
-  );
   return horizontal
-    ? { x: side === "left" ? rect.x : rect.x + rect.width, y: c.y + offset }
-    : { x: c.x + offset, y: side === "top" ? rect.y : rect.y + rect.height };
+    ? { x: side === "left" ? rect.x : rect.x + rect.width, y: c.y }
+    : { x: c.x, y: side === "top" ? rect.y : rect.y + rect.height };
 }
 
 export function segmentClear(a: Point, b: Point, obstacles: Rect[]): boolean {
@@ -265,8 +261,8 @@ export function routeEdge(
     ...(!contains(target, source) ? [target] : []),
   ];
   for (const [sourceSide, targetSide] of pairs) {
-    const a = port(source, sourceSide, lane),
-      b = port(target, targetSide, lane);
+    const a = port(source, sourceSide),
+      b = port(target, targetSide);
     const start = {
       x: a.x + directions[sourceSide].x * 24,
       y: a.y + directions[sourceSide].y * 24,
@@ -277,9 +273,23 @@ export function routeEdge(
     };
     if (!segmentClear(a, start, blocks) || !segmentClear(end, b, blocks))
       continue;
-    const middle = corridor(start, end, blocks);
+    // Separate reciprocal paths after leaving the card, keeping all ports at midpoints.
+    const laneStart = {
+      x: start.x + (directions[sourceSide].y ? lane : 0),
+      y: start.y + (directions[sourceSide].x ? lane : 0),
+    };
+    const laneEnd = {
+      x: end.x + (directions[targetSide].y ? lane : 0),
+      y: end.y + (directions[targetSide].x ? lane : 0),
+    };
+    if (
+      !segmentClear(start, laneStart, blocks) ||
+      !segmentClear(laneEnd, end, blocks)
+    )
+      continue;
+    const middle = corridor(laneStart, laneEnd, blocks);
     if (!middle) continue;
-    const points = simplify([a, ...middle, b]);
+    const points = simplify([a, start, ...middle, end, b]);
     // Keep the whole label off cards, including labels on vertical segments.
     const segments = points
       .slice(1)

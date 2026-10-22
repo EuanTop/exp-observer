@@ -61,7 +61,7 @@ def identity(path):
     return digest.hexdigest(), size
 
 
-COLLECTIONS = ('nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations', 'activity')
+COLLECTIONS = ('nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations', 'usageRecords', 'activity')
 CHECKPOINT_INTERVAL = 50
 
 
@@ -426,7 +426,7 @@ class Store:
             stamp = now()
             p = {'id': project_id, 'name': data['name'].strip(), 'description': data.get('description', ''),
                  'revision': 1, 'createdAt': stamp, 'updatedAt': stamp, 'sourceRoots': [],
-                 **{key: [] for key in ('nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations', 'activity')}}
+                 **{key: [] for key in COLLECTIONS}}
             if 'sourceRoots' in data:
                 p['sourceRoots'] = data['sourceRoots']
             self._validate(p)
@@ -454,6 +454,60 @@ class Store:
             raise StoreError('expectedRevision must be a positive integer.')
         if 'expectedRevision' in body and body['expectedRevision'] != p['revision']:
             raise StoreError(f'Experiment changed: expected revision {body["expectedRevision"]}, current {p["revision"]}. Read it again and reapply your changes.', 'revision_conflict', 409)
+
+    def import_usage_records(self, project_id, records):
+        """Internal adapter entry point: immutable source counters, replay-safe imports.
+
+        Research batch commands cannot write this collection. Attribution may be
+        revised when later frozen captures clarify an interval; counters cannot.
+        """
+        if not isinstance(records, list):
+            raise StoreError('Usage records must be an array.')
+        with self._transaction(write=True) as db:
+            previous = self._load(db, project_id)
+            p = copy.deepcopy(previous)
+            current = p.setdefault('usageRecords', [])
+            by_ref = {(r['source'], r['sourceRef']): index for index, r in enumerate(current)}
+            imported = updated = 0
+            for supplied in records:
+                record = copy.deepcopy(object_value(supplied, 'Usage record'))
+                self._validate_usage_record(record, {node['id'] for node in p['nodes']})
+                key = record['source'], record['sourceRef']
+                if key in by_ref:
+                    index = by_ref[key]
+                    old = current[index]
+                    mutable = {'nodeId', 'attribution'}
+                    if {k: v for k, v in old.items() if k not in mutable} != {k: v for k, v in record.items() if k not in mutable}:
+                        raise StoreError('A host usage reference changed its measured counters or identity.', 'usage_conflict', 409)
+                    if old != record:
+                        current[index] = record
+                        updated += 1
+                    continue
+                claimed = db.execute("SELECT project_id FROM records WHERE collection = 'usageRecords' "
+                                     "AND json_extract(document, '$.source') = ? AND json_extract(document, '$.sourceRef') = ? LIMIT 1", key).fetchone()
+                if claimed is not None and claimed['project_id'] != project_id:
+                    raise StoreError('This host inference is already assigned to another project.', 'usage_conflict', 409)
+                by_ref[key] = len(current)
+                current.append(record)
+                imported += 1
+            if imported or updated:
+                self._validate(p)
+                self._record(db, previous, p, [{'op': 'usage.import', 'data': {'count': imported, 'updated': updated}}])
+            return {'imported': imported, 'updated': updated}
+
+    def _validate_usage_record(self, record, node_ids):
+        valid_id(record.get('id'))
+        if record.get('nodeId') is not None and record['nodeId'] not in node_ids:
+            raise StoreError('Unknown usage node reference.', 'invalid_reference')
+        for field in ('source', 'sourceRef', 'provider', 'model'):
+            if not isinstance(record.get(field), str) or not record[field].strip():
+                raise StoreError(f'Usage {field} is required.')
+        for field in ('inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'):
+            value = record.get(field)
+            if value is not None and (type(value) is not int or value < 0):
+                raise StoreError('Usage counters must be nonnegative integers or unknown.', 'invalid_token_counter')
+        if self._observation_time(record.get('finishedAt')) < self._observation_time(record.get('startedAt')):
+            raise StoreError('Usage finish must not precede its start.')
 
     def batch(self, project_id, body):
         object_value(body, 'Batch')
@@ -500,7 +554,7 @@ class Store:
         def bounds(node):
             x, y = node['position']['x'], node['position']['y']
             nested = [child for child in children.get(node['id'], []) if child['id'] not in unplaced]
-            width, height = 300, 250
+            width, height = 368, 230
             if nested and not node.get('collapsed', False):
                 rectangles = [bounds(child) for child in nested]
                 width = max(330, *(cx + cw - x + 28 for cx, cy, cw, ch in rectangles))
@@ -520,16 +574,12 @@ class Store:
                     # Candidate rows jump over occupied containers rather than scanning pixels.
                     rows = sorted({origin_y, *(max(origin_y, y + height + 52) for x, y, width, height in occupied)})
                     for y in rows:
-                        for column in range(3):
-                            x = origin_x + column * 360
-                            if all(x + 328 <= ox or x >= ox + width + 28 or
-                                   y + 278 <= oy or y >= oy + height + 28
-                                   for ox, oy, width, height in occupied):
-                                node['position'] = {'x': x, 'y': y}
-                                break
-                        else:
-                            continue
-                        break
+                        x = origin_x
+                        if all(x + 396 <= ox or x >= ox + width + 28 or
+                               y + 258 <= oy or y >= oy + height + 28
+                               for ox, oy, width, height in occupied):
+                            node['position'] = {'x': x, 'y': y}
+                            break
                     unplaced.remove(node['id'])
                 visit(node['id'])
 
@@ -560,7 +610,7 @@ class Store:
                 d[field] = aliases.get(d[field], d[field])
         if op == 'project.update':
             for key, value in d.items():
-                if key not in {'id', 'revision', 'createdAt', 'updatedAt', 'nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations', 'activity'}:
+                if key not in {'id', 'revision', 'createdAt', 'updatedAt', *COLLECTIONS}:
                     p[key] = value
             return
         if op == 'node.merge':
@@ -570,7 +620,7 @@ class Store:
                 raise StoreError('Merge requires two different nodes.', 'invalid_merge')
             if any(node.get('parentId') == source['id'] for node in p['nodes']):
                 raise StoreError('Only a leaf node can be merged.', 'invalid_merge')
-            for collection in ('runs', 'artifacts', 'decisions', 'observations'):
+            for collection in ('runs', 'artifacts', 'decisions', 'observations', 'usageRecords'):
                 for record in p.get(collection, []):
                     if record.get('nodeId') == source['id']:
                         record['nodeId'] = target['id']
@@ -607,6 +657,9 @@ class Store:
             p['decisions'] = [a for a in p['decisions'] if a.get('nodeId') not in remove]
             if 'observations' in p:
                 p['observations'] = [o for o in p['observations'] if o.get('nodeId') not in remove]
+            for record in p.get('usageRecords', []):
+                if record.get('nodeId') in remove:
+                    record.update(nodeId=None, attribution='project-unassigned')
             for item in p['runs'] + p['assessments'] + p['decisions']:
                 if 'artifactIds' in item:
                     item['artifactIds'] = [key for key in item['artifactIds'] if key not in artifact_ids]
@@ -701,8 +754,8 @@ class Store:
         if not isinstance(roots, list) or any(not isinstance(r, str) or not (Path(r).is_absolute() or PureWindowsPath(r).is_absolute()) for r in roots):
             raise StoreError('sourceRoots must contain absolute directory paths.')
         groups = {}
-        for collection in ('nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations'):
-            items = p.get(collection, [] if collection == 'observations' else None)
+        for collection in ('nodes', 'edges', 'runs', 'artifacts', 'assessments', 'decisions', 'observations', 'usageRecords'):
+            items = p.get(collection, [] if collection in ('observations', 'usageRecords') else None)
             if not isinstance(items, list):
                 raise StoreError(f'{collection} must be an array.')
             group = {}
@@ -813,6 +866,12 @@ class Store:
             refs(decision.get('runIds', []), 'runs')
             refs(decision.get('artifactIds', []), 'artifacts')
         usage_refs = set()
+        for record in p.get('usageRecords', []):
+            self._validate_usage_record(record, groups['nodes'])
+            key = record['source'], record['sourceRef']
+            if key in usage_refs:
+                raise StoreError('Duplicate host usage source/reference.', 'duplicate_usage_ref', 409)
+            usage_refs.add(key)
         for observation in p.get('observations', []):
             ref(observation.get('nodeId'), 'nodes')
             if observation.get('origin') not in ('observed', 'mock') or observation.get('status') not in ('running', 'finished'):
@@ -1016,6 +1075,12 @@ class Store:
             previous = self._load(db, project_id)
             self._expected(previous, body)
             p = self._revision(db, project_id, body['revision'])
+            if 'usageRecords' in previous:
+                p['usageRecords'] = copy.deepcopy(previous['usageRecords'])
+                present = {node['id'] for node in p['nodes']}
+                for record in p['usageRecords']:
+                    if record.get('nodeId') is not None and record['nodeId'] not in present:
+                        record.update(nodeId=None, attribution='project-unassigned')
             self._validate(p)
             self._record(db, previous, p, [{'op': 'project.restore', 'data': {'revision': body['revision']}}])
             return copy.deepcopy(p)
@@ -1048,7 +1113,9 @@ class Store:
         def compact(records, fields):
             return [{key: record.get(key) for key in fields} for record in records]
         return {'projectId': p['id'], 'name': p['name'], 'revision': p['revision'], 'description': p['description'],
-                'nodes': [{k: n.get(k) for k in ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'nextAction', 'importance', 'importanceReason', 'pauseReason', 'resumeWhen')} for n in nodes],
+                'nodes': [{**{k: n.get(k) for k in ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'nextAction', 'importance', 'importanceReason', 'pauseReason', 'resumeWhen')},
+                           'hasNotes': bool(n.get('notes')),
+                           **({'notes': n.get('notes', '')} if node_id else {})} for n in nodes],
                 'boundaryNodes': compact([n for n in p['nodes'] if n['id'] in boundary_ids], ('id', 'title', 'kind', 'status', 'importance')),
                 'edges': edges,
                 'runs': [{k: r.get(k) for k in ('id', 'nodeId', 'title', 'status', 'metrics', 'artifactIds', 'origin')} for r in runs],
@@ -1057,5 +1124,6 @@ class Store:
                 'artifacts': compact(artifacts, ('id', 'nodeId', 'runId', 'title', 'path', 'sha256', 'bytes', 'mime', 'createdAt', 'origin')),
                 'observations': compact([o for o in p.get('observations', []) if o['nodeId'] in selected],
                                         ('id', 'nodeId', 'title', 'status', 'startedAt', 'finishedAt', 'durationMs', 'inputTokens', 'outputTokens', 'usageSource', 'usageRef', 'origin')),
+                'usageRecords': [r for r in p.get('usageRecords', []) if not node_id or r.get('nodeId') in selected],
                 'counts': {key: len(p.get(key, [])) for key in ('nodes', 'runs', 'artifacts', 'assessments', 'observations')},
                 'warnings': [f'Run {r["id"]} is {r["status"]}.' for r in runs if r['status'] in ('running', 'failed', 'invalid')]}

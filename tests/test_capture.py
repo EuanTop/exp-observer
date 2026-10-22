@@ -1,5 +1,6 @@
 """Capture must not steer experiments; recovery must never rerun or reread them."""
 from contextlib import contextmanager
+import io
 import importlib.util
 import json
 import os
@@ -68,6 +69,152 @@ class CaptureTests(unittest.TestCase):
         client.request = lambda *a, **kw: (_ for _ in ()).throw(cli.ClientError('offline'))
         return client
 
+    def test_native_notes_freeze_utf8_text_and_kind_without_creating_a_report(self):
+        notes = '为什么检查并列面积？\r\n\r\n比较完整曲线；结论只限本轮样本。\r\n'
+        source = self.root / 'existing analysis.txt'
+        source.write_bytes(b'\xef\xbb\xbf' + notes.encode('utf-8'))
+        _, receipt = self.invoke('record', '--project', 'study', '--title', '并列面积如何影响排序？',
+            '--kind', 'question', '--summary', '针对并列情况核对排序规则。', '--notes-file', str(source),
+            '--request-id', 'native-notes', client=self.offline())
+        self.assertTrue(receipt['pending'])
+        task = self.tasks()[0]
+        self.assertEqual(task['operations'][0]['data']['notes'], notes)
+        self.assertEqual(task['operations'][0]['data']['kind'], 'question')
+        self.assertEqual(task['artifacts'], [])
+        source.unlink()
+        self.assertEqual(self.invoke('sync', '--project', 'study')[0], 0)
+        node = next(node for node in self.store.get_project('study')['nodes'] if node['id'] == receipt['nodeId'])
+        self.assertEqual((node['notes'], node['kind']), (notes, 'question'))
+        self.invoke('record', '--project', 'study', '--node', node['id'], '--title', node['title'],
+                    '--summary', '同一问题补充证据。')
+        node = next(node for node in self.store.get_project('study')['nodes'] if node['id'] == receipt['nodeId'])
+        self.assertEqual((node['notes'], node['kind']), (notes, 'question'))
+        self.assertEqual(self.store.get_project('study')['artifacts'], [])
+        self.assertEqual(list(self.root.rglob('*.md')), [])
+
+    def test_notes_stdin_and_intent_conflicts_preserve_frozen_analysis(self):
+        arguments = ('record', '--project', 'study', '--title', '容差是否有效？', '--kind', 'experiment',
+                     '--notes-file', '-', '--request-id', 'stdin-analysis')
+        with patch.object(cli.sys, 'stdin', io.StringIO('分析原文\n候选解释与限制。\n')):
+            self.invoke(*arguments, client=self.offline())
+        before = self.tasks()[0]
+        self.assertEqual(before['operations'][0]['data']['notes'], '分析原文\n候选解释与限制。\n')
+        with patch.object(cli.sys, 'stdin', io.StringIO('不同分析')):
+            with self.assertRaisesRegex(cli.ClientError, 'different work'):
+                self.invoke(*arguments, client=self.offline())
+        self.assertEqual(self.tasks()[0], before)
+        with patch.object(cli.sys, 'stdin', io.StringIO('分析原文\n候选解释与限制。\n')):
+            with self.assertRaisesRegex(cli.ClientError, 'different work'):
+                self.invoke('record', '--project', 'study', '--title', '容差是否有效？', '--kind', 'decision',
+                            '--notes-file', '-', '--request-id', 'stdin-analysis', client=self.offline())
+
+    def test_missing_notes_source_retries_frozen_pending_and_acknowledged_records(self):
+        source = self.root / 'analysis.txt'
+        notes = '完整分析\r\n限制与备选解释。\r\n'
+        source.write_bytes(notes.encode('utf-8'))
+        arguments = ('record', '--project', 'study', '--title', '原始问题', '--kind', 'question',
+                     '--notes-file', str(source), '--request-id', 'removed-notes-source')
+        _, original = self.invoke(*arguments, client=self.offline())
+        frozen = self.tasks()[0]
+        source.unlink()
+        _, registered = self.invoke(*arguments)
+        self.assertTrue(original['pending'])
+        self.assertFalse(registered['pending'])
+        self.assertEqual(registered['nodeId'], original['nodeId'])
+        self.assertEqual(self.tasks()[0]['operations'], frozen['operations'])
+        self.assertEqual(self.tasks()[0]['intent'], frozen['intent'])
+        with patch.object(cli.Client, 'request', side_effect=AssertionError('Synced retry attempted HTTP')), \
+             patch.object(cli, 'save_task', side_effect=AssertionError('Synced retry rewrote the queue')):
+            self.assertEqual(self.invoke(*arguments)[1], registered)
+        node = next(node for node in self.store.get_project('study')['nodes'] if node['id'] == original['nodeId'])
+        self.assertEqual(node['notes'], notes)
+
+    def test_unavailable_notes_retry_still_rejects_different_intent_and_changed_readable_text(self):
+        source = self.root / 'analysis.txt'
+        source.write_text('Original analysis', encoding='utf-8')
+        base = ('record', '--project', 'study', '--title', 'Original question', '--kind', 'question',
+                '--notes-file', str(source), '--request-id', 'notes-identity')
+        self.invoke(*base, client=self.offline())
+        frozen = self.tasks()[0]
+        source.unlink()
+        variants = [('--title', 'Different question'), ('--kind', 'decision'),
+                    ('--notes-file', str(self.root / 'another-missing-file.txt'))]
+        for option, value in variants:
+            arguments = list(base)
+            arguments[arguments.index(option) + 1] = value
+            with self.subTest(option=option), self.assertRaisesRegex(cli.ClientError, 'different work'):
+                self.invoke(*arguments, client=self.offline())
+        source.write_text('Changed readable analysis', encoding='utf-8')
+        with self.assertRaisesRegex(cli.ClientError, 'different work'):
+            self.invoke(*base, client=self.offline())
+        self.assertEqual(self.tasks()[0], frozen)
+
+    def test_missing_analysis_cannot_create_a_new_record_or_clear_existing_notes(self):
+        for retry in ((), ('--request-id', 'new-request')):
+            with self.subTest(retry=retry), self.assertRaises(FileNotFoundError):
+                self.invoke('record', '--project', 'study', '--title', 'New question',
+                            '--notes-file', str(self.root / 'missing.txt'), *retry)
+        self.assertFalse((self.root / '.exp-observer-runs').exists())
+
+    def test_invalid_notes_file_does_not_silently_drop_native_analysis(self):
+        source = self.root / 'invalid.txt'
+        source.write_bytes(b'\xff\xfeinvalid')
+        with patch.object(self.client, 'request', side_effect=AssertionError('HTTP before valid notes')):
+            with self.assertRaises(UnicodeDecodeError):
+                self.invoke('record', '--project', 'study', '--title', 'Invalid notes', '--notes-file', str(source))
+        self.assertFalse((self.root / '.exp-observer-runs').exists())
+
+    def test_standalone_client_accepts_native_analysis_from_utf8_stdin(self):
+        notes = '比较两种解释。\n\n结论：现有证据不足以外推。\n'
+        result = subprocess.run([sys.executable, str(CLI_PATH), '--url', self.url, 'record',
+            '--project', 'study', '--title', '证据支持哪种解释？', '--kind', 'decision', '--notes-file', '-'],
+            input=notes, capture_output=True, text=True, encoding='utf-8', cwd=self.root, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertFalse(receipt['pending'])
+        node = next(node for node in self.store.get_project('study')['nodes'] if node['id'] == receipt['nodeId'])
+        self.assertEqual((node['kind'], node['notes']), ('decision', notes))
+        self.assertEqual(list(self.root.rglob('*.md')), [])
+
+    def test_status_is_read_only_local_and_distinguishes_incomplete_and_unknown(self):
+        _, first = self.invoke('record', '--project', 'study', '--title', 'Saved analysis', client=self.offline())
+        outbox = self.root / '.exp-observer-runs' / 'outbox'
+        path = next(path for path in outbox.glob('*.json') if not path.name.startswith('project-'))
+        task = json.loads(path.read_text(encoding='utf-8'))
+        task['state'] = 'running'
+        cli.save_task(path, task)
+        before = {str(path): path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        with patch.object(cli.Client, 'request', side_effect=AssertionError('status contacted HTTP')), \
+             patch.object(cli, 'save_task', side_effect=AssertionError('status wrote a task')), \
+             patch.object(cli, 'task_lock', side_effect=AssertionError('status created a lock')), \
+             patch.object(cli.subprocess, 'Popen', side_effect=AssertionError('status reran work')):
+            code, result = self.invoke('status', '--project', 'study')
+            _, unknown = self.invoke('status', '--project', 'never-recorded')
+        self.assertEqual(code, 0)
+        self.assertEqual((result['recordCount'], result['pendingCount'], result['incompleteCount']), (1, 1, 1))
+        self.assertEqual(result['records'][0]['nodeId'], first['nodeId'])
+        self.assertEqual(result['source'], 'local')
+        self.assertEqual(unknown['deliveryState'], 'unknown')
+        self.assertFalse(unknown['transportChecked'])
+        self.assertIsNone(unknown['pending'])
+        after = {str(path): path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        self.assertEqual(after, before)
+        (outbox / 'broken.json').write_text('[]', encoding='utf-8')
+        _, partial = self.invoke('status', '--project', 'never-recorded')
+        self.assertEqual(partial['deliveryState'], 'partial')
+        self.assertIsNone(partial['pending'])
+
+    def test_synced_failed_execution_is_not_pending_registration(self):
+        code, receipt = self.invoke('execute', '--project', 'study', '--title', 'Expected command failure',
+            '--', sys.executable, '-c', 'raise SystemExit(7)')
+        self.assertEqual(code, 7)
+        self.assertFalse(receipt['pending'])
+        _, result = self.invoke('status', '--project', 'study', client=self.offline())
+        self.assertEqual(result['deliveryState'], 'synced')
+        self.assertEqual(result['pendingCount'], 0)
+        self.assertEqual(result['records'][0]['status'], 'failed')
+        self.assertEqual(result['records'][0]['exitCode'], 7)
+
     def test_record_generates_references_and_preserves_nested_metrics(self):
         metrics = {'quality': {'means': [1, 2.5, None], 'ok': True}, '标签': ['实测']}
         (self.root / 'metrics.json').write_text(json.dumps(metrics), encoding='utf-8-sig')
@@ -120,10 +267,13 @@ class CaptureTests(unittest.TestCase):
         self.assertFalse(result['pending'], result)
         self.assertTrue(any('not found locally' in warning for warning in result['recordingWarnings']))
         project = self.store.get_project('study')
-        self.assertEqual(project['nodes'][-1]['conclusion'], 'Measured finding')
+        self.assertEqual(project['nodes'][-1]['title'], 'Measured finding')
+        self.assertEqual(project['nodes'][-1]['conclusion'], '')
         self.assertEqual(project['edges'], [])
 
     def test_record_updates_existing_node_without_hand_authored_batch(self):
+        self.store.batch('study', {'operations': [{'op': 'node.update', 'data': {
+            'id': 'a', 'conclusion': 'Original scoped finding'}}]})
         code, result = self.invoke('record', '--project', 'study', '--node', 'a', '--title', 'Updated',
                                    '--summary', 'Finding', '--status', 'completed')
         self.assertEqual(code, 0)
@@ -131,6 +281,7 @@ class CaptureTests(unittest.TestCase):
         project = self.store.get_project('study')
         self.assertEqual(len(project['nodes']), 1)
         self.assertEqual((project['nodes'][0]['title'], project['nodes'][0]['status']), ('Updated', 'completed'))
+        self.assertEqual(project['nodes'][0]['conclusion'], 'Original scoped finding')
         self.assertEqual(project['runs'], [])
         self.assertIsNone(result['runId'])
 
@@ -196,6 +347,30 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual((self.root / 'once.txt').read_text(), '1')
         self.assertEqual(self.store.get_project('study'), before)
         self.assertEqual(json.loads(path.read_text(encoding='utf-8'))['operations'], task['operations'])
+
+    def test_legacy_record_retry_defaults_new_intent_fields_without_refreezing_operations(self):
+        arguments = ('record', '--project', 'study', '--title', 'Original research question',
+                     '--summary', 'Original evidence', '--request-id', 'legacy-record')
+        _, original = self.invoke(*arguments, client=self.offline())
+        path = next(path for path in (self.root / '.exp-observer-runs/outbox').glob('*.json')
+                    if not path.name.startswith('project-'))
+        task = json.loads(path.read_text(encoding='utf-8'))
+        for key in ('conclusion', 'kind', 'notes', 'notesFile'):
+            task['intent'].pop(key, None)
+        # An older client materialized this field; an upgraded retry must keep
+        # the frozen batch rather than rebuilding it with today's defaults.
+        task['operations'][0]['data']['conclusion'] = 'Original research question'
+        cli.save_task(path, task)
+        _, receipt = self.invoke(*arguments)
+        self.assertFalse(receipt['pending'])
+        self.assertEqual(receipt['nodeId'], original['nodeId'])
+        acknowledged = json.loads(path.read_text(encoding='utf-8'))
+        self.assertEqual(acknowledged['operations'], task['operations'])
+        self.assertEqual(acknowledged['intent'], task['intent'])
+        before = self.store.get_project('study')
+        with patch.object(cli.Client, 'request', side_effect=AssertionError('Acknowledged legacy record attempted HTTP')):
+            self.assertEqual(self.invoke(*arguments)[1], receipt)
+        self.assertEqual(self.store.get_project('study'), before)
 
     def test_record_wraps_json_root_values_without_rewriting_result_files(self):
         metrics_path = self.root / 'metrics.json'

@@ -1,4 +1,9 @@
-import { isExecutionRun, type Observation, type Project } from "./model";
+import {
+  isExecutionRun,
+  type HostUsageRecord,
+  type Observation,
+  type Project,
+} from "./model";
 
 export type NodeUsage = {
   elapsedMs: number | null;
@@ -11,6 +16,9 @@ export type NodeUsage = {
   totalTokens: number | null;
   tokensPartial: boolean;
   observations: Observation[];
+  hostUsage: HostUsageRecord[];
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
 };
 
 function nonnegative(value: unknown): value is number {
@@ -30,6 +38,57 @@ function unique<T extends { id: string }>(records: T[]): T[] {
 function sumKnown(values: unknown[], valid = nonnegative): number | null {
   const known = values.filter(valid);
   return known.length ? known.reduce((sum, value) => sum + value, 0) : null;
+}
+
+export function hostUsageRecords(project: Project): HostUsageRecord[] {
+  return [
+    ...new Map(
+      (project.usageRecords ?? []).map((record) => [
+        `${record.source}\u0000${record.sourceRef}`,
+        record,
+      ]),
+    ).values(),
+  ];
+}
+
+export function getProjectHostUsage(project: Project) {
+  const records = hostUsageRecords(project);
+  const totals = (entries: HostUsageRecord[]) => ({
+    inputTokens: sumKnown(
+      entries.map((record) => record.inputTokens),
+      counter,
+    ),
+    outputTokens: sumKnown(
+      entries.map((record) => record.outputTokens),
+      counter,
+    ),
+    cacheReadTokens: sumKnown(
+      entries.map((record) => record.cacheReadTokens),
+      counter,
+    ),
+    cacheWriteTokens: sumKnown(
+      entries.map((record) => record.cacheWriteTokens),
+      counter,
+    ),
+  });
+  const groups = new Map<string, HostUsageRecord[]>();
+  for (const record of records) {
+    const key = `${record.provider}\u0000${record.model}`;
+    const group = groups.get(key);
+    if (group) group.push(record);
+    else groups.set(key, [record]);
+  }
+  return {
+    ...totals(records),
+    recordCount: records.length,
+    unassignedCount: records.filter((record) => !record.nodeId).length,
+    models: [...groups.values()].map((entries) => ({
+      provider: entries[0].provider,
+      model: entries[0].model,
+      ...totals(entries),
+      recordCount: entries.length,
+    })),
+  };
 }
 
 function timestamp(value: unknown): number {
@@ -88,16 +147,36 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
   const runs = unique(project.runs).filter(
     (run) => scope.has(run.nodeId) && isExecutionRun(run),
   );
+  const hostUsage = hostUsageRecords(project).filter(
+    (record) => record.nodeId !== null && scope.has(record.nodeId),
+  );
+  const tokenObservations = observations.filter(
+    (observation) =>
+      !hostUsage.some(
+        (record) =>
+          record.source === observation.usageSource &&
+          record.sourceRef === observation.usageRef,
+      ),
+  );
   const inputTokens = sumKnown(
-    observations.map((o) => o.inputTokens),
+    [
+      ...tokenObservations.map((o) => o.inputTokens),
+      ...hostUsage.map((record) => record.inputTokens),
+    ],
     counter,
   );
   const outputTokens = sumKnown(
-    observations.map((o) => o.outputTokens),
+    [
+      ...tokenObservations.map((o) => o.outputTokens),
+      ...hostUsage.map((record) => record.outputTokens),
+    ],
     counter,
   );
   const totalTokens = sumKnown([inputTokens, outputTokens], counter);
-  const observedNodes = new Set(observations.map((o) => o.nodeId));
+  const observedNodes = new Set([
+    ...observations.map((o) => o.nodeId),
+    ...hostUsage.map((record) => record.nodeId),
+  ]);
   const parents = new Set(nodes.map((node) => node.parentId));
   const unobservedWorkedLeaf = nodes.some(
     (node) =>
@@ -118,11 +197,24 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
     outputTokens,
     totalTokens,
     tokensPartial:
-      observations.some(
+      tokenObservations.some(
         (o) => !counter(o.inputTokens) || !counter(o.outputTokens),
+      ) ||
+      hostUsage.some(
+        (record) =>
+          !counter(record.inputTokens) || !counter(record.outputTokens),
       ) ||
       (totalTokens !== null && unobservedWorkedLeaf),
     observations,
+    hostUsage,
+    cacheReadTokens: sumKnown(
+      hostUsage.map((record) => record.cacheReadTokens),
+      counter,
+    ),
+    cacheWriteTokens: sumKnown(
+      hostUsage.map((record) => record.cacheWriteTokens),
+      counter,
+    ),
   };
 }
 

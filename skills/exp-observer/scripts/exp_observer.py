@@ -99,6 +99,10 @@ def parser():
     record.add_argument('--title', required=True)
     record.add_argument('--summary')
     record.add_argument('--conclusion', help='The substantive finding displayed directly on the node')
+    record.add_argument('--kind', help='Natural research type, e.g. question, experiment, finding or decision; omitted updates preserve the type')
+    notes = record.add_mutually_exclusive_group()
+    notes.add_argument('--notes', help='Full analysis retained in the node notes')
+    notes.add_argument('--notes-file', help='UTF-8 analysis loaded verbatim into node notes; - reads stdin without creating a report file')
     record.add_argument('--node', help='Update this node; omit to create a node')
     record.add_argument('--after', help='Related node ID or exact locally recorded title')
     record.add_argument('--relation', default='leads_to', help='Meaning of an explicit --after relationship')
@@ -110,6 +114,8 @@ def parser():
     record.add_argument('--request-id', help='Stable identifier for retries of this record')
     sync = commands.add_parser('sync', help='Retry local pending records without executing experiments')
     sync.add_argument('--project', help='Only sync this project')
+    status_command = commands.add_parser('status', help='Read current durable queue receipts locally, without HTTP or polling')
+    status_command.add_argument('--project', required=True)
     observe = commands.add_parser('observe', help='Record a node step duration and explicit runtime token counters')
     observation_actions = observe.add_subparsers(dest='observation_action', required=True)
     for action in ('start', 'finish'):
@@ -400,8 +406,9 @@ def read_queue_task(path):
     return task
 
 
-def local_context(outbox, client, project_id):
+def local_context(outbox, client, project_id, node_id=None):
     project, records = None, []
+    node_updates = []
     for path in Path(outbox).glob('*.json'):
         try:
             task = read_queue_task(path)
@@ -412,30 +419,68 @@ def local_context(outbox, client, project_id):
             else:
                 record = {key: task[key] for key in
                           ('requestId', 'nodeId', 'runId', 'state', 'capturedAt', 'startedAt', 'finishedAt') if key in task}
+                record['localTaskPath'] = str(path.resolve())
                 record['operations'] = []
-                for operation in task.get('operations', []):
+                for index, operation in enumerate(task.get('operations', [])):
                     data = operation.get('data', {})
                     detail = {'op': operation['op'], **{key: data[key] for key in
-                              ('id', 'title', 'status', 'nodeId', 'source', 'target', 'parentId') if key in data}}
-                    if isinstance(data.get('summary'), str):
-                        detail['summary'] = data['summary'][:512]
-                        if len(data['summary']) > 512:
-                            detail['summaryTruncated'] = True
+                              ('id', 'title', 'kind', 'status', 'nodeId', 'source', 'target', 'parentId') if key in data}}
+                    for field, limit in (('summary', 512), ('conclusion', 512)):
+                        if isinstance(data.get(field), str):
+                            detail[field] = data[field][:limit]
+                            if len(data[field]) > limit:
+                                detail[field + 'Truncated'] = True
+                    if isinstance(data.get('notes'), str):
+                        detail.update({'notes': data['notes'], 'hasNotes': bool(data['notes'])})
+                    if operation['op'] in ('node.add', 'node.update') and isinstance(data.get('id'), str):
+                        fields = ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'notes')
+                        node_updates.append(((task.get('capturedAt') or task.get('startedAt') or '', path.name, index),
+                                             {key: data[key] for key in fields if key in data}))
                     record['operations'].append(detail)
                 record['artifactCount'] = len(task.get('artifacts', []))
                 records.append(record)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             continue
     records.sort(key=lambda record: record.get('capturedAt') or record.get('startedAt') or '')
+    # Fold all local updates before applying the receipt window: an old notes
+    # operation can remain current after many later summary-only revisions.
+    nodes = {}
+    for _, update in sorted(node_updates, key=lambda entry: entry[0]):
+        nodes.setdefault(update['id'], {}).update(update)
+    scoped = {node_id} if node_id else set()
+    if node_id:
+        changed = True
+        while changed:
+            children = {key for key, node in nodes.items() if node.get('parentId') in scoped}
+            changed = bool(children - scoped)
+            scoped.update(children)
+    for record in records:
+        for detail in record['operations']:
+            if detail.get('id') not in scoped:
+                detail.pop('notes', None)
+    local_nodes = []
+    for key, node in nodes.items():
+        if node_id and key not in scoped:
+            continue
+        detail = {field: node[field] for field in ('id', 'title', 'kind', 'status', 'parentId') if field in node}
+        for field in ('summary', 'conclusion'):
+            if isinstance(node.get(field), str):
+                detail[field] = node[field][:512]
+                if len(node[field]) > 512:
+                    detail[field + 'Truncated'] = True
+        detail['hasNotes'] = isinstance(node.get('notes'), str) and bool(node['notes'])
+        if node_id and isinstance(node.get('notes'), str):
+            detail['notes'] = node['notes']
+        local_nodes.append(detail)
     pending = [record for record in records if record['state'] != 'synced']
-    return project, records, pending
+    return project, records, pending, local_nodes
 
 
 def context(client, args):
     workspace = Path.cwd() / '.exp-observer-runs'
     key = hashlib.sha256(json.dumps([client.url, args.project, args.node], ensure_ascii=False).encode('utf-8')).hexdigest()
     cache_path = workspace / 'context' / (key + '.json')
-    project, records, pending = local_context(workspace / 'outbox', client, args.project)
+    project, records, pending, local_nodes = local_context(workspace / 'outbox', client, args.project, args.node)
     try:
         route = client.project_route(args.project) + '/context'
         if args.node:
@@ -452,7 +497,7 @@ def context(client, args):
         pending_project = rejected and exc.code == 'not_found' and 'Experiment not found.' in str(exc) and has_pending
         result = {'projectId': args.project, 'availability': 'pending' if pending_project else ('error' if rejected else 'unavailable'),
                   'pending': has_pending,
-                  'cachedRemote': cached, 'localProject': project, 'localRecords': records[-20:],
+                  'cachedRemote': cached, 'localProject': project, 'localNodes': local_nodes, 'localRecords': records[-20:],
                   'localPending': pending[-20:], 'localRecordCount': len(records), 'localPendingCount': len(pending),
                   'recordingWarnings': [str(exc)]}
         if rejected:
@@ -471,6 +516,8 @@ def context(client, args):
     if pending:
         result['localPending'] = pending[-20:]
         result['localPendingCount'] = len(pending)
+        pending_ids = {record.get('nodeId') for record in pending}
+        result['localPendingNodes'] = [node for node in local_nodes if node['id'] in pending_ids]
     emit(result)
     return 0
 
@@ -486,12 +533,19 @@ def task_identity(client, args, intent):
     return path, task
 
 
-def load_existing(path, task):
+def load_existing(path, task, *, frozen_notes=False):
     if not path.exists():
         return None
     existing = json.loads(path.read_text(encoding='utf-8'))
-    defaults = {'conclusion': None, 'independent': False, 'relation': 'leads_to', 'after': None}
-    if (defaults | existing.get('intent', {})) != (defaults | task['intent']):
+    defaults = {'conclusion': None, 'independent': False, 'relation': 'leads_to', 'after': None,
+                'kind': None, 'notes': None, 'notesFile': None}
+    expected = defaults | task['intent']
+    if frozen_notes:
+        retained_notes = existing.get('intent', {}).get('notes')
+        if not isinstance(retained_notes, str):
+            raise ClientError('The durable capture has no frozen analysis for this retry.', code='queue_identity_conflict')
+        expected['notes'] = retained_notes
+    if (defaults | existing.get('intent', {})) != expected:
         raise ClientError('request-id was already used for different work; use a new request-id.')
     return existing
 
@@ -634,6 +688,13 @@ def merge_source_root(client, task):
 
 
 def sync_task(client, path, task):
+    # A background worker may have acknowledged the frozen task since this
+    # caller read it. The atomic on-disk receipt is authoritative, even offline.
+    current = read_queue_task(path)
+    identity = ('url', 'projectId', 'taskId', 'requestId', 'nodeId', 'runId', 'intent')
+    if current['url'] != client.url or any(current.get(key) != task.get(key) for key in identity):
+        raise ClientError('The durable queue identity differs from this capture; refusing to submit or overwrite it.', code='queue_identity_conflict')
+    task = current
     if task['state'] == 'synced':
         return task_result(task)
     if task['state'] != 'ready':
@@ -702,6 +763,17 @@ def task_result(task, warnings=()):
 
 
 def record(client, args):
+    notes = args.notes
+    notes_error = None
+    if args.notes_file is not None:
+        if args.notes_file == '-':
+            notes = sys.stdin.read()
+        else:
+            try:
+                with Path(args.notes_file).open('r', encoding='utf-8-sig', newline='') as stream:
+                    notes = stream.read()
+            except OSError as exc:
+                notes_error = exc
     metrics, metrics_warning = {}, None
     if args.metrics_file:
         try:
@@ -713,17 +785,24 @@ def record(client, args):
             metrics = {}
             metrics_warning = f'Metrics could not be decoded; retaining the original file as evidence when available: {exc}'
     intent = {'command': 'record', **{key: getattr(args, key) for key in
-              ('title', 'summary', 'conclusion', 'node', 'after', 'relation', 'independent', 'parent', 'status', 'artifact')},
+              ('title', 'summary', 'conclusion', 'kind', 'node', 'after', 'relation', 'independent', 'parent', 'status', 'artifact')},
+              'notes': notes, 'notesFile': args.notes_file,
               'metrics': metrics, 'hasMetrics': args.metrics_file is not None and metrics_warning is None,
               'metricsFile': args.metrics_file}
     path, task = task_identity(client, args, intent)
+    # Missing/unreadable source text must not prevent a stable request from
+    # returning or delivering its existing frozen analysis. New work still fails.
+    if notes_error is not None and (not args.request_id or not path.is_file()):
+        raise notes_error
     if not intent['hasMetrics']:
         task['runId'] = None
     with task_lock(path):
-        existing = load_existing(path, task)
+        existing = load_existing(path, task, frozen_notes=notes_error is not None)
         if existing:
             emit(sync_task(client, path, existing))
             return 0
+        if notes_error is not None:
+            raise notes_error
         directory = Path(task['captureRoot']) / task['taskId']
         ensure_directory(directory)
         at = stamp()
@@ -731,13 +810,18 @@ def record(client, args):
         if metrics_warning:
             task['recordingWarnings'].append(metrics_warning)
         node = {'id': task['nodeId'], 'title': args.title}
-        node['conclusion'] = args.conclusion if args.conclusion is not None else args.title
+        if args.conclusion is not None:
+            node['conclusion'] = args.conclusion
+        if notes is not None:
+            node['notes'] = notes
+        if args.kind is not None:
+            node['kind'] = args.kind
         for option, field in (('summary', 'summary'), ('parent', 'parentId'), ('status', 'status')):
             if getattr(args, option) is not None:
                 node[field] = getattr(args, option)
         if not args.node:
             node.setdefault('status', 'active')
-            node['kind'] = 'finding'
+            node.setdefault('kind', 'finding')
             node['createdAt'] = at
         task['operations'] = [{'op': 'node.update' if args.node else 'node.add', 'data': node}]
         capture_relationship(client, args, path, task)
@@ -810,6 +894,54 @@ def sync(client, args):
     pending = sum(bool(result['pending']) for result in results)
     emit({'records': results, 'pending': pending})
     return 1 if pending else 0
+
+
+def status(client, args):
+    """Read atomic local receipts only; never contact the server or advance work."""
+    outbox = Path.cwd() / '.exp-observer-runs' / 'outbox'
+    records, plans, warnings = [], [], []
+    seen = set()
+    for directory in ancestor_outboxes(outbox, client.queue_root):
+        try:
+            paths = sorted(directory.glob('*.json'))
+        except OSError as exc:
+            warnings.append(f'{directory}: {exc}')
+            continue
+        for path in paths:
+            try:
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                task = read_queue_task(path)
+                if task['url'] != client.url or task['projectId'] != args.project:
+                    continue
+                if task.get('kind') == 'project':
+                    plans.append({'state': task['state'], 'preparedAt': task.get('preparedAt')})
+                else:
+                    records.append({**task_result(task), 'state': task['state']})
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                warnings.append(f'{path}: {exc}')
+    records.sort(key=lambda record: str(record.get('capturedAt') or record.get('finishedAt') or record.get('startedAt') or ''))
+    pending_records = [record for record in records if record['pending']]
+    has_records = bool(records or plans)
+    pending = bool(pending_records or any(plan['state'] != 'synced' for plan in plans))
+    result = {'projectId': args.project, 'source': 'local', 'checkedAt': stamp(),
+              'scope': 'current_directory_and_ancestors', 'transportChecked': False,
+              'deliveryState': 'partial' if warnings else ('pending' if pending else ('synced' if has_records else 'unknown')),
+              'pending': True if pending else (None if warnings or not has_records else False),
+              'recordCount': len(records), 'syncedCount': len(records) - len(pending_records),
+              'pendingCount': len(pending_records),
+              'incompleteCount': sum(record['state'] not in ('ready', 'synced') for record in records),
+              'records': records[-20:], 'pendingRecords': pending_records[-20:], 'projectPlans': plans}
+    if len(records) > 20:
+        result['recordsTruncated'] = True
+    if len(pending_records) > 20:
+        result['pendingRecordsTruncated'] = True
+    if warnings:
+        result.update({'localReadWarnings': warnings[:20], 'warningCount': len(warnings)})
+    emit(result)
+    return 0
 
 
 def run_command(command, stdout, stderr):
@@ -1018,6 +1150,8 @@ def main(argv=None):
             return record(client, args)
         elif args.command == 'sync':
             return sync(client, args)
+        elif args.command == 'status':
+            return status(client, args)
         emit(result)
         return 0
     except (ClientError, ValueError, OSError) as exc:
