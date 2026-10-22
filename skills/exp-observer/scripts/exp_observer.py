@@ -127,13 +127,16 @@ def parser():
     analysis.add_argument('--notes', help='Full native analysis for this event, or for the question when no event is supplied')
     analysis.add_argument('--notes-file', help='UTF-8 native analysis; - reads stdin')
     event.add_argument('--status', help='Actual question status; omitted status preserves an existing question')
+    event.add_argument('--next-action', help='Next action for this question; omitted value preserves it')
+    event.add_argument('--pause-reason', help='Why this question is paused; omitted value preserves it')
+    event.add_argument('--resume-when', help='Condition for resuming this question; omitted value preserves it')
     event.add_argument('--metrics-file', help='Existing measurement JSON; retain its values without rerunning work')
     event.add_argument('--artifact', action='append', default=[])
     event.add_argument('--request-id', help='Stable retry identity; reuse for delivery retries of this same event')
     event.set_defaults(node=None)
     sync = commands.add_parser('sync', help='Retry local pending records without executing experiments')
     sync.add_argument('--project', help='Only sync this project')
-    status_command = commands.add_parser('status', help='Read current durable queue receipts locally, without HTTP or polling')
+    status_command = commands.add_parser('status', help='Read local delivery receipts and research-review hints, without HTTP or polling')
     status_command.add_argument('--project', required=True)
     observe = commands.add_parser('observe', help='Record a node step duration and explicit runtime token counters')
     observation_actions = observe.add_subparsers(dest='observation_action', required=True)
@@ -444,7 +447,7 @@ def local_context(outbox, client, project_id, node_id=None):
                 for index, operation in enumerate(task.get('operations', [])):
                     data = operation.get('data', {})
                     detail = {'op': operation['op'], **{key: data[key] for key in
-                              ('id', 'title', 'kind', 'status', 'nodeId', 'source', 'target', 'parentId') if key in data}}
+                              ('id', 'title', 'kind', 'status', 'nodeId', 'source', 'target', 'parentId', 'nextAction', 'pauseReason', 'resumeWhen') if key in data}}
                     for field, limit in (('summary', 512), ('conclusion', 512)):
                         if isinstance(data.get(field), str):
                             detail[field] = data[field][:limit]
@@ -453,7 +456,7 @@ def local_context(outbox, client, project_id, node_id=None):
                     if isinstance(data.get('notes'), str):
                         detail.update({'notes': data['notes'], 'hasNotes': bool(data['notes'])})
                     if operation['op'] in ('node.add', 'node.update', 'node.ensure') and isinstance(data.get('id'), str):
-                        fields = ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'notes')
+                        fields = ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'notes', 'nextAction', 'pauseReason', 'resumeWhen')
                         node_updates.append(((task.get('capturedAt') or task.get('startedAt') or '', path.name, index),
                                              operation['op'], {key: data[key] for key in fields if key in data}))
                     record['operations'].append(detail)
@@ -485,7 +488,7 @@ def local_context(outbox, client, project_id, node_id=None):
     for key, node in nodes.items():
         if node_id and key not in scoped:
             continue
-        detail = {field: node[field] for field in ('id', 'title', 'kind', 'status', 'parentId') if field in node}
+        detail = {field: node[field] for field in ('id', 'title', 'kind', 'status', 'parentId', 'nextAction', 'pauseReason', 'resumeWhen') if field in node}
         for field in ('summary', 'conclusion'):
             if isinstance(node.get(field), str):
                 detail[field] = node[field][:512]
@@ -562,7 +565,8 @@ def load_existing(path, task, *, frozen_notes=False):
         return None
     existing = json.loads(path.read_text(encoding='utf-8'))
     defaults = {'conclusion': None, 'independent': False, 'relation': 'leads_to', 'after': None,
-                'kind': None, 'notes': None, 'notesFile': None}
+                'kind': None, 'notes': None, 'notesFile': None,
+                'next_action': None, 'pause_reason': None, 'resume_when': None}
     expected = defaults | task['intent']
     if frozen_notes:
         retained_notes = existing.get('intent', {}).get('notes')
@@ -586,15 +590,26 @@ def ancestor_outboxes(outbox, queue_root=None):
             break
 
 
-def local_nodes(client, outbox, project_id, exclude=None):
-    nodes = {}
+def local_timestamp(value):
+    """Compare dated local facts without consulting file mtimes or the network."""
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return parsed.timestamp() if parsed.utcoffset() is not None else None
+    except (ValueError, TypeError, AttributeError, OverflowError, OSError):
+        return None
+
+
+def local_node_view(client, outbox, project_id, exclude=None, include_cache=False):
+    """Fold patches, not replacement summaries; caches are dated local evidence."""
+    updates, caches, warnings = [], [], []
     for directory in ancestor_outboxes(outbox, client.queue_root):
         try:
-            paths = list(directory.glob('*.json'))
-        except OSError:
+            paths = sorted(directory.glob('*.json'))
+        except OSError as exc:
+            warnings.append(f'{directory}: {exc}')
             continue
         for path in paths:
-            if path == exclude:
+            if exclude is not None and path.resolve() == Path(exclude).resolve():
                 continue
             try:
                 task = read_queue_task(path)
@@ -602,16 +617,68 @@ def local_nodes(client, outbox, project_id, exclude=None):
                         or task['state'] not in ('ready', 'synced') or task.get('kind') == 'project'):
                     continue
                 at = task.get('capturedAt') or task.get('finishedAt') or task.get('startedAt') or ''
-                for operation in task.get('operations', []):
+                for index, operation in enumerate(task.get('operations', [])):
                     if operation.get('op') not in ('node.add', 'node.update', 'node.ensure'):
                         continue
                     data = operation['data']
-                    entry = {'id': data['id'], 'title': data.get('title', ''), 'at': at}
-                    if entry['id'] not in nodes or entry['at'] > nodes[entry['id']]['at']:
-                        nodes[entry['id']] = entry
-            except (OSError, ValueError, KeyError, TypeError, AttributeError):
-                continue
-    return sorted(nodes.values(), key=lambda node: (node['at'], node['id']))
+                    if not isinstance(data.get('id'), str):
+                        continue
+                    # Pending intents overlay snapshots until acknowledged; within
+                    # each layer, preserve captured order and operation order.
+                    order = (include_cache and task['state'] != 'synced', local_timestamp(at) or 0, str(path), index)
+                    updates.append((order, operation['op'], dict(data), at))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                warnings.append(f'{path}: {exc}')
+        if not include_cache:
+            continue
+        context_directory = directory.parent / 'context'
+        try:
+            cache_paths = sorted(context_directory.glob('*.json'))
+        except OSError as exc:
+            warnings.append(f'{context_directory}: {exc}')
+            continue
+        for path in cache_paths:
+            full_key = hashlib.sha256(json.dumps([client.url, project_id, None], ensure_ascii=False).encode('utf-8')).hexdigest()
+            matching = path.name == full_key + '.json'
+            try:
+                cached = json.loads(path.read_text(encoding='utf-8'))
+                scope = cached.get('nodeId')
+                key = hashlib.sha256(json.dumps([client.url, project_id, scope], ensure_ascii=False).encode('utf-8')).hexdigest()
+                matching = path.name == key + '.json'
+                if not matching:
+                    continue
+                at = cached.get('cachedAt')
+                when = local_timestamp(at)
+                context = cached['context']
+                if when is None or context.get('projectId') != project_id or not isinstance(context.get('nodes'), list):
+                    raise ValueError('Context cache has no valid date or matching project snapshot.')
+                caches.append({'cachedAt': at, 'nodeId': scope, 'localCachePath': str(path.resolve())})
+                if scope is None:
+                    # A full dated snapshot also records removals. Pending local
+                    # intents are replayed afterward, not lost with old receipts.
+                    updates.append(((False, when, str(path), -1), 'nodes.snapshot', {}, at))
+                for index, node in enumerate(context['nodes']):
+                    if isinstance(node.get('id'), str) and isinstance(node.get('title'), str):
+                        updates.append(((False, when, str(path), index), 'node.snapshot', dict(node), at))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                # Only matching cache names can describe this project/URL.
+                if matching:
+                    warnings.append(f'{path}: {exc}')
+    nodes = {}
+    for _, operation, update, at in sorted(updates, key=lambda entry: entry[0]):
+        if operation == 'nodes.snapshot':
+            nodes.clear()
+            continue
+        if operation == 'node.ensure' and update['id'] in nodes:
+            continue
+        nodes.setdefault(update['id'], {}).update(update)
+        nodes[update['id']]['at'] = at
+    return sorted(nodes.values(), key=lambda node: (local_timestamp(node.get('at')) or 0, node['id'])), caches, warnings
+
+
+def local_nodes(client, outbox, project_id, exclude=None):
+    nodes, _, _ = local_node_view(client, outbox, project_id, exclude=exclude)
+    return nodes
 
 
 def capture_project_plan(outbox, url, project_id, queue_root=None):
@@ -641,7 +708,7 @@ def capture_relationship(client, args, path, task):
     nodes = local_nodes(client, path.parent, task['projectId'], exclude=path)
     source = args.after
     if source:
-        matches = [node for node in nodes if node['title'] == source]
+        matches = [node for node in nodes if node.get('title') == source]
         if len(matches) == 1:
             source = matches[0]['id']
         elif len(matches) > 1:
@@ -874,27 +941,16 @@ def record(client, args):
 
 
 def semantic_nodes(client, outbox, project_id, exclude=None):
-    """Resolve exact references from retained context and ancestor queues only."""
-    nodes = {}
-    key = hashlib.sha256(json.dumps([client.url, project_id, None], ensure_ascii=False).encode('utf-8')).hexdigest()
-    for directory in reversed(list(ancestor_outboxes(outbox, client.queue_root))):
-        try:
-            cached = json.loads((directory.parent / 'context' / (key + '.json')).read_text(encoding='utf-8'))
-            for node in cached['context']['nodes']:
-                if isinstance(node.get('id'), str) and isinstance(node.get('title'), str):
-                    nodes[node['id']] = {'id': node['id'], 'title': node['title']}
-        except (OSError, ValueError, KeyError, TypeError, AttributeError):
-            continue
-    for node in local_nodes(client, outbox, project_id, exclude=exclude):
-        nodes[node['id']] = node
-    return list(nodes.values())
+    """Resolve exact references from dated context and ancestor queues only."""
+    nodes, _, _ = local_node_view(client, outbox, project_id, exclude=exclude, include_cache=True)
+    return nodes
 
 
 def exact_reference(nodes, value):
     by_id = [node for node in nodes if node['id'] == value]
     if by_id:
         return by_id[0]
-    matches = [node for node in nodes if node['title'] == value]
+    matches = [node for node in nodes if node.get('title') == value]
     if len(matches) > 1:
         raise ClientError('Reference title is ambiguous; use an existing ID: ' + value)
     return matches[0] if matches else None
@@ -909,8 +965,9 @@ def semantic_question(client, outbox, project_id, text, exclude=None):
     if existing is None:
         key = hashlib.sha256(json.dumps([client.url, project_id, title], ensure_ascii=False).encode('utf-8')).hexdigest()[:32]
         existing = {'id': 'question-' + key, 'title': title}
-    question = {key: existing[key] for key in ('id', 'title')}
-    return question | {'kind': 'question', 'status': 'active'}, nodes
+    question = {'id': existing['id'], 'title': existing.get('title') or title}
+    question.update({field: existing[field] for field in ('nextAction', 'pauseReason', 'resumeWhen') if field in existing})
+    return question | {'kind': 'question', 'status': existing.get('status') or 'active'}, nodes
 
 
 def event(client, args):
@@ -927,7 +984,7 @@ def event(client, args):
         raise ClientError('--after relates a finding, correction or direction; supply that change.')
     notes, notes_error, metrics, metrics_warning = capture_inputs(args)
     intent = {'command': 'event', **{key: getattr(args, key) for key in
-              ('question', 'reason', 'finding', 'correction', 'direction', 'after', 'relation', 'evidence', 'status', 'artifact')},
+              ('question', 'reason', 'finding', 'correction', 'direction', 'after', 'relation', 'evidence', 'status', 'next_action', 'pause_reason', 'resume_when', 'artifact')},
               'notes': notes, 'notesFile': args.notes_file,
               'metrics': metrics, 'hasMetrics': args.metrics_file is not None and metrics_warning is None,
               'metricsFile': args.metrics_file}
@@ -965,8 +1022,11 @@ def event(client, args):
         else:
             task['nodeId'] = question['id']
         update = {'id': question['id']}
-        if args.status is not None:
-            update['status'] = args.status
+        for option, field in (('status', 'status'), ('next_action', 'nextAction'),
+                              ('pause_reason', 'pauseReason'), ('resume_when', 'resumeWhen')):
+            value = getattr(args, option)
+            if value is not None:
+                update[field] = value
         if not event_type and notes is not None:
             update['notes'] = notes
         if len(update) > 1:
@@ -1065,6 +1125,24 @@ def sync(client, args):
     return 1 if pending else 0
 
 
+def research_review(client, outbox, project_id):
+    nodes, caches, warnings = local_node_view(client, outbox, project_id, include_cache=True)
+    questions = [node for node in nodes if node.get('kind') == 'question']
+    open_questions = [{field: node.get(field) for field in
+                       ('id', 'title', 'status', 'nextAction', 'pauseReason', 'resumeWhen')}
+                      for node in questions if node.get('status') in ('active', 'running')]
+    known = bool(questions or caches)
+    incomplete = bool(warnings or any(not isinstance(node.get('status'), str) for node in questions))
+    return {'source': 'local_queue_and_dated_context', 'scope': 'current_directory_and_ancestors',
+            'coverage': 'local_snapshot_only',
+            'availability': 'partial' if incomplete else ('available' if known else 'unknown'),
+            'openQuestions': open_questions,
+            'needsReview': True if open_questions else (None if incomplete or not known else False),
+            'cachedContexts': sorted(caches, key=lambda cache: local_timestamp(cache['cachedAt'])),
+            'note': 'Review questions actually worked on; local receipts and dated caches do not prove global research state or scientific success.',
+            **({'localReadWarnings': warnings[:20]} if warnings else {})}
+
+
 def status(client, args):
     """Read atomic local receipts only; never contact the server or advance work."""
     outbox = Path.cwd() / '.exp-observer-runs' / 'outbox'
@@ -1102,7 +1180,8 @@ def status(client, args):
               'recordCount': len(records), 'syncedCount': len(records) - len(pending_records),
               'pendingCount': len(pending_records),
               'incompleteCount': sum(record['state'] not in ('ready', 'synced') for record in records),
-              'records': records[-20:], 'pendingRecords': pending_records[-20:], 'projectPlans': plans}
+              'records': records[-20:], 'pendingRecords': pending_records[-20:], 'projectPlans': plans,
+              'researchReview': research_review(client, outbox, args.project)}
     if len(records) > 20:
         result['recordsTruncated'] = True
     if len(pending_records) > 20:

@@ -15,6 +15,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from .layout import layout_nodes, legacy_column_candidate
+
 
 class StoreError(Exception):
     def __init__(self, message, code='invalid_request', status=400):
@@ -413,7 +415,22 @@ class Store:
 
     def get_project(self, project_id):
         with self._transaction() as db:
-            return self._load(db, project_id)
+            project = self._load(db, project_id)
+        if not legacy_column_candidate(project['nodes'], project['edges']):
+            return project
+        # Recheck under the write lock: a concurrent manual edit wins. Historical
+        # snapshots are left intact; the repair is a new, reconstructable version.
+        with self._transaction(write=True) as db:
+            previous = self._load(db, project_id)
+            if not legacy_column_candidate(previous['nodes'], previous['edges']):
+                return previous
+            project = copy.deepcopy(previous)
+            for node in project['nodes']:
+                node['positionSource'] = 'auto'
+            layout_nodes(project['nodes'], project['edges'])
+            self._validate(project)
+            self._record(db, previous, project, [{'op': 'layout.upgrade', 'data': {'strategy': 'semantic-branches-v1'}}])
+            return project
 
     def create_project(self, data):
         object_value(data, 'Project')
@@ -533,6 +550,7 @@ class Store:
             self._expected(previous, body)
             p = copy.deepcopy(previous)
             unplaced = set()
+            geometry_changed = False
             for operation in operations:
                 object_value(operation, 'Operation')
                 data = copy.deepcopy(object_value(operation.get('data', {}), 'Operation data'))
@@ -540,65 +558,21 @@ class Store:
                 self._apply(p, operation.get('op'), data)
                 if operation.get('op') in ('node.add', 'node.ensure') and len(p['nodes']) > node_count and 'position' not in data:
                     unplaced.add(p['nodes'][-1]['id'])
+                op = operation.get('op')
+                geometry_changed = geometry_changed or (
+                    op in ('edge.add', 'edge.update', 'edge.delete', 'node.delete', 'node.merge') or
+                    op in ('node.add', 'node.ensure') and len(p['nodes']) > node_count or
+                    op == 'node.update' and any(key in data for key in ('parentId', 'kind', 'isContainer', 'collapsed', 'position', 'positionSource')))
             self._validate(p)
-            if unplaced:
+            if geometry_changed:
                 self._place_nodes(p, unplaced)
                 self._validate(p)
             self._record(db, previous, p, operations, request_id, fingerprint)
             return copy.deepcopy(p)
 
-    @staticmethod
-    def _is_visual_container(node):
-        return node.get('isContainer', node.get('kind') == 'group') is True
-
-    def _place_nodes(self, p, unplaced):
-        """Assign initial positions; callers need only describe research and containment."""
-        children = {}
-        by_id = {node['id']: node for node in p['nodes']}
-        for node in p['nodes']:
-            children.setdefault(node.get('parentId'), []).append(node)
-
-        def visual_parent(node):
-            parent = by_id.get(node.get('parentId'))
-            while parent and not self._is_visual_container(parent):
-                parent = by_id.get(parent.get('parentId'))
-            return parent['id'] if parent else None
-
-        def bounds(node):
-            x, y = node['position']['x'], node['position']['y']
-            nested = [child for child in p['nodes']
-                      if child['id'] not in unplaced and visual_parent(child) == node['id']]
-            width, height = 368, 230
-            if nested and self._is_visual_container(node) and not node.get('collapsed', False):
-                rectangles = [bounds(child) for child in nested]
-                width = max(330, *(cx + cw - x + 28 for cx, cy, cw, ch in rectangles))
-                height = max(230, *(cy + ch - y + 28 for cx, cy, cw, ch in rectangles))
-            return x, y, width, height
-
-        def visit(parent_id):
-            siblings = children.get(parent_id, [])
-            # Finish existing containers before placing new siblings beside their bounds.
-            for node in sorted(siblings, key=lambda n: n['id'] in unplaced):
-                if node['id'] in unplaced:
-                    parent = by_id.get(parent_id)
-                    origin_x = parent['position']['x'] + 30 if parent else 40
-                    origin_y = parent['position']['y'] + (100 if self._is_visual_container(parent) else 282) if parent else 40
-                    occupied = [bounds(other) for other in p['nodes']
-                                if other['id'] != node['id'] and other['id'] not in unplaced
-                                and visual_parent(other) == visual_parent(node)]
-                    # Candidate rows jump over occupied containers rather than scanning pixels.
-                    rows = sorted({origin_y, *(max(origin_y, y + height + 52) for x, y, width, height in occupied)})
-                    for y in rows:
-                        x = origin_x
-                        if all(x + 396 <= ox or x >= ox + width + 28 or
-                               y + 258 <= oy or y >= oy + height + 28
-                               for ox, oy, width, height in occupied):
-                            node['position'] = {'x': x, 'y': y}
-                            break
-                    unplaced.remove(node['id'])
-                visit(node['id'])
-
-        visit(None)
+    def _place_nodes(self, p, unplaced=()):
+        """Place automatic graph nodes while preserving manual coordinates."""
+        layout_nodes(p['nodes'], p['edges'], unplaced)
 
     def _find(self, p, collection, key):
         if collection == 'nodes' and isinstance(key, str):
@@ -738,6 +712,8 @@ class Store:
             return
         if action == 'update':
             existing = self._find(p, collection, d.get('id'))
+            if kind == 'node' and 'position' in d:
+                d.setdefault('positionSource', 'manual')
             existing.update(d)
             if kind == 'node':
                 existing['updatedAt'] = stamp
@@ -746,6 +722,8 @@ class Store:
         valid_id(d['id'])
         if any(item['id'] == d['id'] for item in p[collection]):
             raise StoreError(f'{kind} ID already exists.', 'conflict', 409)
+        if kind == 'node':
+            d.setdefault('positionSource', 'manual' if 'position' in d else 'auto')
         defaults = {
             'node': {'title': 'Untitled', 'kind': 'experiment', 'status': 'proposed', 'parentId': None,
                      'summary': '', 'conclusion': '', 'notes': '', 'nextAction': '', 'tags': [], 'position': {'x': 0, 'y': 0},
@@ -804,6 +782,8 @@ class Store:
             for value in values:
                 ref(value, collection)
         for node in p['nodes']:
+            if 'positionSource' in node and node['positionSource'] not in ('auto', 'manual'):
+                raise StoreError('Node positionSource must be auto or manual.')
             ref(node.get('parentId'), 'nodes', True)
         for node in p['nodes']:
             for field in ('title', 'kind', 'status', 'summary', 'conclusion', 'notes', 'nextAction', 'importanceReason', 'pauseReason', 'resumeWhen'):

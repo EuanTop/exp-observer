@@ -77,7 +77,7 @@ export function StatusMark({
   className?: string;
   decorative?: boolean;
 }) {
-  const state = status === "running" ? "active" : status;
+  const state = status;
   const ring = (
     <circle
       cx="8"
@@ -136,6 +136,8 @@ export function StatusMark({
           />
         </>
       ) : state === "active" ? (
+        ring
+      ) : state === "running" ? (
         <>
           <circle
             className="status-spinner"

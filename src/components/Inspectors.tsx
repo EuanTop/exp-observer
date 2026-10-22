@@ -77,7 +77,7 @@ export function ProjectInspector({
         </div>
         <ProjectHostUsage project={project} />
         <div className="inspector-section-title">
-          <span>正在探索</span>
+          <span>开放问题与方向</span>
           <span>{active.length}</span>
         </div>
         {active.map((n) => (

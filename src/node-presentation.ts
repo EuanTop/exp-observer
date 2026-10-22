@@ -65,11 +65,16 @@ export function isNodeProcessing(
   project: Project,
   node: ResearchNode,
 ): boolean {
+  // A live executor snapshot takes precedence over historical run records.
+  // An open research question says nothing about whether somebody is working.
+  if (project.runtimeActivity !== undefined)
+    return project.runtimeActivity.some(
+      (activity) => activity.nodeId === node.id,
+    );
   return (
-    node.status === "active" ||
-    node.status === "running" ||
     (project.runs ?? []).some(
-      (run) => run.nodeId === node.id && run.status === "running",
+      (run) =>
+        run.nodeId === node.id && run.status === "running" && !run.finishedAt,
     ) ||
     (project.observations ?? []).some(
       (observation) =>

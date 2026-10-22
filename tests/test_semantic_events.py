@@ -1,5 +1,6 @@
 """Research changes retain separate identities, independently of command captures."""
 import json
+import hashlib
 from pathlib import Path
 import sys
 import tempfile
@@ -243,6 +244,188 @@ class SemanticEventTests(unittest.TestCase):
                                  '--finding', '正文提到旧发现也不猜测因果')
         self.assertEqual([edge['relation'] for edge in self.project()['edges'] if edge['target'] == receipt['nodeId']],
                          ['has_finding'])
+
+    def test_last_finding_can_park_only_its_question_and_omitted_fields_survive(self):
+        self.client.offline = True
+        _, other = self.invoke('event', '--project', 'study', '--question', 'Other work stays active')
+        arguments = ('event', '--project', 'study', '--question', 'What remains uncertain?',
+                     '--finding', 'The measured scope is narrower than expected', '--status', 'paused',
+                     '--next-action', 'Collect the missing condition', '--pause-reason', 'No remaining budget',
+                     '--resume-when', 'A new sample is available', '--request-id', 'last-real-finding')
+        _, final = self.invoke(*arguments)
+        frozen = next(task for task in self.tasks() if task['requestId'] == 'last-real-finding')
+        update = next(op['data'] for op in frozen['operations'] if op['op'] == 'node.update')
+        self.assertEqual(update, {'id': final['questionId'], 'status': 'paused',
+                                 'nextAction': 'Collect the missing condition', 'pauseReason': 'No remaining budget',
+                                 'resumeWhen': 'A new sample is available'})
+        self.invoke('event', '--project', 'study', '--question', 'What remains uncertain?',
+                    '--finding', 'The same retained scope also explains the outlier')
+        outbox = self.root / '.exp-observer-runs' / 'outbox'
+        nodes = {node['id']: node for node in cli.local_nodes(self.client, outbox, 'study')}
+        self.assertEqual(nodes[final['questionId']]['title'], 'What remains uncertain?')
+        self.assertEqual(nodes[final['questionId']]['status'], 'paused')
+        self.assertEqual(nodes[other['questionId']]['status'], 'active')
+        _, local = self.invoke('context', '--project', 'study')
+        question = next(node for node in local['localNodes'] if node['id'] == final['questionId'])
+        self.assertEqual((question['nextAction'], question['pauseReason'], question['resumeWhen']),
+                         ('Collect the missing condition', 'No remaining budget', 'A new sample is available'))
+        _, status = self.invoke('status', '--project', 'study')
+        self.assertEqual([q['id'] for q in status['researchReview']['openQuestions']], [other['questionId']])
+        self.assertTrue(status['researchReview']['needsReview'])
+        self.client.offline = False
+        self.assertEqual(self.invoke('sync', '--project', 'study')[0], 0)
+        self.invoke(*arguments)
+        nodes = {node['id']: node for node in self.project()['nodes']}
+        self.assertEqual(nodes[final['questionId']]['pauseReason'], 'No remaining budget')
+        self.assertEqual(nodes[other['questionId']]['status'], 'active')
+        self.assertEqual(next(task for task in self.tasks() if task['requestId'] == 'last-real-finding')['operations'],
+                         frozen['operations'])
+        completed = ('event', '--project', 'study', '--question', 'What remains uncertain?',
+                     '--finding', 'The new sample resolves this question', '--status', 'completed')
+        self.invoke(*completed)
+        question = next(n for n in self.project()['nodes'] if n['id'] == final['questionId'])
+        self.assertEqual(question['status'], 'completed')
+        self.assertEqual(question['nextAction'], 'Collect the missing condition')
+        self.assertEqual(len([n for n in self.project()['nodes'] if n['kind'] == 'question']), 2)
+
+    def test_new_closeout_fields_preserve_old_frozen_retry_and_reject_changed_intent(self):
+        self.client.offline = True
+        legacy = ('event', '--project', 'study', '--question', 'Legacy retry', '--finding', 'Retained finding',
+                  '--request-id', 'old-format')
+        self.invoke(*legacy)
+        path = next(path for path in (self.root / '.exp-observer-runs' / 'outbox').glob('*.json')
+                    if json.loads(path.read_text()).get('requestId') == 'old-format')
+        old = json.loads(path.read_text())
+        for field in ('next_action', 'pause_reason', 'resume_when'):
+            old['intent'].pop(field)
+        cli.save_task(path, old)
+        self.client.offline = False
+        _, receipt = self.invoke(*legacy)
+        self.assertFalse(receipt['pending'])
+        self.assertEqual(json.loads(path.read_text())['operations'], old['operations'])
+        with self.assertRaisesRegex(cli.ClientError, 'different work'):
+            self.invoke(*legacy, '--next-action', 'A different retry')
+        paused = ('event', '--project', 'study', '--question', 'Frozen paused question', '--finding', 'Latest finding',
+                  '--status', 'paused', '--next-action', 'Read the retained evidence', '--request-id', 'paused-intent')
+        self.client.lose_batch_reply = True
+        _, queued = self.invoke(*paused)
+        self.assertTrue(queued['pending'])
+        _, receipt = self.invoke(*paused)
+        self.assertFalse(receipt['pending'])
+        with self.assertRaisesRegex(cli.ClientError, 'different work'):
+            self.invoke(*paused, '--pause-reason', 'Changed work')
+
+    def write_cache(self, nodes, at, cwd=None, node_id=None, project_id='study', url=None):
+        folder = (cwd or self.root) / '.exp-observer-runs' / 'context'
+        folder.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256(json.dumps([url or self.client.url, project_id, node_id],
+                                       ensure_ascii=False).encode('utf-8')).hexdigest()
+        path = folder / (key + '.json')
+        path.write_text(json.dumps({'cachedAt': at, 'nodeId': node_id,
+                                   'context': {'projectId': project_id, 'nodes': nodes}}), encoding='utf-8')
+        return path
+
+    def test_newer_dated_cache_overrides_old_synced_but_pending_patch_overlays_cache(self):
+        _, opened = self.invoke('event', '--project', 'study', '--question', 'Exact retained question')
+        outbox = self.root / '.exp-observer-runs' / 'outbox'
+        for path in outbox.glob('*.json'):
+            task = json.loads(path.read_text())
+            if task.get('kind') != 'project':
+                task['capturedAt'] = '2020-01-01T00:00:00Z'
+                cli.save_task(path, task)
+        cache = {'id': opened['questionId'], 'title': 'Exact retained question', 'kind': 'question',
+                 'status': 'completed', 'nextAction': 'Remote completed step', 'pauseReason': ''}
+        self.write_cache([cache], '2021-01-01T00:00:00Z')
+        self.client.offline = True
+        _, state = self.invoke('status', '--project', 'study')
+        self.assertEqual(state['researchReview']['openQuestions'], [])
+        self.assertFalse(state['researchReview']['needsReview'])
+        self.assertEqual(state['researchReview']['cachedContexts'][0]['cachedAt'], '2021-01-01T00:00:00Z')
+        self.invoke('event', '--project', 'study', '--question', 'Exact retained question',
+                    '--finding', 'Supplement without reopening')
+        nodes = cli.semantic_nodes(self.client, outbox, 'study')
+        self.assertEqual(next(n for n in nodes if n['id'] == opened['questionId'])['status'], 'completed')
+        self.invoke('event', '--project', 'study', '--question', opened['questionId'],
+                    '--status', 'active', '--next-action', 'Investigate a new counterexample', '--request-id', 'new-intent')
+        # A later fetch can omit a not-yet-delivered intent. The pending patch
+        # remains visible while earlier synced operations must not reset it.
+        self.write_cache([cache], '2099-01-01T00:00:00Z')
+        _, state = self.invoke('status', '--project', 'study')
+        question = state['researchReview']['openQuestions'][0]
+        self.assertEqual((question['id'], question['title'], question['status'], question['nextAction']),
+                         (opened['questionId'], 'Exact retained question', 'active', 'Investigate a new counterexample'))
+        self.assertEqual(state['deliveryState'], 'pending')
+        self.assertEqual(state['researchReview']['coverage'], 'local_snapshot_only')
+
+    def test_status_reads_only_ancestor_queues_and_dated_context_without_mutations(self):
+        self.client.offline = True
+        _, ancestor = self.invoke('event', '--project', 'study', '--question', 'Ancestor question',
+                                  '--next-action', 'Keep measuring')
+        child, sibling = self.root / 'child', self.root / 'sibling'
+        child.mkdir()
+        sibling.mkdir()
+        self.invoke('event', '--project', 'study', '--question', 'Sibling question', cwd=sibling)
+        self.invoke('event', '--project', 'other-study', '--question', 'Other experiment', cwd=child)
+        self.write_cache([{'id': 'cached-question', 'title': 'Cached running question', 'kind': 'question',
+                           'status': 'running', 'nextAction': 'Wait for actual result'}],
+                          '2020-01-01T00:00:00Z', node_id='cached-question')
+        self.write_cache([{'id': 'sibling-cache', 'title': 'Sibling cache', 'kind': 'question', 'status': 'active'}],
+                          '2022-01-01T00:00:00Z', cwd=sibling)
+        before = {str(path): path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        with patch.object(self.client, 'request', side_effect=AssertionError('status used HTTP')), \
+             patch.object(cli, 'save_task', side_effect=AssertionError('status wrote a task')), \
+             patch.object(cli, 'task_lock', side_effect=AssertionError('status used a lock')), \
+             patch.object(cli.subprocess, 'Popen', side_effect=AssertionError('status ran a command')), \
+             patch.object(Path, 'rglob', side_effect=AssertionError('status recursively searched directories')):
+            _, state = self.invoke('status', '--project', 'study', cwd=child)
+            _, unknown = self.invoke('status', '--project', 'unknown', cwd=child)
+        review = state['researchReview']
+        self.assertEqual({q['id'] for q in review['openQuestions']}, {ancestor['questionId'], 'cached-question'})
+        self.assertEqual(review['scope'], 'current_directory_and_ancestors')
+        self.assertTrue(review['needsReview'])
+        self.assertFalse(state['transportChecked'])
+        self.assertEqual(unknown['researchReview']['availability'], 'unknown')
+        self.assertIsNone(unknown['researchReview']['needsReview'])
+        after = {str(path): path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        self.assertEqual(before, after)
+
+    def test_cached_closed_question_keeps_its_status_and_followup_in_offline_context(self):
+        cached = {'id': 'closed', 'title': 'Completed elsewhere', 'kind': 'question', 'status': 'completed',
+                  'nextAction': 'Revisit only for new evidence', 'pauseReason': 'Earlier pause', 'resumeWhen': 'New evidence'}
+        self.write_cache([cached], '2020-01-01T00:00:00Z')
+        child = self.root / 'child'
+        child.mkdir()
+        self.client.offline = True
+        self.invoke('event', '--project', 'study', '--question', 'Completed elsewhere',
+                    '--finding', 'A bounded follow-up finding', cwd=child)
+        _, context = self.invoke('context', '--project', 'study', cwd=child)
+        question = next(node for node in context['localNodes'] if node['id'] == 'closed')
+        self.assertEqual((question['status'], question['nextAction'], question['resumeWhen']),
+                         ('completed', 'Revisit only for new evidence', 'New evidence'))
+        _, status = self.invoke('status', '--project', 'study', cwd=child)
+        self.assertEqual(status['researchReview']['openQuestions'], [])
+
+    def test_full_cache_can_remove_old_synced_nodes_but_missing_status_remains_unknown(self):
+        self.invoke('event', '--project', 'study', '--question', 'Old acknowledged question')
+        self.write_cache([], '2099-01-01T00:00:00Z')
+        _, status = self.invoke('status', '--project', 'study')
+        self.assertFalse(status['researchReview']['needsReview'])
+        self.assertEqual(status['researchReview']['openQuestions'], [])
+        self.write_cache([{'id': 'unknown', 'title': 'No status in old cache', 'kind': 'question'}],
+                         '2099-01-01T00:00:00Z')
+        _, status = self.invoke('status', '--project', 'study')
+        self.assertIsNone(status['researchReview']['needsReview'])
+        self.assertEqual(status['researchReview']['availability'], 'partial')
+
+    def test_undated_cache_does_not_claim_known_research_state(self):
+        self.write_cache([{'id': 'unknown', 'title': 'Question', 'kind': 'question', 'status': 'completed'}], None)
+        self.client.offline = True
+        _, result = self.invoke('status', '--project', 'study')
+        self.assertEqual(result['deliveryState'], 'unknown')
+        self.assertEqual(result['researchReview']['availability'], 'partial')
+        self.assertIsNone(result['researchReview']['needsReview'])
+        self.assertEqual(result['researchReview']['openQuestions'], [])
+        self.assertIn('date', result['researchReview']['localReadWarnings'][0])
 
     def test_existing_alias_remains_a_reference_without_recreating_or_resetting_merged_question(self):
         _, original = self.invoke('record', '--project', 'study', '--title', '待合并的旧问题', '--kind', 'question')

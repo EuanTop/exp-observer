@@ -696,11 +696,11 @@ p {
   filter: drop-shadow(0 0 3px #32bb9999);
 }
 @media (prefers-reduced-motion: reduce) {
-  .processing-outline-blue,
-  .processing-outline-green {
+  :root:not([data-motion="on"]) .processing-outline-blue,
+  :root:not([data-motion="on"]) .processing-outline-green {
     animation: none;
   }
-  .processing-outline-green {
+  :root:not([data-motion="on"]) .processing-outline-green {
     stroke-dashoffset: -50;
   }
 }
@@ -783,12 +783,11 @@ p {
   stroke-dasharray: 2 22;
   opacity: 0.55;
   pointer-events: none;
-  animation: edge-direction 2.8s linear infinite;
 }
 .research-edge-flow.is-active {
   stroke: var(--accent);
   opacity: 0.8;
-  animation-duration: 1.6s;
+  animation: edge-direction 1.6s linear infinite;
 }
 .react-flow__edge.selected .research-edge-flow {
   stroke: var(--accent);
@@ -2985,13 +2984,34 @@ p {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :root:not([data-motion="on"]) *,
+  :root:not([data-motion="on"]) *::before,
+  :root:not([data-motion="on"]) *::after {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
   }
+}
+:root[data-motion="off"] *,
+:root[data-motion="off"] *::before,
+:root[data-motion="off"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+.motion-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.motion-control select {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  padding: 6px 0;
+  cursor: pointer;
 }
 
 :root[data-theme="light"] .status-active,

@@ -7,6 +7,11 @@ export type AgentSetup = {
   url: string;
 };
 export type ResearchWorkspace = { id: string; path: string; addedAt: string };
+export type RuntimeSnapshot = {
+  projectId: string;
+  checkedAt: string;
+  active: NonNullable<Project["runtimeActivity"]>;
+};
 type WorkspaceList = { workspaces: ResearchWorkspace[] };
 export class ApiError extends Error {
   constructor(
@@ -48,6 +53,8 @@ export const api = {
   list: () => request<{ projects: ProjectSummary[] }>("/api/projects"),
   project: (id: string) =>
     request<Project>(`/api/projects/${encodeURIComponent(id)}`),
+  runtime: (id: string) =>
+    request<RuntimeSnapshot>(`/api/projects/${encodeURIComponent(id)}/runtime`),
   create: (name: string) =>
     request<Project>("/api/projects", {
       method: "POST",

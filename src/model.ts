@@ -136,6 +136,7 @@ export type Project = {
   decisions: Decision[];
   observations?: Observation[];
   usageRecords?: HostUsageRecord[];
+  runtimeActivity?: { id: string; nodeId: string; source: string }[];
   activity: {
     id: string;
     at: string;
@@ -153,7 +154,7 @@ export const uid = (prefix = "n") =>
   `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
 export const statuses: Record<string, string> = {
   proposed: "未开始",
-  active: "进行中",
+  active: "开放中",
   completed: "已完成",
   paused: "已暂停",
   rejected: "已排除",
@@ -402,13 +403,8 @@ export function toCanvas(
         original: e,
         orderOnly: e.relation === "recorded_after",
         active:
-          project.runs.some(
-            (r) =>
-              (r.nodeId === target || r.nodeId === source) &&
-              r.status === "running",
-          ) ||
-          sourceNode.status === "active" ||
-          targetNode.status === "active",
+          isNodeProcessing(project, sourceNode) ||
+          isNodeProcessing(project, targetNode),
       },
     });
   }

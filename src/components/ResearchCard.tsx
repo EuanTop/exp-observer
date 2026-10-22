@@ -96,7 +96,7 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
             </span>
           )}
         </div>
-        <Badge status={n.status || "未记录"} />
+        <Badge status={processing ? "running" : n.status || "未记录"} />
       </div>
       <div
         className={`node-content ${presentation.conclusion ? "has-conclusion" : ""}`}

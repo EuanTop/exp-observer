@@ -44,7 +44,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError } from "./api";
+import { api, ApiError, type RuntimeSnapshot } from "./api";
 import {
   ancestry,
   descendants,
@@ -82,6 +82,15 @@ import { CompareView, EvidenceView, RunsView } from "./components/Views";
 const nodeTypes = { research: ResearchCard };
 const edgeTypes = { research: ResearchEdge };
 type View = "graph" | "runs" | "compare" | "evidence";
+type Motion = "system" | "on" | "off";
+const motionDuration = (duration: number) => {
+  const preference = document.documentElement.dataset.motion;
+  return preference === "off" ||
+    (preference !== "on" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+    ? 0
+    : duration;
+};
 
 export default function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]),
@@ -107,6 +116,11 @@ export default function App() {
     [theme, setTheme] = useState(
       localStorage.getItem("exp-observer-theme") || "light",
     );
+  const [motion, setMotion] = useState<Motion>(() => {
+    const saved = localStorage.getItem("exp-observer-motion");
+    return saved === "on" || saved === "off" ? saved : "system";
+  });
+  const [runtime, setRuntime] = useState<RuntimeSnapshot | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasData>>([]),
     [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const selectionRef = useRef(selected);
@@ -126,6 +140,45 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("exp-observer-theme", theme);
   }, [theme]);
+  useEffect(() => {
+    document.documentElement.dataset.motion = motion;
+    localStorage.setItem("exp-observer-motion", motion);
+  }, [motion]);
+  useEffect(() => {
+    const id = project?.id;
+    setRuntime(null);
+    if (!id) return;
+    let cancelled = false,
+      pending = false;
+    let expiry: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      if (pending || document.hidden) return;
+      pending = true;
+      try {
+        const snapshot = await api.runtime(id);
+        if (!cancelled) {
+          clearTimeout(expiry);
+          expiry = setTimeout(() => setRuntime(null), 10000);
+          setRuntime((previous) =>
+            JSON.stringify(previous?.active) === JSON.stringify(snapshot.active)
+              ? previous
+              : snapshot,
+          );
+        }
+      } catch {
+        if (!cancelled) setRuntime(null);
+      } finally {
+        pending = false;
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 1800);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      clearTimeout(expiry);
+    };
+  }, [project?.id]);
   const notify = useCallback((message: string) => {
     setToast(message);
   }, []);
@@ -148,7 +201,10 @@ export default function App() {
         setEdgeId(null);
         localStorage.setItem("exp-observer-project", id);
         setError("");
-        setTimeout(() => flow.fitView({ padding: 0.2, duration: 400 }), 180);
+        setTimeout(
+          () => flow.fitView({ padding: 0.2, duration: motionDuration(400) }),
+          180,
+        );
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -255,7 +311,10 @@ export default function App() {
     (id: string) => {
       setScope(id);
       setSelected([]);
-      setTimeout(() => flow.fitView({ padding: 0.22, duration: 350 }), 100);
+      setTimeout(
+        () => flow.fitView({ padding: 0.22, duration: motionDuration(350) }),
+        100,
+      );
     },
     [flow],
   );
@@ -270,14 +329,23 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!project) return;
-    const canvas = toCanvas(project, scope, selectionRef.current, {
-      onToggle: toggle,
-      onEnter: enter,
-      onInspect: inspectNode,
-    });
+    const canvas = toCanvas(
+      {
+        ...project,
+        runtimeActivity:
+          runtime?.projectId === project.id ? runtime.active : [],
+      },
+      scope,
+      selectionRef.current,
+      {
+        onToggle: toggle,
+        onEnter: enter,
+        onInspect: inspectNode,
+      },
+    );
     setNodes(canvas.nodes);
     setEdges(canvas.edges as any);
-  }, [project, scope, toggle, enter, inspectNode]);
+  }, [project, runtime, scope, toggle, enter, inspectNode]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
@@ -298,7 +366,7 @@ export default function App() {
       if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey)
         setDialog({ type: "node", parentId: scope });
       if (e.key.toLowerCase() === "f")
-        void flow.fitView({ padding: 0.18, duration: 350 });
+        void flow.fitView({ padding: 0.18, duration: motionDuration(350) });
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
         e.preventDefault();
         if (selected.length) setDialog({ type: "group" });
@@ -345,7 +413,7 @@ export default function App() {
         void flow.fitView({
           nodes: [target],
           padding: 1,
-          duration: 350,
+          duration: motionDuration(350),
           maxZoom: 1,
         });
     }, 120);
@@ -445,11 +513,12 @@ export default function App() {
       }
       for (const e of project.edges)
         if (
+          e.relation !== "recorded_after" &&
           group.some((n) => n.id === e.source) &&
           group.some((n) => n.id === e.target)
         )
           g.setEdge(e.source, e.target, {
-            weight: e.relation === "recorded_after" ? 0.1 : 2,
+            weight: 2,
           });
       if (!group.length) return;
       dagre.layout(g);
@@ -480,7 +549,10 @@ export default function App() {
         data: { id: n.id, position: absolute(n.id) },
       }));
     if (await mutate(ops))
-      setTimeout(() => flow.fitView({ padding: 0.2, duration: 400 }), 120);
+      setTimeout(
+        () => flow.fitView({ padding: 0.2, duration: motionDuration(400) }),
+        120,
+      );
   };
   const exportProject = () => {
     if (!project) return;
@@ -647,6 +719,18 @@ export default function App() {
             >
               {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
             </IconButton>
+            <label className="motion-control" title="动画偏好">
+              <Activity size={14} aria-hidden="true" />
+              <select
+                aria-label="动画偏好"
+                value={motion}
+                onChange={(e) => setMotion(e.target.value as Motion)}
+              >
+                <option value="system">跟随系统</option>
+                <option value="on">开启动画</option>
+                <option value="off">关闭动画</option>
+              </select>
+            </label>
             <IconButton
               label="导出研究 JSON"
               onClick={exportProject}
@@ -680,7 +764,11 @@ export default function App() {
                   setScope(null);
                   setView("graph");
                   setTimeout(
-                    () => flow.fitView({ padding: 0.2, duration: 300 }),
+                    () =>
+                      flow.fitView({
+                        padding: 0.2,
+                        duration: motionDuration(300),
+                      }),
                     100,
                   );
                 }}
@@ -899,7 +987,7 @@ export default function App() {
                                   () =>
                                     flow.fitView({
                                       padding: 0.2,
-                                      duration: 300,
+                                      duration: motionDuration(300),
                                     }),
                                   80,
                                 );
@@ -940,13 +1028,17 @@ export default function App() {
                       <div className="canvas-controls">
                         <IconButton
                           label="放大"
-                          onClick={() => flow.zoomIn({ duration: 180 })}
+                          onClick={() =>
+                            flow.zoomIn({ duration: motionDuration(180) })
+                          }
                         >
                           <ZoomIn size={16} />
                         </IconButton>
                         <IconButton
                           label="缩小"
-                          onClick={() => flow.zoomOut({ duration: 180 })}
+                          onClick={() =>
+                            flow.zoomOut({ duration: motionDuration(180) })
+                          }
                         >
                           <ZoomOut size={16} />
                         </IconButton>
@@ -954,7 +1046,10 @@ export default function App() {
                         <IconButton
                           label="适应画布 · F"
                           onClick={() =>
-                            flow.fitView({ padding: 0.2, duration: 350 })
+                            flow.fitView({
+                              padding: 0.2,
+                              duration: motionDuration(350),
+                            })
                           }
                         >
                           <Maximize2 size={15} />

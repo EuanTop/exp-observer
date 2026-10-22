@@ -157,7 +157,8 @@ describe("research card content", () => {
       target: "next",
       relation: "recorded_after",
     });
-    const edge = toCanvas(p, null, [], { onToggle() {}, onEnter() {} }).edges[0];
+    const edge = toCanvas(p, null, [], { onToggle() {}, onEnter() {} })
+      .edges[0];
     expect(edge.label).toBe("");
     expect(edge.data?.orderOnly).toBe(true);
     expect(p.edges[0].relation).toBe("recorded_after");
@@ -165,17 +166,39 @@ describe("research card content", () => {
 });
 
 describe("recorded node processing state", () => {
-  it("lights active/running nodes, but never a completed node merely because it is selected", () => {
+  it("does not infer execution from an open question, a node status or selection", () => {
     const p = project();
     expect(isNodeProcessing(p, node)).toBe(false);
-    expect(isNodeProcessing(p, { ...node, status: "active" })).toBe(true);
-    expect(isNodeProcessing(p, { ...node, status: "running" })).toBe(true);
+    expect(isNodeProcessing(p, { ...node, status: "active" })).toBe(false);
+    expect(isNodeProcessing(p, { ...node, status: "running" })).toBe(false);
     const canvas = toCanvas(p, null, [node.id], {
       onToggle() {},
       onEnter() {},
     });
     expect(canvas.nodes[0].selected).toBe(true);
     expect(canvas.nodes[0].data.processing).toBe(false);
+  });
+
+  it("prioritizes live executor snapshots over stale run records, without changing research state", () => {
+    const p = project();
+    p.runs = [
+      {
+        id: "old",
+        nodeId: node.id,
+        status: "running",
+      } as Project["runs"][number],
+    ];
+    p.runtimeActivity = [];
+    expect(isNodeProcessing(p, node)).toBe(false);
+    p.runtimeActivity.push({
+      id: "capture",
+      nodeId: node.id,
+      source: "local-executor",
+    });
+    expect(isNodeProcessing(p, node)).toBe(true);
+    expect(node.status).toBe("completed");
+    p.runtimeActivity = [];
+    expect(isNodeProcessing(p, node)).toBe(false);
   });
 
   it("uses any running run on this node, even when a more recent run finished", () => {
@@ -195,6 +218,9 @@ describe("recorded node processing state", () => {
     p.runs = [run, { ...run, id: "done", status: "completed" }];
     expect(isNodeProcessing(p, node)).toBe(true);
     p.runs[0].nodeId = "other";
+    expect(isNodeProcessing(p, node)).toBe(false);
+    p.runs[0].nodeId = node.id;
+    p.runs[0].finishedAt = "2026-01-01T00:00:01Z";
     expect(isNodeProcessing(p, node)).toBe(false);
   });
 

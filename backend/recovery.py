@@ -41,6 +41,33 @@ def scoped_path(path, root, allow_missing=False):
         return False
 
 
+def capture_lock_held(path):
+    """Probe an existing executor lock without creating files or changing records."""
+    try:
+        with path.open('r+b') as stream:
+            if os.name == 'nt':
+                import msvcrt
+                stream.seek(0, os.SEEK_END)
+                if not stream.tell():
+                    return False
+                stream.seek(0)
+                try:
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    return True
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                try:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return True
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    return False
+
+
 class WorkspaceDiscovery:
     """Budget root/experiment change probes without losing ordinary tree progress."""
     def __init__(self, root, rescan_interval):
@@ -236,6 +263,7 @@ class Recovery:
         self.last_results = []
         self.acknowledged = {}
         self.project_plans = {}
+        self.runtime_candidates = (0, ())
         from .host_usage import HostUsageImporter
         self.host_usage = HostUsageImporter(store, url=self.url) if store is not None else None
 
@@ -394,6 +422,11 @@ class Recovery:
             return results
         targets = self._targets(results)
         candidates = self._read_candidates(targets, results)
+        # A candidate is only a location hint. Runtime reads recheck the current
+        # record and OS lock; a crashed executor's stale `running` is not liveness.
+        self.runtime_candidates = (time.monotonic(), tuple(
+            item for item in candidates if item[2].get('state') == 'running'
+            and item[2].get('intent', {}).get('command') == 'execute'))
         groups = defaultdict(list)
         for item in candidates:
             groups[item[2]['projectId']].append(item)
@@ -417,6 +450,36 @@ class Recovery:
             results.extend(self.host_usage.drain_once(targets))
         self.last_results = results
         return results
+
+    def runtime(self, project_id):
+        checked_at, candidates = self.runtime_candidates
+        active = []
+        result = {'projectId': project_id, 'checkedAt': self.cli.stamp(),
+                  'source': 'connected_local_executors', 'active': active}
+        if self.stopped.is_set() or time.monotonic() - checked_at > max(10, self.interval * 3):
+            return result
+        configuration = self.store.recovery_workspaces() if self.store is not None else None
+        for path, root, previous in candidates:
+            if previous.get('projectId') != project_id:
+                continue
+            if configuration is not None:
+                covered = any(path.is_relative_to(Path(entry['path'])) for entry in configuration['workspaces'])
+                if not covered and any(path.is_relative_to(Path(disabled)) for disabled in configuration['disabledRoots']):
+                    continue
+            lock = path.with_suffix('.lock')
+            if not scoped_path(path, root) or not scoped_path(lock, root) or not capture_lock_held(lock):
+                continue
+            try:
+                task = self.cli.read_queue_task(path)
+                if (task['state'] != 'running' or task['projectId'] != project_id
+                        or self.cli.loopback_origin(task['url']) != self.origin
+                        or task.get('intent', {}).get('command') != 'execute'
+                        or not isinstance(task.get('nodeId'), str)):
+                    continue
+                active.append({'id': task['taskId'], 'nodeId': task['nodeId'], 'source': 'local-executor'})
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return result
 
     def _run(self):
         try:

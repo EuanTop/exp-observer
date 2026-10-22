@@ -11,7 +11,7 @@ import sys
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import __version__
-from .store import Store, StoreError, canonical
+from .store import Store, StoreError, canonical, now
 
 MAX_BODY = 2 * 1024 * 1024
 STATIC_MIME = {
@@ -174,6 +174,11 @@ class Handler(BaseHTTPRequestHandler):
             tail = parts[3:]
             if not tail and method == 'GET':
                 return self._send(store.get_project(project_id))
+            if tail == ['runtime'] and method == 'GET':
+                store.get_project(project_id)
+                recovery = self.server.recovery
+                return self._send(recovery.runtime(project_id) if recovery is not None else {
+                    'projectId': project_id, 'checkedAt': now(), 'source': 'unavailable', 'active': []})
             if tail == ['context'] and method == 'GET':
                 return self._send(store.context(project_id, query.get('node', [None])[0]))
             if tail == ['batch'] and method == 'POST':

@@ -59,7 +59,8 @@ class ObservationRecordTests(unittest.TestCase):
         for i, a in enumerate(positions):
             for b in positions[i + 1:]:
                 self.assertTrue(abs(a['x'] - b['x']) >= 396 or abs(a['y'] - b['y']) >= 258)
-        self.assertEqual(len({pos['x'] for pos in positions}), 1)
+        self.assertGreater(len({pos['x'] for pos in positions}), 1)
+        self.assertTrue(all(node['positionSource'] == 'auto' for node in recorded['nodes']))
         self.assertEqual(self.store.batch('study', body), recorded)
 
     def test_children_can_precede_parent_without_agent_coordinates(self):
@@ -69,8 +70,11 @@ class ObservationRecordTests(unittest.TestCase):
             {'op': 'node.add', 'data': {'id': 'manual', 'position': {'x': -500, 'y': 700}}},
         ]})
         nodes = {node['id']: node for node in result['nodes']}
-        self.assertGreaterEqual(nodes['child']['position']['x'], nodes['parent']['position']['x'] + 30)
-        self.assertGreaterEqual(nodes['child']['position']['y'], nodes['parent']['position']['y'] + 100)
+        # An ordinary research parent is a card, not an enclosing frame. Its
+        # child shares the root visual scope and follows it vertically.
+        self.assertEqual(nodes['child']['position']['x'], nodes['parent']['position']['x'])
+        self.assertGreaterEqual(nodes['child']['position']['y'], nodes['parent']['position']['y'] + 230 + 52)
+        self.assertEqual(nodes['child']['positionSource'], 'auto')
         self.assertEqual(nodes['manual']['position'], {'x': -500, 'y': 700})
         existing = copy.deepcopy(nodes)
         result = self.store.batch('study', {'operations': [{'op': 'node.add', 'data': {'id': 'later'}}]})

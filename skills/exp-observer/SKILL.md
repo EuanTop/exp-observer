@@ -33,7 +33,9 @@ python3 <skill>/scripts/exp_observer.py event --project ID --question "What affe
 
 Use `--finding`, `--correction` or `--direction` for a substantive discovery, corrected judgment or changed direction. Each is a separate ordinary node linked to the stated question; earlier findings remain intact. `--after "Earlier finding title"` relates a change to a retained finding, defaulting to `revises` for a correction, `leads_to` for a direction or `related_to` for a finding; `--relation supports` can explicitly state support. No causal relationships are inferred from prose or recording order.
 
-Retain different discoveries even when one script produced them. Repeat measurements of the same question reuse its identity; routine steps need no event. Use `event --question "Exact question" --status completed` or `paused` for actual question status. Do not invent stages, fill a node quota or create completion-only findings.
+Retain different discoveries even when one script produced them. Repeat measurements of the same question reuse its identity; routine steps need no event. The last substantive finding can also update its question with `--status completed` or `--status paused --next-action TEXT`; `--pause-reason TEXT` and `--resume-when TEXT` retain why it stopped and what would restart it. Omitted fields preserve existing values. Do not invent stages, fill a node quota or create completion-only findings.
+
+As you finish, check only questions you actually worked on: mark resolved work completed; pause unresolved work you are no longer advancing and leave its next action; keep genuinely ongoing work active. A turn ending does not pause the whole experiment or unrelated questions.
 
 ## Keep analysis in the experiment
 
@@ -63,7 +65,7 @@ A workspace network denial is an expected local-queue mode. Do not request a san
 
 Recovery never reruns experiments or rereads changed source evidence. Do not reformat outputs, repeat experiments or diagnose the platform merely to complete a record. Manual `sync` is optional recovery.
 
-Before your final brief result, call `status --project ID` once from the research working directory. It reads current local queue receipts without HTTP or polling. Background recovery may have replaced an earlier pending receipt with `synced`; use this latest `deliveryState`, not an old `pending` response, when describing registration. Say registered for `synced`, or saved locally awaiting background reception for `pending`. This does not test HTTP reachability: a past client connection error is not evidence that the service is down, and historical warnings do not make an acknowledged record pending. Respect the reported local scope; unknown or partial status does not confirm registration. A synced receipt confirms registration rather than scientific success.
+Before your final brief result, call `status --project ID` once from the research working directory. It reads local receipts and dated context without HTTP or polling. `researchReview.openQuestions` prompts you to check locally known active/running questions you actually touched; it does not assess conclusions or prove global state. No local question/context means research review is unknown. Keep this review separate from `deliveryState`. Background recovery may have replaced an earlier pending receipt with `synced`; use this latest `deliveryState`, not an old `pending` response, when describing registration. Say registered for `synced`, or saved locally awaiting background reception for `pending`. This does not test HTTP reachability: a past client connection error is not evidence that the service is down, and historical warnings do not make an acknowledged record pending. Respect the reported local scope; unknown or partial status does not confirm registration. A synced receipt confirms registration rather than scientific success.
 
 Label synthetic data honestly and leave unavailable usage counters unknown.
 

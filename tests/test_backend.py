@@ -113,7 +113,7 @@ class StoreTests(unittest.TestCase):
         ])
         self.add_node('outside')
         outside = next(node for node in self.store.get_project('study')['nodes'] if node['id'] == 'outside')
-        self.assertGreaterEqual(outside['position']['y'], 800 + 230 + 28)
+        self.assertTrue(outside['position']['x'] >= 30 + 368 + 28 or outside['position']['y'] >= 800 + 230 + 28)
 
     def test_native_analysis_is_available_in_scoped_context_without_expanding_global_context(self):
         self.add_node('child', 'a')

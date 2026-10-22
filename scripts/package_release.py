@@ -17,7 +17,7 @@ FILES = (
     'docs/contract.md', 'docs/observation-test.md', 'docs/screenshots/research.png', 'docs/screenshots/comparison.png',
     'examples/real-study/report.md', 'examples/real-study/continuation-review.md', 'examples/real-study/study.py',
     'start.py', 'start.bat', 'start.command',
-    'backend/__init__.py', 'backend/server.py', 'backend/store.py', 'backend/seed.py', 'backend/recovery.py', 'backend/host_usage.py', 'backend/execution_usage.py',
+    'backend/__init__.py', 'backend/server.py', 'backend/store.py', 'backend/layout.py', 'backend/seed.py', 'backend/recovery.py', 'backend/host_usage.py', 'backend/execution_usage.py',
     'skills/exp-observer/SKILL.md',
     'skills/exp-observer/agents/openai.yaml',
     'skills/exp-observer/references/records.md',
