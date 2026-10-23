@@ -39,6 +39,18 @@ def origin(url):
 
 
 def probe(url):
+    # Windows can defer a refused TCP connection beyond the HTTP deadline.
+    # A successful exclusive bind proves this local port has no listener, without
+    # waiting for the network stack. Close it immediately; the launch lock still
+    # coordinates actual startup. If binding is denied, use the health check.
+    if os.name == 'nt' and origin(url) is not None:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reserved:
+                reserved.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                reserved.bind(('127.0.0.1', origin(url)))
+            return 'missing'
+        except OSError:
+            pass
     # Bypass proxy settings for a local service; do not follow redirects to a
     # different destination or mistake another listener for this application.
     class NoRedirect(HTTPRedirectHandler):
