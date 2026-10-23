@@ -42,7 +42,20 @@ export function nodePresentation(
     text(node.conclusion) ||
     text(decision?.conclusion) ||
     text(assessment?.conclusion);
-  const summary = text(node.summary);
+  // Show recorded prose, never manufacture a result from metrics or status.
+  const paragraphs = text(node.notes).split(/\n\s*\n/);
+  const notesPreview = (
+    paragraphs.find((p) =>
+      /^(?:对研究问题的回答|研究结论|Conclusion)[:：]/i.test(p),
+    ) ||
+    paragraphs[0] ||
+    ""
+  ).slice(0, 700);
+  const hasDistinctConclusion = !!conclusion && conclusion !== text(node.title);
+  const summary =
+    text(node.summary) ||
+    (!hasDistinctConclusion ? notesPreview : "") ||
+    (!hasDistinctConclusion ? text(node.nextAction) : "");
   const source = text(node.conclusion)
     ? "结论"
     : text(decision?.conclusion)

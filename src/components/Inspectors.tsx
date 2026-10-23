@@ -273,7 +273,7 @@ export function NodeInspector({
             }
           >
             <Diamond size={12} />
-            关键节点
+            脉络节点
           </button>
         </div>
         <div className="detail-tabs">
@@ -334,12 +334,12 @@ export function NodeInspector({
                     }
                   >
                     <option value="normal">普通节点</option>
-                    <option value="critical">关键节点</option>
+                    <option value="critical">脉络节点</option>
                   </select>
                 </label>
                 {draft.importance === "critical" && (
                   <label>
-                    影响主结论的原因
+                    为何保留在研究脉络中
                     <textarea
                       value={draft.importanceReason || ""}
                       onChange={(e) =>

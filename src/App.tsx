@@ -8,6 +8,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStore,
   type Connection,
   type Edge,
   type Node,
@@ -45,14 +46,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type RuntimeSnapshot } from "./api";
+import { researchSpine } from "./research-spine";
 import {
   ancestry,
   descendants,
   kinds,
-  NODE_SIZE,
   isExecutionRun,
   isVisualContainer,
-  visualParent,
   toCanvas,
   uid,
   type Artifact,
@@ -78,6 +78,7 @@ import { OutlineTree } from "./components/OutlineTree";
 import { date, IconButton, time } from "./components/Primitives";
 import { ResearchCard } from "./components/ResearchCard";
 import { ResearchEdge } from "./components/ResearchEdge";
+import { layoutCanvas } from "./graph-layout";
 import { CompareView, EvidenceView, RunsView } from "./components/Views";
 const nodeTypes = { research: ResearchCard };
 const edgeTypes = { research: ResearchEdge };
@@ -120,6 +121,7 @@ export default function App() {
     const saved = localStorage.getItem("exp-observer-motion");
     return saved === "on" || saved === "off" ? saved : "system";
   });
+  const [spineOnly, setSpineOnly] = useState(false);
   const [runtime, setRuntime] = useState<RuntimeSnapshot | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasData>>([]),
     [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -131,6 +133,14 @@ export default function App() {
     fileInput = useRef<HTMLInputElement>(null),
     loadedId = useRef("");
   const flow = useReactFlow();
+  const fittedLayout = useRef("");
+  const measuredSizes = useStore((state) =>
+    JSON.stringify(
+      state.nodes
+        .filter((n) => !n.data.expanded && n.measured?.height)
+        .map((n) => [n.id, n.measured!.width, n.measured!.height]),
+    ),
+  );
   const selectedNode = project?.nodes.find((n) => n.id === selected[0]);
   const selectedEdge = project?.edges.find((e) => e.id === edgeId);
   useEffect(() => {
@@ -201,10 +211,6 @@ export default function App() {
         setEdgeId(null);
         localStorage.setItem("exp-observer-project", id);
         setError("");
-        setTimeout(
-          () => flow.fitView({ padding: 0.2, duration: motionDuration(400) }),
-          180,
-        );
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -331,7 +337,7 @@ export default function App() {
     if (!project) return;
     const canvas = toCanvas(
       {
-        ...project,
+        ...(spineOnly ? researchSpine(project) : project),
         runtimeActivity:
           runtime?.projectId === project.id ? runtime.active : [],
       },
@@ -343,9 +349,64 @@ export default function App() {
         onInspect: inspectNode,
       },
     );
-    setNodes(canvas.nodes);
-    setEdges(canvas.edges as any);
-  }, [project, runtime, scope, toggle, enter, inspectNode]);
+    const measured = new Map<string, { width: number; height: number }>(
+      (JSON.parse(measuredSizes) as [string, number, number][]).map(
+        ([id, width, height]) => [id, { width, height }],
+      ),
+    );
+    canvas.nodes = canvas.nodes.map((n) => ({
+      ...n,
+      measured: measured.get(n.id),
+    }));
+    let cancelled = false;
+    void layoutCanvas(canvas)
+      .then((arranged) => {
+        if (cancelled || dragging.current) return;
+        setNodes(
+          arranged.nodes.map((n) => ({
+            ...n,
+            selected: selectionRef.current.includes(n.id),
+          })),
+        );
+        setEdges(arranged.edges);
+        const key = `${project.id}:${scope}:${spineOnly}`;
+        if (fittedLayout.current !== key) {
+          fittedLayout.current = key;
+          setTimeout(() => {
+            if (pRef.current?.id !== project.id) return;
+            const cards = arranged.nodes
+              .filter((n) => !n.parentId)
+              .sort((a, b) => a.position.y - b.position.y);
+            const firstRows = [
+              ...new Set(cards.map((n) => n.position.y)),
+            ].slice(0, 3);
+            void flow.fitView({
+              nodes: cards.filter((n) => firstRows.includes(n.position.y)),
+              padding: 0.18,
+              maxZoom: 0.85,
+              duration: motionDuration(300),
+            });
+          }, 120);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) notify(`布局失败：${(e as Error).message}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    project,
+    runtime,
+    scope,
+    toggle,
+    enter,
+    inspectNode,
+    flow,
+    notify,
+    measuredSizes,
+    spineOnly,
+  ]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
@@ -464,13 +525,20 @@ export default function App() {
         ...(isVisualContainer(original) ? descendants(p.nodes, root.id) : []),
       ]) {
         const existing = p.nodes.find((n) => n.id === id)!;
+        const rendered = byId.get(id);
+        const finalPosition = rendered
+          ? absolute(rendered)
+          : {
+              x: existing.position.x + dx,
+              y: existing.position.y + dy,
+            };
         changes.set(id, {
           op: "node.update",
           data: {
             id,
             position: {
-              x: Math.round(existing.position.x + dx),
-              y: Math.round(existing.position.y + dy),
+              x: Math.round(finalPosition.x),
+              y: Math.round(finalPosition.y),
             },
           },
         });
@@ -480,79 +548,47 @@ export default function App() {
   };
   const layout = async () => {
     if (!project) return;
-    const module = await import("@dagrejs/dagre");
-    const dagre = (module.default || module) as any;
-    const positions = new Map<string, { x: number; y: number }>();
-    const dimensions = new Map<string, { w: number; h: number }>();
-    const layoutNodes = scope
-      ? project.nodes.filter((n) =>
-          descendants(project.nodes, scope).includes(n.id),
-        )
-      : project.nodes;
-    const layoutIds = new Set(layoutNodes.map((n) => n.id));
-    const arrange = (parentId: string | null) => {
-      const group = layoutNodes.filter((n) => {
-        const container = visualParent(project.nodes, n);
-        const parent =
-          container && layoutIds.has(container.id) ? container.id : scope;
-        return parent === parentId;
-      });
-      for (const n of group) if (isVisualContainer(n)) arrange(n.id);
-      const g = new dagre.graphlib.Graph();
-      g.setGraph({
-        rankdir: "TB",
-        nodesep: 65,
-        ranksep: 100,
-        marginx: 30,
-        marginy: parentId ? 85 : 40,
-      });
-      g.setDefaultEdgeLabel(() => ({}));
-      for (const n of group) {
-        const d = dimensions.get(n.id) || NODE_SIZE;
-        g.setNode(n.id, { width: d.w, height: d.h });
-      }
-      for (const e of project.edges)
-        if (
-          e.relation !== "recorded_after" &&
-          group.some((n) => n.id === e.source) &&
-          group.some((n) => n.id === e.target)
-        )
-          g.setEdge(e.source, e.target, {
-            weight: 2,
-          });
-      if (!group.length) return;
-      dagre.layout(g);
-      for (const n of group) {
-        const a = g.node(n.id);
-        positions.set(n.id, { x: a.x - a.width / 2, y: a.y - a.height / 2 });
-      }
-      if (parentId) {
-        dimensions.set(parentId, {
-          w: g.graph().width + 30,
-          h: g.graph().height + 25,
-        });
-      }
-    };
-    arrange(scope);
-    const absolute = (id: string): { x: number; y: number } => {
-      const n = project.nodes.find((n) => n.id === id)!;
-      const pos = positions.get(id) || n.position;
-      const container = visualParent(project.nodes, n);
-      if (!container || !positions.has(container.id)) return pos;
-      const parent = absolute(container.id);
-      return { x: parent.x + pos.x, y: parent.y + pos.y };
-    };
-    const ops = project.nodes
-      .filter((n) => positions.has(n.id))
-      .map((n) => ({
-        op: "node.update",
-        data: { id: n.id, position: absolute(n.id) },
-      }));
-    if (await mutate(ops))
-      setTimeout(
-        () => flow.fitView({ padding: 0.2, duration: motionDuration(400) }),
-        120,
+    try {
+      const arranged = await layoutCanvas(
+        toCanvas(project, scope, selected, {
+          onToggle: toggle,
+          onEnter: enter,
+          onInspect: inspectNode,
+        }),
+        { resetManual: true },
       );
+      // Explicit relayout releases manual pins. Automatic view coordinates are
+      // computed by the same ELK engine used on load and incoming updates.
+      const visibleScope = new Set(
+        scope
+          ? descendants(project.nodes, scope)
+          : project.nodes.map((n) => n.id),
+      );
+      const ops = project.nodes
+        .filter((n) => visibleScope.has(n.id))
+        .map((n) => ({
+          op: "node.update",
+          data: {
+            id: n.id,
+            positionSource: "auto",
+          },
+        }));
+      if (await mutate(ops)) {
+        setNodes(arranged.nodes);
+        setEdges(arranged.edges);
+        setTimeout(
+          () =>
+            void flow.fitView({
+              padding: 0.18,
+              maxZoom: 1,
+              duration: motionDuration(350),
+            }),
+          120,
+        );
+      }
+    } catch (e) {
+      notify(`布局失败：${(e as Error).message}`);
+    }
   };
   const exportProject = () => {
     if (!project) return;
@@ -812,7 +848,9 @@ export default function App() {
                   : mainTabs.find((t) => t.id === view)?.label}
               </h1>
               {view === "graph" && (
-                <span className="toolbar-count">{graphCount} 个节点</span>
+                <span className="toolbar-count">
+                  {spineOnly ? nodes.length : graphCount} 个节点
+                </span>
               )}
               {project?.id === "retrieval-demo" && (
                 <span className="origin-tag">模拟研究</span>
@@ -826,6 +864,17 @@ export default function App() {
                 )}
                 {view === "graph" && (
                   <>
+                    <button
+                      className={`button spine-toggle ${spineOnly ? "selected" : ""}`}
+                      aria-pressed={spineOnly}
+                      title="隐藏非脉络节点；折叠路径可点击展开"
+                      onClick={() => {
+                        setSpineOnly(!spineOnly);
+                        setScope(null);
+                      }}
+                    >
+                      {spineOnly ? "全部节点" : "只看脉络"}
+                    </button>
                     <IconButton
                       label="自动布局"
                       onClick={() => void layout()}
@@ -912,6 +961,10 @@ export default function App() {
                           setInspector(true);
                         }}
                         onEdgeClick={(_, e) => {
+                          if (e.id.startsWith("spine:")) {
+                            setSpineOnly(false);
+                            return;
+                          }
                           setEdgeId(e.id);
                           setSelected([]);
                           setInspector(true);

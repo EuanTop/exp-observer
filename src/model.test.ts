@@ -58,7 +58,7 @@ describe("nested research graph", () => {
     });
     expect(canvas.nodes[0].style).toMatchObject({
       width: NODE_SIZE.w,
-      height: NODE_SIZE.h,
+      height: expect.any(Number),
     });
     expect(canvas.nodes[1].parentId).toBeUndefined();
     expect(canvas.nodes[1].position).toEqual(finding.position);

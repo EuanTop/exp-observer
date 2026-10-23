@@ -44,9 +44,7 @@ export function NodeUsagePanel({
         </div>
       </div>
       <p className="usage-scope">
-        {usage.tokenScope === "execution"
-          ? "被测任务用量，非主研究Agent完整成本"
-          : "关联会话用量（含手工记录）；与被测任务用量分开列示，不相加"}
+        {usage.tokenScope === "execution" ? "被测任务用量" : "研究 Agent 用量"}
       </p>
       <div className="usage-scope">
         <span>

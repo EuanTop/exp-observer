@@ -46,8 +46,36 @@ describe("research card content", () => {
     expect(canvas.nodes[0].data.presentation.summary).toBe(node.summary);
     expect(canvas.nodes[0].style).toMatchObject({
       width: NODE_SIZE.w,
-      height: NODE_SIZE.h,
+      height: expect.any(Number),
     });
+  });
+
+  it("previews retained notes without inventing text, and leaves empty work compact", () => {
+    const p = project();
+    const finding = {
+      ...node,
+      summary: "",
+      notes: "第一段原始分析。\n\n第二段详细计算。",
+    };
+    expect(nodePresentation(p, finding).summary).toBe("第一段原始分析。");
+    expect(
+      nodePresentation(p, { ...finding, conclusion: finding.title }).summary,
+    ).toBe("第一段原始分析。");
+    const empty = { ...node, title: "运行样地模型", summary: "", notes: "" };
+    const a = toCanvas({ ...p, nodes: [empty] }, null, [], {
+      onToggle() {},
+      onEnter() {},
+    }).nodes[0];
+    const b = toCanvas({ ...p, nodes: [finding] }, null, [], {
+      onToggle() {},
+      onEnter() {},
+    }).nodes[0];
+    expect(Number(a.style!.height)).toBeLessThan(Number(b.style!.height));
+    expect(Number(a.style!.height)).toBeLessThan(160);
+    expect(
+      nodePresentation(p, { ...empty, nextAction: "取得独立样地后复测" })
+        .summary,
+    ).toBe("取得独立样地后复测");
   });
 
   it("uses explicit conclusions then the latest decision for this node", () => {

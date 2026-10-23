@@ -69,6 +69,24 @@ class SemanticEventTests(unittest.TestCase):
                 ((cwd or self.root) / '.exp-observer-runs' / 'outbox').glob('*.json')
                 if not path.name.startswith('project-')]
 
+    def test_parallel_followups_are_questions_and_importance_applies_to_actual_event(self):
+        _, first = self.invoke('event', '--project', 'study', '--question', '中心问题',
+                               '--finding', '决定下一步的证据', '--importance', 'critical',
+                               '--importance-reason', '隐藏后无法理解研究为什么继续')
+        for title in ('后续问题一', '后续问题二', '后续问题三'):
+            self.invoke('event', '--project', 'study', '--question', title, '--after', first['nodeId'])
+        p = self.project()
+        self.assertEqual([n['kind'] for n in p['nodes']].count('question'), 4)
+        self.assertFalse(any(n['kind'] == 'direction' for n in p['nodes']))
+        finding = next(n for n in p['nodes'] if n['id'] == first['nodeId'])
+        self.assertEqual(finding['importance'], 'critical')
+        self.assertEqual(finding['importanceReason'], '隐藏后无法理解研究为什么继续')
+        self.assertEqual(len([e for e in p['edges'] if e['source'] == first['nodeId'] and e['relation'] == 'branches']), 3)
+        self.invoke('record', '--project', 'study', '--title', '研究者自定义观察类型',
+                    '--kind', 'ablation_note', '--importance', 'critical')
+        self.assertEqual(self.project()['nodes'][-1]['kind'], 'ablation_note')
+        self.assertEqual(self.project()['nodes'][-1]['importance'], 'critical')
+
     def test_same_question_keeps_distinct_findings_correction_and_direction(self):
         _, question = self.invoke('event', '--project', 'study', '--question', '什么影响确认收益？',
             '--reason', '核对用户操作的实际收益。', '--notes', '保留问题的原始范围。')

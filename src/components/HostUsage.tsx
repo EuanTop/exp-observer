@@ -12,7 +12,7 @@ export function ProjectHostUsage({ project }: { project: Project }) {
   return (
     <section className="project-host-usage">
       <div className="inspector-section-title">
-        <span>分口径实测用量</span>
+        <span>实测用量</span>
         <span>{usage.recordCount} 条用量记录</span>
       </div>
       {usage.models.map((model) => (
@@ -24,7 +24,7 @@ export function ProjectHostUsage({ project }: { project: Project }) {
             <strong>{modelName(model.model)}</strong>
           </div>
           <div className="observation-meta">
-            {model.scope === "execution" ? "被测任务用量" : "关联会话用量"} ·{" "}
+            {model.scope === "execution" ? "被测任务用量" : "研究 Agent 用量"} ·{" "}
             {model.provider || "未知提供商"} · {model.recordCount} 条记录
           </div>
           <dl className="host-usage-values">
@@ -50,9 +50,7 @@ export function ProjectHostUsage({ project }: { project: Project }) {
       <p className="usage-scope">
         保留宿主原始计数，缓存单列，不额外叠加到输入 Token。
       </p>
-      <p className="usage-scope">
-        关联会话与被测任务分开列示，不相加。被测任务用量，非主研究Agent完整成本。
-      </p>
+
       {usage.unassignedCount > 0 && (
         <p className="usage-scope">
           {usage.unassignedCount} 条记录尚未归属节点，保留在对应口径中。
@@ -75,13 +73,14 @@ export function NodeHostUsage({ records }: { records: HostUsageRecord[] }) {
           <section key={scope}>
             <div className="inspector-section-title">
               <span>
-                {scope === "execution" ? "被测任务用量" : "关联会话用量"}
+                {scope === "execution" ? "被测任务用量" : "研究 Agent 用量"}
               </span>
               <span>{scoped.length} 条记录</span>
             </div>
             <p className="usage-scope">
-              仅计入能够明确归属的推理。缓存单列，不额外叠加。
-              {scope === "execution" && "被测任务用量，非主研究Agent完整成本。"}
+              {scoped.some((r) => r.attribution === "recorded-work-window")
+                ? "宿主实测 · 按研究记录区间归属"
+                : "宿主实测 · 缓存单列"}
             </p>
             {scoped.map((record) => (
               <div className="observation-card" key={record.id}>
@@ -97,20 +96,30 @@ export function NodeHostUsage({ records }: { records: HostUsageRecord[] }) {
                   <span>缓存写入 {tokens(record.cacheWriteTokens)}</span>
                 </div>
                 <div className="observation-meta">
-                  <span>
-                    开始 <time>{formatUsageTime(record.startedAt)}</time>
-                  </span>
-                  <span>
-                    结束 <time>{formatUsageTime(record.finishedAt)}</time>
-                  </span>
+                  {record.source === "codex-session" ? (
+                    <span>
+                      记录时间 <time>{formatUsageTime(record.finishedAt)}</time>
+                    </span>
+                  ) : (
+                    <>
+                      <span>
+                        开始 <time>{formatUsageTime(record.startedAt)}</time>
+                      </span>
+                      <span>
+                        结束 <time>{formatUsageTime(record.finishedAt)}</time>
+                      </span>
+                    </>
+                  )}
                   <span>{record.provider || "未知提供商"}</span>
                 </div>
                 <details>
                   <summary>来源记录</summary>
                   <p className="usage-scope">
-                    {record.source.startsWith("happy-sqlite:")
-                      ? "Happy 宿主"
-                      : record.source}{" "}
+                    {record.source === "codex-session"
+                      ? "Codex 宿主日志"
+                      : record.source.startsWith("happy-sqlite:")
+                        ? "Happy 宿主"
+                        : record.source}{" "}
                     · {record.sourceRef}
                   </p>
                 </details>

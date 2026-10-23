@@ -611,7 +611,7 @@ p {
 }
 .research-node {
   width: 100%;
-  height: 100%;
+  height: auto;
   background: var(--node);
   border: 1px solid var(--border);
   border-radius: 13px;
@@ -867,9 +867,9 @@ p {
   color: #a1a1aa;
 }
 .node-content {
-  padding: 10px 19px 0;
+  padding: 10px 19px 14px;
   min-width: 0;
-  flex: 1;
+  flex: 0 0 auto;
   overflow: hidden;
 }
 .node-content h3 {
@@ -879,7 +879,7 @@ p {
   letter-spacing: -0.2px;
   line-height: 1.5;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
@@ -1077,6 +1077,7 @@ p {
   height: 7px;
 }
 .research-node.container-expanded {
+  height: 100%;
   background: var(--raised);
   border: 1px dashed var(--faint);
   box-shadow: none;
@@ -3035,4 +3036,17 @@ p {
 }
 :root[data-theme="light"] .container-expanded .node-type {
   color: var(--muted);
+}
+
+/* State remains visible when selected; the separate focus ring stays blue. */
+.research-node.state-failed {
+  border: 2px solid #dc4444;
+  box-shadow: 0 0 0 1px #dc444415, 0 4px 14px #00000012;
+}
+.research-node.state-paused {
+  border: 2px solid #9a6b38;
+  box-shadow: 0 0 0 1px #9a6b3815, 0 4px 14px #00000012;
+}
+:root[data-theme="dark"] .research-node.state-paused {
+  border-color: #c59a66;
 }

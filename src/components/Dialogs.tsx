@@ -605,11 +605,15 @@ export function CreateDialog({
                     required
                   />
                   <datalist id="node-kinds">
-                    {Object.entries(kinds).map(([k, v]) => (
-                      <option key={k} value={k}>
-                        {v}
-                      </option>
-                    ))}
+                    {Object.entries(kinds)
+                      .filter(([k]) =>
+                        ["question", "experiment", "finding"].includes(k),
+                      )
+                      .map(([k, v]) => (
+                        <option key={k} value={k}>
+                          {v}
+                        </option>
+                      ))}
                   </datalist>
                 </label>
               )}

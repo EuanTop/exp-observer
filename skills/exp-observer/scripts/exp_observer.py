@@ -99,6 +99,8 @@ def parser():
     record.add_argument('--title', required=True)
     record.add_argument('--summary')
     record.add_argument('--conclusion', help='The substantive finding displayed directly on the node')
+    record.add_argument('--importance', choices=('normal', 'critical'), help='Mark a node essential to understanding the research story')
+    record.add_argument('--importance-reason', help='Why the condensed research story needs this node')
     record.add_argument('--kind', help='Natural research type, e.g. question, experiment, finding or decision; omitted updates preserve the type')
     notes = record.add_mutually_exclusive_group()
     notes.add_argument('--notes', help='Full analysis retained in the node notes')
@@ -120,7 +122,9 @@ def parser():
     change.add_argument('--finding', help='A substantive finding, retained as its own event')
     change.add_argument('--correction', help='A corrected judgment, retained separately from the earlier finding')
     change.add_argument('--direction', help='A change in research direction, retained as its own event')
-    event.add_argument('--after', help='Earlier finding title or ID that this event relates to')
+    event.add_argument('--importance', choices=('normal', 'critical'), help='Importance of the finding, or the question when no finding is supplied')
+    event.add_argument('--importance-reason', help='Why this node belongs in the research spine')
+    event.add_argument('--after', help='Earlier node title or ID; a new question branches from it')
     event.add_argument('--relation', help='Meaning of --after (default: revises for correction, leads_to for direction, related_to for finding)')
     event.add_argument('--evidence', action='append', default=[], help='Execution/evidence node title or ID supporting this event; repeat as needed')
     analysis = event.add_mutually_exclusive_group()
@@ -456,7 +460,7 @@ def local_context(outbox, client, project_id, node_id=None):
                     if isinstance(data.get('notes'), str):
                         detail.update({'notes': data['notes'], 'hasNotes': bool(data['notes'])})
                     if operation['op'] in ('node.add', 'node.update', 'node.ensure') and isinstance(data.get('id'), str):
-                        fields = ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'notes', 'nextAction', 'pauseReason', 'resumeWhen')
+                        fields = ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'notes', 'importance', 'importanceReason', 'nextAction', 'pauseReason', 'resumeWhen')
                         node_updates.append(((task.get('capturedAt') or task.get('startedAt') or '', path.name, index),
                                              operation['op'], {key: data[key] for key in fields if key in data}))
                     record['operations'].append(detail)
@@ -557,6 +561,9 @@ def task_identity(client, args, intent):
             'projectId': args.project, 'intent': intent, 'state': 'preparing',
             'nodeId': args.node or 'node-' + key, 'runId': 'run-' + key,
             'captureRoot': str(capture_root(args.project)), 'artifacts': [], 'recordingWarnings': []}
+    thread_id = os.environ.get('CODEX_THREAD_ID', '')
+    if re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', thread_id):
+        task['hostUsage'] = {'host': 'codex', 'threadId': thread_id}
     return path, task
 
 
@@ -884,7 +891,7 @@ def capture_inputs(args):
 def record(client, args):
     notes, notes_error, metrics, metrics_warning = capture_inputs(args)
     intent = {'command': 'record', **{key: getattr(args, key) for key in
-              ('title', 'summary', 'conclusion', 'kind', 'node', 'after', 'relation', 'independent', 'parent', 'status', 'artifact')},
+              ('title', 'summary', 'conclusion', 'kind', 'node', 'after', 'relation', 'independent', 'parent', 'status', 'artifact', 'importance', 'importance_reason')},
               'notes': notes, 'notesFile': args.notes_file,
               'metrics': metrics, 'hasMetrics': args.metrics_file is not None and metrics_warning is None,
               'metricsFile': args.metrics_file}
@@ -915,7 +922,7 @@ def record(client, args):
             node['notes'] = notes
         if args.kind is not None:
             node['kind'] = args.kind
-        for option, field in (('summary', 'summary'), ('parent', 'parentId'), ('status', 'status')):
+        for option, field in (('summary', 'summary'), ('parent', 'parentId'), ('status', 'status'), ('importance', 'importance'), ('importance_reason', 'importanceReason')):
             if getattr(args, option) is not None:
                 node[field] = getattr(args, option)
         if not args.node:
@@ -980,11 +987,9 @@ def event(client, args):
         raise ClientError('A research change must contain its actual finding, correction or direction.')
     if args.relation and not args.after:
         raise ClientError('--relation requires an explicit --after reference.')
-    if args.after and not event_type:
-        raise ClientError('--after relates a finding, correction or direction; supply that change.')
     notes, notes_error, metrics, metrics_warning = capture_inputs(args)
     intent = {'command': 'event', **{key: getattr(args, key) for key in
-              ('question', 'reason', 'finding', 'correction', 'direction', 'after', 'relation', 'evidence', 'status', 'next_action', 'pause_reason', 'resume_when', 'artifact')},
+              ('question', 'reason', 'finding', 'correction', 'direction', 'after', 'relation', 'evidence', 'status', 'next_action', 'pause_reason', 'resume_when', 'artifact', 'importance', 'importance_reason')},
               'notes': notes, 'notesFile': args.notes_file,
               'metrics': metrics, 'hasMetrics': args.metrics_file is not None and metrics_warning is None,
               'metricsFile': args.metrics_file}
@@ -1021,7 +1026,12 @@ def event(client, args):
                 'basis': 'observed'}})
         else:
             task['nodeId'] = question['id']
-        update = {'id': question['id']}
+        importance = {field: getattr(args, option) for option, field in
+                      (('importance', 'importance'), ('importance_reason', 'importanceReason'))
+                      if getattr(args, option) is not None}
+        if event_type:
+            node.update(importance)
+        update = {'id': question['id'], **(importance if not event_type else {})}
         for option, field in (('status', 'status'), ('next_action', 'nextAction'),
                               ('pause_reason', 'pauseReason'), ('resume_when', 'resumeWhen')):
             value = getattr(args, option)
@@ -1033,7 +1043,7 @@ def event(client, args):
             task['operations'].append({'op': 'node.update', 'data': update})
         links = [(value, 'supports', 'evidence-' + str(index)) for index, value in enumerate(args.evidence)]
         if args.after:
-            relation = args.relation or {'finding': 'related_to', 'correction': 'revises', 'direction': 'leads_to'}[event_type]
+            relation = args.relation or {'finding': 'related_to', 'correction': 'revises', 'direction': 'leads_to', None: 'branches'}[event_type]
             links.append((args.after, relation, 'after'))
         for value, relation, suffix in links:
             try:

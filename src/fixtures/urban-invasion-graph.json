@@ -1,0 +1,320 @@
+{
+  "nodes": [
+    {
+      "id": "question-c821c6c038afcbee1ca00b104c25d8a1",
+      "kind": "question",
+      "parentId": null,
+      "position": {
+        "x": 463,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-b43a0b0c918baeaa6c6119134c7fceef",
+      "kind": "experiment",
+      "parentId": null,
+      "position": {
+        "x": 916,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-c04b9b3328c0e6c152c18b07a018ad38",
+      "kind": "finding",
+      "parentId": null,
+      "position": {
+        "x": 483,
+        "y": 370
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-60389e07c3c5d761793f0a690c465d7f",
+      "kind": "experiment",
+      "parentId": null,
+      "position": {
+        "x": 30,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-c8f00beaa41bb714212da9509acf2e6f",
+      "kind": "experiment",
+      "parentId": null,
+      "position": {
+        "x": 1782,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-1f865d87eabf5be7a2b64abc18d5bf9e",
+      "kind": "direction",
+      "parentId": null,
+      "position": {
+        "x": 50,
+        "y": 370
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "question-c7282b971270ce42ddcfc1f48ee6299a",
+      "kind": "question",
+      "parentId": null,
+      "position": {
+        "x": 3514,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-f136faae41a1a319e17b86c6f8bb839e",
+      "kind": "experiment",
+      "parentId": null,
+      "position": {
+        "x": 3947,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-e11e91c95e8e6fd916e2f551e5b8221e",
+      "kind": "finding",
+      "parentId": null,
+      "position": {
+        "x": 3927,
+        "y": 370
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-081bd382fe944eabeafa845631a2f3ef",
+      "kind": "experiment",
+      "parentId": null,
+      "position": {
+        "x": 1349,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-2cf3be9bd0f61d353206e9967786d98f",
+      "kind": "finding",
+      "parentId": null,
+      "position": {
+        "x": 916,
+        "y": 370
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-d8fa5b3d8701f39a3820be89d8f5c649",
+      "kind": "experiment",
+      "parentId": null,
+      "position": {
+        "x": 2648,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "question-aaea890851506b70c9cc42cf0430da4e",
+      "kind": "question",
+      "parentId": null,
+      "position": {
+        "x": 3081,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-3cccda3533c4d9186219726b4e5077eb",
+      "kind": "finding",
+      "parentId": null,
+      "position": {
+        "x": 3061,
+        "y": 370
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-ecb4f3df347dbaf39e00d0a629775136",
+      "kind": "experiment",
+      "parentId": null,
+      "position": {
+        "x": 2215,
+        "y": 40
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    },
+    {
+      "id": "node-03c293c033506ae50bfdc7d3f9e968fa",
+      "kind": "finding",
+      "parentId": null,
+      "position": {
+        "x": 1772,
+        "y": 370
+      },
+      "positionSource": "manual",
+      "collapsed": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-b43a0b0c918baeaa6c6119134c7fceef",
+      "source": "question-c821c6c038afcbee1ca00b104c25d8a1",
+      "target": "node-b43a0b0c918baeaa6c6119134c7fceef",
+      "relation": "recorded_after"
+    },
+    {
+      "id": "edge-c04b9b3328c0e6c152c18b07a018ad38-question",
+      "source": "question-c821c6c038afcbee1ca00b104c25d8a1",
+      "target": "node-c04b9b3328c0e6c152c18b07a018ad38",
+      "relation": "has_finding"
+    },
+    {
+      "id": "edge-c04b9b3328c0e6c152c18b07a018ad38-evidence-0",
+      "source": "node-b43a0b0c918baeaa6c6119134c7fceef",
+      "target": "node-c04b9b3328c0e6c152c18b07a018ad38",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-60389e07c3c5d761793f0a690c465d7f",
+      "source": "node-c04b9b3328c0e6c152c18b07a018ad38",
+      "target": "node-60389e07c3c5d761793f0a690c465d7f",
+      "relation": "recorded_after"
+    },
+    {
+      "id": "edge-c8f00beaa41bb714212da9509acf2e6f",
+      "source": "node-60389e07c3c5d761793f0a690c465d7f",
+      "target": "node-c8f00beaa41bb714212da9509acf2e6f",
+      "relation": "recorded_after"
+    },
+    {
+      "id": "edge-1f865d87eabf5be7a2b64abc18d5bf9e-question",
+      "source": "question-c821c6c038afcbee1ca00b104c25d8a1",
+      "target": "node-1f865d87eabf5be7a2b64abc18d5bf9e",
+      "relation": "has_direction"
+    },
+    {
+      "id": "edge-1f865d87eabf5be7a2b64abc18d5bf9e-evidence-0",
+      "source": "node-60389e07c3c5d761793f0a690c465d7f",
+      "target": "node-1f865d87eabf5be7a2b64abc18d5bf9e",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-f136faae41a1a319e17b86c6f8bb839e",
+      "source": "question-c7282b971270ce42ddcfc1f48ee6299a",
+      "target": "node-f136faae41a1a319e17b86c6f8bb839e",
+      "relation": "recorded_after"
+    },
+    {
+      "id": "edge-e11e91c95e8e6fd916e2f551e5b8221e-question",
+      "source": "question-c7282b971270ce42ddcfc1f48ee6299a",
+      "target": "node-e11e91c95e8e6fd916e2f551e5b8221e",
+      "relation": "has_finding"
+    },
+    {
+      "id": "edge-e11e91c95e8e6fd916e2f551e5b8221e-evidence-0",
+      "source": "node-f136faae41a1a319e17b86c6f8bb839e",
+      "target": "node-e11e91c95e8e6fd916e2f551e5b8221e",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-081bd382fe944eabeafa845631a2f3ef",
+      "source": "question-c7282b971270ce42ddcfc1f48ee6299a",
+      "target": "node-081bd382fe944eabeafa845631a2f3ef",
+      "relation": "recorded_after"
+    },
+    {
+      "id": "edge-2cf3be9bd0f61d353206e9967786d98f-question",
+      "source": "question-c821c6c038afcbee1ca00b104c25d8a1",
+      "target": "node-2cf3be9bd0f61d353206e9967786d98f",
+      "relation": "has_finding"
+    },
+    {
+      "id": "edge-2cf3be9bd0f61d353206e9967786d98f-evidence-0",
+      "source": "node-081bd382fe944eabeafa845631a2f3ef",
+      "target": "node-2cf3be9bd0f61d353206e9967786d98f",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-d8fa5b3d8701f39a3820be89d8f5c649",
+      "source": "node-2cf3be9bd0f61d353206e9967786d98f",
+      "target": "node-d8fa5b3d8701f39a3820be89d8f5c649",
+      "relation": "recorded_after"
+    },
+    {
+      "id": "edge-3cccda3533c4d9186219726b4e5077eb-question",
+      "source": "question-aaea890851506b70c9cc42cf0430da4e",
+      "target": "node-3cccda3533c4d9186219726b4e5077eb",
+      "relation": "has_finding"
+    },
+    {
+      "id": "edge-3cccda3533c4d9186219726b4e5077eb-evidence-0",
+      "source": "node-d8fa5b3d8701f39a3820be89d8f5c649",
+      "target": "node-3cccda3533c4d9186219726b4e5077eb",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-ecb4f3df347dbaf39e00d0a629775136",
+      "source": "question-aaea890851506b70c9cc42cf0430da4e",
+      "target": "node-ecb4f3df347dbaf39e00d0a629775136",
+      "relation": "recorded_after"
+    },
+    {
+      "id": "edge-03c293c033506ae50bfdc7d3f9e968fa-question",
+      "source": "question-c821c6c038afcbee1ca00b104c25d8a1",
+      "target": "node-03c293c033506ae50bfdc7d3f9e968fa",
+      "relation": "has_finding"
+    },
+    {
+      "id": "edge-03c293c033506ae50bfdc7d3f9e968fa-evidence-0",
+      "source": "node-b43a0b0c918baeaa6c6119134c7fceef",
+      "target": "node-03c293c033506ae50bfdc7d3f9e968fa",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-03c293c033506ae50bfdc7d3f9e968fa-evidence-1",
+      "source": "node-c8f00beaa41bb714212da9509acf2e6f",
+      "target": "node-03c293c033506ae50bfdc7d3f9e968fa",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-03c293c033506ae50bfdc7d3f9e968fa-evidence-2",
+      "source": "node-081bd382fe944eabeafa845631a2f3ef",
+      "target": "node-03c293c033506ae50bfdc7d3f9e968fa",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-03c293c033506ae50bfdc7d3f9e968fa-evidence-3",
+      "source": "node-d8fa5b3d8701f39a3820be89d8f5c649",
+      "target": "node-03c293c033506ae50bfdc7d3f9e968fa",
+      "relation": "supports"
+    },
+    {
+      "id": "edge-03c293c033506ae50bfdc7d3f9e968fa-evidence-4",
+      "source": "node-ecb4f3df347dbaf39e00d0a629775136",
+      "target": "node-03c293c033506ae50bfdc7d3f9e968fa",
+      "relation": "supports"
+    }
+  ]
+}

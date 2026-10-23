@@ -5,6 +5,7 @@ import {
   type ReactFlowState,
 } from "@xyflow/react";
 import { roundedPath, routeEdge, type Rect } from "../edge-routing";
+import type { LayoutRoute } from "../graph-layout";
 
 type CardBounds = Rect & { id: string; parentId?: string; expanded: boolean };
 const bounds = (state: ReactFlowState): CardBounds[] =>
@@ -18,7 +19,9 @@ const bounds = (state: ReactFlowState): CardBounds[] =>
         expanded: !!node.data.expanded,
         ...internal.internals.positionAbsolute,
         width: node.measured?.width ?? Number(node.style?.width ?? 280),
-        height: node.measured?.height ?? Number(node.style?.height ?? 178),
+        height:
+          node.measured?.height ??
+          Number(node.style?.height ?? node.data.layoutHeight ?? 178),
       };
     });
 const equalBounds = (a: CardBounds[], b: CardBounds[]) =>
@@ -67,13 +70,30 @@ export function ResearchEdge(props: EdgeProps) {
           16,
         )
       : 90;
-  const route = routeEdge(
-    source,
-    target,
-    obstacles,
-    Number(props.data?.lane ?? 0),
-    labelWidth,
-  );
+  const planned = props.data?.layoutRoute as LayoutRoute | undefined;
+  const geometryMatches =
+    planned?.geometry.length === cards.length &&
+    planned.geometry.every((r) => {
+      const card = cards.find((c) => c.id === r.id);
+      return (
+        card &&
+        Math.abs(card.x - r.x) < 0.5 &&
+        Math.abs(card.y - r.y) < 0.5 &&
+        Math.abs(card.width - r.width) < 0.5 &&
+        Math.abs(card.height - r.height) < 0.5
+      );
+    });
+  // ELK plans all ports and channels together. Only a live drag or a manual
+  // anchor needs the local obstacle-aware fallback.
+  const route = geometryMatches
+    ? planned
+    : routeEdge(
+        source,
+        target,
+        obstacles,
+        Number(props.data?.lane ?? 0),
+        labelWidth,
+      );
   if (!route) return null;
   const path = roundedPath(route.points);
   return (

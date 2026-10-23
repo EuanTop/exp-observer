@@ -17,7 +17,7 @@ python3 <skill>/scripts/exp_observer.py event --project ID --question "Is the me
 
 As work ends, review only the actual questions you worked on. Resolved questions can be completed; unresolved work no longer advancing can be paused with a next action; real continuing work can remain active. Do not suspend the entire experiment or unrelated questions merely because a turn ends.
 
-`--after ID_OR_EXACT_TITLE` states a relationship to an earlier finding: defaults are `related_to` for a finding, `revises` for a correction and `leads_to` for a direction. `--relation supports` or another explicit relation overrides that meaning. Repeated `--evidence ID_OR_EXACT_TITLE` adds `supports` links from captured evidence to this event. Exact titles resolve locally or from retained context; missing or ambiguous optional relationship titles produce warnings while retaining the finding without those links. Explicit IDs are validated at delivery. No order-only edges are added by `event`.
+`--after ID_OR_EXACT_TITLE` without a change creates a `branches` relationship from that earlier node to the new question. With a change, it states a relationship to an earlier finding: defaults are `related_to` for a finding, `revises` for a correction and `leads_to` for a direction. `--relation supports` or another explicit relation overrides that meaning. Repeated `--evidence ID_OR_EXACT_TITLE` adds `supports` links from captured evidence to this event. Exact titles resolve locally or from retained context; missing or ambiguous optional relationship titles produce warnings while retaining the finding without those links. Explicit IDs are validated at delivery. No order-only edges are added by `event`.
 
 A single captured execution can support several discoveries. Use its exact title in `--evidence` for each actual change, without rerunning it. Repeated measurements use `execute --question "Exact question" --title "Actual measurement" -- COMMAND...`; this adds a run to the same question, without creating a discovery. Existing JSON can be captured with `event --question "Exact question" --metrics-file result.json`. No per-tool start/finish events, fixed phases or node quotas are required.
 
@@ -147,3 +147,9 @@ Assessment example, using an existing run:
 The example values above illustrate shape only; replace with actual results. Use one rubric to compare measurement boundaries consistently. If preparation time was omitted, revise the assessment using the existing raw evidence when possible, linking `supersedes`. If new execution is needed, create a new run.
 
 HTTP routes and storage contract: see the repository's `docs/contract.md` when developing an adapter. Agent research generally needs only this reference and the client.
+
+## Node types and research spine
+
+The suggested types are `question`, `experiment`, `finding`. `record --kind TYPE` also accepts domain-specific types. Parallel follow-up questions remain questions, with `branches` links; the legacy `--direction` event is optional, not a required research phase.
+
+`event` and `record` accept `--importance normal|critical` and `--importance-reason TEXT`. An event marks its new finding, or the question if no finding is supplied. Omitted importance preserves existing values. Marking identifies the narrative needed to understand the central question, decisive evidence, changed judgments, current answer and material unresolved questions. It does not certify evidence quality.

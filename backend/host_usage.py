@@ -331,7 +331,9 @@ class HostUsageImporter:
         self.store = store
         if adapters is None:
             from .execution_usage import CapturedUsageAdapter
-            adapters = [HappySQLiteAdapter(url=url or 'http://127.0.0.1:4317'), CapturedUsageAdapter(store)]
+            from .codex_usage import CodexSessionAdapter
+            adapters = [HappySQLiteAdapter(url=url or 'http://127.0.0.1:4317'),
+                        CodexSessionAdapter(url=url or 'http://127.0.0.1:4317'), CapturedUsageAdapter(store)]
         self.adapters = adapters
         self.interval = interval
         self.url = url
@@ -368,6 +370,8 @@ class HostUsageImporter:
         results = []
         for adapter in self.adapters:
             try:
+                if hasattr(adapter, 'outboxes'):
+                    adapter.outboxes = outboxes
                 records = adapter.read(projects)
                 results.extend(getattr(adapter, 'warnings', []))
                 for project in projects:

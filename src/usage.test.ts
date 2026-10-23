@@ -178,7 +178,7 @@ describe("host usage attribution", () => {
     const html = renderToStaticMarkup(
       createElement(NodeHostUsage, { records: p.usageRecords }),
     );
-    expect(html).toContain("被测任务用量，非主研究Agent完整成本");
+    expect(html).toContain("被测任务用量");
     expect(html).toContain("未知模型");
     expect(html.match(/未提供/g)).toHaveLength(2);
     expect(html).toContain("exec");

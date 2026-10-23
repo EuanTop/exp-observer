@@ -31,10 +31,10 @@ function UsageStats({ data }: { data: CanvasData }) {
         className="node-stat nodrag"
         title={
           usage?.tokenScope === "execution"
-            ? "被测任务用量，非主研究Agent完整成本；查看输入与输出 Token 来源"
+            ? "被测任务用量；查看输入与输出 Token 来源"
             : usage?.tokensPartial
               ? "部分用量未采集；查看已记录的输入与输出 Token"
-              : "关联会话用量（含手工记录）；查看输入与输出 Token 来源"
+              : "研究 Agent 用量；查看输入与输出 Token 来源"
         }
         onClick={(e) => {
           e.stopPropagation();
@@ -60,7 +60,7 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
   const processing = data.processing === true;
   return (
     <div
-      className={`research-node ${selected ? "is-selected" : ""} ${processing ? "is-processing" : ""} ${n.importance === "critical" ? "is-critical" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${container ? "is-container" : ""}`}
+      className={`research-node ${selected ? "is-selected" : ""} ${processing ? "is-processing" : ""} ${n.importance === "critical" ? "is-critical" : ""} ${!processing && n.status === "failed" ? "state-failed" : ""} ${!processing && n.status === "paused" ? "state-paused" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${container ? "is-container" : ""}`}
       aria-label={processing ? `${presentation.headline}，处理中` : undefined}
     >
       {processing && (
@@ -89,7 +89,7 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
           {n.importance === "critical" && (
             <span
               className="node-critical-mark"
-              title={n.importanceReason || "关键节点"}
+              title={n.importanceReason || "研究脉络节点"}
             >
               <Diamond size={10} />
               关键

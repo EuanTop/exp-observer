@@ -1,6 +1,7 @@
 import type { Edge, Node } from "@xyflow/react";
 import { getNodeUsage } from "./usage";
 import { facingSides } from "./edge-routing";
+import { estimateCardHeight } from "./card-sizing";
 import {
   isNodeProcessing,
   nodePresentation,
@@ -170,7 +171,7 @@ export const kinds: Record<string, string> = {
   algorithm: "算法",
   finding: "发现",
   correction: "纠正",
-  direction: "转向",
+  direction: "方向调整",
   decision: "决策",
   group: "容器",
   reference: "资料",
@@ -189,8 +190,9 @@ export const relations: Record<string, string> = {
   compares: "对比",
   has_finding: "发现",
   has_correction: "纠正",
-  has_direction: "转向",
+  has_direction: "方向调整",
   related_to: "关联",
+  collapsed_path: "折叠路径",
   recorded_after: "后续记录",
 };
 export function descendants(nodes: ResearchNode[], id: string): string[] {
@@ -282,7 +284,8 @@ export function toCanvas(
     const children = visible.filter(
       (c) => visualParent(project.nodes, c)?.id === n.id,
     );
-    let { w, h } = NODE_SIZE;
+    let w = NODE_SIZE.w;
+    let h = estimateCardHeight(nodePresentation(project, n), w);
     if (isVisualContainer(n) && children.length && !n.collapsed) {
       w = Math.max(
         330,
@@ -377,7 +380,9 @@ export function toCanvas(
       label:
         e.relation === "recorded_after"
           ? ""
-          : e.label || relations[e.relation] || e.relation,
+          : e.relation === "has_direction"
+            ? relations[e.relation]
+            : e.label || relations[e.relation] || e.relation,
       style: {
         stroke: e.basis === "hypothesis" ? "#94a3b8" : "#71717a",
         strokeWidth: e.relation === "recorded_after" ? 1 : 1.4,
@@ -385,7 +390,7 @@ export function toCanvas(
         strokeDasharray:
           e.relation === "recorded_after"
             ? "3 6"
-            : e.basis === "hypothesis"
+            : e.basis === "hypothesis" || e.relation === "collapsed_path"
               ? "5 5"
               : undefined,
       },
