@@ -44,14 +44,17 @@ def probe(url):
     class NoRedirect(HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
+    # Windows reports a refused localhost TCP connection after roughly one
+    # second; a shorter deadline misclassifies a stopped platform as blocked.
+    timeout = 1.5 if os.name == 'nt' else .35
     try:
-        with build_opener(ProxyHandler({}), NoRedirect()).open(url.rstrip('/') + '/api/health', timeout=.35) as response:
+        with build_opener(ProxyHandler({}), NoRedirect()).open(url.rstrip('/') + '/api/health', timeout=timeout) as response:
             value = json.loads(response.read(8192))
         if value.get('ok') is True and value.get('app') == 'ExpObserver':
             return 'ready'
         # Older installed versions expose identity through agent setup.
         if value.get('ok') is True and isinstance(value.get('version'), str):
-            with build_opener(ProxyHandler({}), NoRedirect()).open(url.rstrip('/') + '/api/agent-setup', timeout=.35) as response:
+            with build_opener(ProxyHandler({}), NoRedirect()).open(url.rstrip('/') + '/api/agent-setup', timeout=timeout) as response:
                 setup = json.loads(response.read(16384))
             if str(setup.get('clientPath', '')).replace('\\', '/').endswith('/scripts/exp_observer.py'):
                 return 'ready'

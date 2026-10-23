@@ -79,12 +79,13 @@ class BootstrapTests(unittest.TestCase):
     def invoke(self, *arguments):
         result = subprocess.run([sys.executable, str(self.skill/'scripts/exp_observer.py'), '--url', self.url, *arguments],
                                 cwd=self.workspace, env=self.env, capture_output=True, timeout=15)
-        self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
+        diagnostics = '\n'.join(path.read_text(encoding='utf-8',errors='replace')[-8000:] for path in self.state.glob('*') if path.suffix in ('.log','.json')) if self.state.exists() else 'No startup state written'
+        self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace') + '\n' + diagnostics)
         return json.loads(result.stdout)
 
     def test_skill_only_boots_offline_then_reuses_and_restarts_the_same_data(self):
         created = self.invoke('init', '--id', 'study', '--name', '移植后实验')
-        self.assertFalse(created['pending'], created)
+        self.assertFalse(created['pending'], (created,bootstrap.read_json(self.state/('launch-'+str(self.port)+'.json'))))
         receipt = self.invoke('event', '--project', 'study', '--question', '已有结果需要验证吗？', '--finding', '保留真实已有结果')
         self.assertFalse(receipt['pending'])
         launch = self.state/('launch-'+str(self.port)+'.json')
