@@ -677,6 +677,12 @@ export function EdgeInspector({
         </span>
       </div>
       <div className="inspector-scroll edit-fields">
+        {edge.provenance?.mode === "retrospective" && (
+          <div className="node-context-note">
+            <strong>事后补充的关系</strong>
+            <p>{edge.provenance.note}</p>
+          </div>
+        )}
         <label>
           关系
           <select

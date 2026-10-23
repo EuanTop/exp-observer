@@ -3069,3 +3069,18 @@ p {
 .usage-collection[open] summary {
   margin-bottom: 12px;
 }
+
+.node-content.has-pause > p,
+.node-content .node-pause-details p {
+  -webkit-line-clamp: 2;
+}
+.node-content .node-pause-details p {
+  margin-top: 6px;
+  color: var(--text);
+}
+.node-content .node-pause-details p:first-child {
+  margin-top: 8px;
+}
+.node-pause-details span {
+  color: var(--muted);
+}

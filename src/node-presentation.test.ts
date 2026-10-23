@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { isNodeProcessing, nodePresentation } from "./node-presentation";
 import { NODE_SIZE, toCanvas, type Project, type ResearchNode } from "./model";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ReactFlowProvider } from "@xyflow/react";
+import { ResearchCard } from "./components/ResearchCard";
+import { estimateCardHeight } from "./card-sizing";
 
 const node: ResearchNode = {
   id: "step",
@@ -32,6 +37,98 @@ const project = (): Project => ({
 });
 
 describe("research card content", () => {
+  it("prioritizes the recorded pause reason and recovery condition without changing the question", () => {
+    const paused = {
+      ...node,
+      status: "paused",
+      pauseReason: "当前样本不足以确认稳定效应。",
+      resumeWhen: "取得独立样地数据后验证。",
+      nextAction: "准备独立样地。",
+    };
+    const p = project(),
+      presentation = nodePresentation(p, paused);
+    expect(presentation).toMatchObject({
+      headline: node.title,
+      pauseReason: paused.pauseReason,
+      resumeWhen: paused.resumeWhen,
+      summary: node.summary,
+    });
+    expect(presentation.nextAction).toBeUndefined();
+    expect(estimateCardHeight(presentation)).toBeGreaterThan(
+      estimateCardHeight(nodePresentation(p, node)),
+    );
+    const data = toCanvas({ ...p, nodes: [paused] }, null, [], {
+      onToggle() {},
+      onEnter() {},
+    }).nodes[0].data;
+    const html = renderToStaticMarkup(
+      createElement(
+        ReactFlowProvider,
+        null,
+        createElement(ResearchCard, { data, selected: false } as Parameters<
+          typeof ResearchCard
+        >[0]),
+      ),
+    );
+    expect(html).toContain("state-paused");
+    expect(html).toContain(node.title);
+    expect(html).toContain("恢复：");
+    expect(html.indexOf(paused.pauseReason)).toBeLessThan(
+      html.indexOf(node.summary),
+    );
+    expect(html.indexOf(paused.resumeWhen)).toBeLessThan(
+      html.indexOf(node.summary),
+    );
+    expect(html).toContain('title="查看平台捕获的命令执行"');
+    expect(html).toContain('title="查看步骤计时与执行耗时"');
+    expect(html).toContain("未采集执行");
+  });
+
+  it("uses a recorded next action only when no recovery condition exists and never invents pause text", () => {
+    const paused = {
+      ...node,
+      status: "paused",
+      summary: "",
+      nextAction: "收集独立样地。",
+    };
+    expect(nodePresentation(project(), paused)).toMatchObject({
+      headline: node.title,
+      nextAction: paused.nextAction,
+      summary: "",
+    });
+    expect(
+      nodePresentation(project(), { ...paused, nextAction: "" }).pauseReason,
+    ).toBeUndefined();
+    expect(
+      nodePresentation(project(), {
+        ...paused,
+        status: "completed",
+        pauseReason: "旧暂停原因",
+      }).pauseReason,
+    ).toBeUndefined();
+  });
+
+  it("renders failure feedback while an open question alone never gains a processing outline", () => {
+    const render = (status: string) => {
+      const p = { ...project(), nodes: [{ ...node, status }] };
+      const data = toCanvas(p, null, [], { onToggle() {}, onEnter() {} })
+        .nodes[0].data;
+      return renderToStaticMarkup(
+        createElement(
+          ReactFlowProvider,
+          null,
+          createElement(ResearchCard, { data, selected: false } as Parameters<
+            typeof ResearchCard
+          >[0]),
+        ),
+      );
+    };
+    expect(render("failed")).toContain("state-failed");
+    expect(render("failed")).toContain("status-failed");
+    expect(render("active")).not.toContain("processing-outline");
+    expect(render("completed")).toContain('stroke="#fff"');
+  });
+
   it("keeps the research question as title and recorded context/finding in the body", () => {
     const p = project();
     expect(nodePresentation(p, node)).toEqual({

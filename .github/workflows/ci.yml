@@ -23,7 +23,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: npm ci
-      - run: npm test
       - run: npm run build
+      - run: npm test
       - run: python scripts/package_release.py
       - run: python -m unittest discover -s tests -p test_distribution.py -v
+      - run: python -m unittest discover -s tests -p test_bootstrap.py -v

@@ -51,6 +51,8 @@ class Client:
         self.opener = build_opener(ProxyHandler({}), NoRedirect()) if local_only else None
 
     def request(self, route, body=None, raw=False):
+        if getattr(self, 'startup_unavailable', None):
+            raise ClientError(self.startup_unavailable, code='unavailable')
         data = None if body is None else json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
         request = Request(self.transport_url + route, data=data, headers={'Content-Type': 'application/json'})
         try:
@@ -87,6 +89,7 @@ class Client:
 def parser():
     root = argparse.ArgumentParser(description='Maintain independent ExpObserver experiment records.')
     root.add_argument('--url', default=os.environ.get('EXP_OBSERVER_URL') or 'http://127.0.0.1:4317')
+    root.add_argument('--no-autostart', action='store_true', help='Keep recording offline without attempting local platform startup')
     commands = root.add_subparsers(dest='command', required=True)
     commands.add_parser('projects', help='List experiments')
     init = commands.add_parser('init', help='Create an experiment')
@@ -127,6 +130,7 @@ def parser():
     event.add_argument('--after', help='Earlier node title or ID; a new question branches from it')
     event.add_argument('--relation', help='Meaning of --after (default: revises for correction, leads_to for direction, related_to for finding)')
     event.add_argument('--evidence', action='append', default=[], help='Execution/evidence node title or ID supporting this event; repeat as needed')
+    event.add_argument('--summarizes', action='append', default=[], help='Earlier finding title/ID incorporated into this answer; repeat without inventing scientific support')
     analysis = event.add_mutually_exclusive_group()
     analysis.add_argument('--notes', help='Full native analysis for this event, or for the question when no event is supplied')
     analysis.add_argument('--notes-file', help='UTF-8 native analysis; - reads stdin')
@@ -1036,6 +1040,43 @@ def semantic_nodes(client, outbox, project_id, exclude=None):
     return nodes
 
 
+def execution_reference(client, outbox, project_id, value, exclude=None):
+    """An execute title can identify a run on an existing question, not a new node."""
+    runs = {}
+    _, caches, _ = local_node_view(client, outbox, project_id, exclude=exclude, include_cache=True)
+    for cache in caches:
+        try:
+            context = json.loads(Path(cache['localCachePath']).read_text(encoding='utf-8'))['context']
+            for run in context.get('runs', []):
+                if isinstance(run.get('id'), str):
+                    runs[run['id']] = run
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    for directory in ancestor_outboxes(outbox, client.queue_root):
+        for path in directory.glob('*.json'):
+            if exclude is not None and path.resolve() == Path(exclude).resolve():
+                continue
+            try:
+                task = read_queue_task(path)
+                if (task['url'] != client.url or task['projectId'] != project_id or
+                        task['state'] not in ('ready','synced')):
+                    continue
+                for operation in task.get('operations', []):
+                    if operation.get('op') == 'run.add':
+                        run = operation['data']
+                        runs[run['id']] = run
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    matches = [r for r in runs.values() if r.get('id') == value]
+    if not matches:
+        matches = [r for r in runs.values() if r.get('title') == value]
+    if len(matches) > 1:
+        raise ClientError('Execution title is ambiguous; use its retained run ID: ' + value)
+    if matches:
+        return {'id': matches[0]['nodeId'], 'runIds': [matches[0]['id']]}
+    return None
+
+
 def exact_reference(nodes, value):
     by_id = [node for node in nodes if node['id'] == value]
     if by_id:
@@ -1070,12 +1111,16 @@ def event(client, args):
         raise ClientError('A research change must contain its actual finding, correction or direction.')
     if args.relation and not args.after:
         raise ClientError('--relation requires an explicit --after reference.')
+    if args.summarizes and event_type is None:
+        raise ClientError('--summarizes requires a finding, correction or direction to retain the resulting answer.')
     notes, notes_error, metrics, metrics_warning = capture_inputs(args)
     intent = {'command': 'event', **{key: getattr(args, key) for key in
               ('question', 'reason', 'finding', 'correction', 'direction', 'after', 'relation', 'evidence', 'status', 'next_action', 'pause_reason', 'resume_when', 'artifact', 'importance', 'importance_reason')},
               'notes': notes, 'notesFile': args.notes_file,
               'metrics': metrics, 'hasMetrics': args.metrics_file is not None and metrics_warning is None,
               'metricsFile': args.metrics_file}
+    if args.summarizes:
+        intent['summarizes'] = args.summarizes
     path, task = task_identity(client, args, intent)
     if notes_error is not None and (not args.request_id or not path.is_file()):
         raise notes_error
@@ -1125,12 +1170,15 @@ def event(client, args):
         if len(update) > 1:
             task['operations'].append({'op': 'node.update', 'data': update})
         links = [(value, 'supports', 'evidence-' + str(index)) for index, value in enumerate(args.evidence)]
+        links.extend((value, 'summarizes', 'summary-' + str(index)) for index, value in enumerate(args.summarizes))
         if args.after:
             relation = args.relation or {'finding': 'related_to', 'correction': 'revises', 'direction': 'leads_to', None: 'branches'}[event_type]
             links.append((args.after, relation, 'after'))
         for value, relation, suffix in links:
             try:
                 referenced = exact_reference(nodes, value)
+                if relation == 'supports' and suffix.startswith('evidence-') and referenced is None:
+                    referenced = execution_reference(client, path.parent, args.project, value, exclude=path)
             except ClientError as exc:
                 task['recordingWarnings'].append(str(exc) + '; the finding is retained without that relationship.')
                 continue
@@ -1143,7 +1191,8 @@ def event(client, args):
                 continue
             task['operations'].append({'op': 'edge.add', 'data': {
                 'id': 'edge-' + task['taskId'] + '-' + suffix, 'source': source, 'target': task['nodeId'],
-                'relation': relation, 'basis': 'observed'}})
+                'relation': relation, 'basis': 'observed',
+                **({'runIds': referenced['runIds']} if referenced and referenced.get('runIds') else {})}})
         if intent['hasMetrics']:
             task['operations'].append({'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
                 'title': change or question['title'], 'status': 'completed', 'startedAt': None, 'finishedAt': None,
@@ -1433,6 +1482,15 @@ def main(argv=None):
     args = parser().parse_args(argv)
     client = Client(args.url, timeout=2 if args.command in ('init', 'context', 'record', 'event', 'execute', 'sync') else 30)
     try:
+        if args.command != 'status' and not args.no_autostart:
+            try:
+                from bootstrap import ensure_platform
+                startup = ensure_platform(args.url, Path.cwd().resolve(), state_directory())
+                if startup.get('state') in ('occupied', 'unavailable'):
+                    client.startup_unavailable = 'Local platform startup is unavailable; retain research in the local queue.'
+            except (ImportError, OSError, ValueError):
+                # Older partial Skill copies still retain local records.
+                pass
         if args.command == 'projects':
             result = client.request('/api/projects')
         elif args.command == 'init':

@@ -809,6 +809,10 @@ class Store:
         for edge in p['edges']:
             ref(edge.get('source'), 'nodes')
             ref(edge.get('target'), 'nodes')
+            if 'runIds' in edge:
+                refs(edge['runIds'], 'runs')
+                if any(groups['runs'][key]['nodeId'] != edge['source'] for key in edge['runIds']):
+                    raise StoreError('Edge execution evidence must belong to its source node.', 'invalid_reference')
             if edge['source'] == edge['target']:
                 raise StoreError('A node cannot connect to itself.', 'self_edge')
             if edge.get('basis', 'unknown') not in ('observed', 'hypothesis', 'unknown'):
@@ -1104,14 +1108,14 @@ class Store:
         else:
             selected = {n['id'] for n in nodes}
         decisions = [d for d in p['decisions'] if d['nodeId'] in selected]
-        referenced_runs = {run_id for decision in decisions for run_id in decision.get('runIds', [])}
+        edges = [e for e in p['edges'] if e['source'] in selected or e['target'] in selected]
+        referenced_runs = {run_id for record in decisions + edges for run_id in record.get('runIds', [])}
         runs = [r for r in p['runs'] if r.get('nodeId') in selected or r['id'] in referenced_runs]
         superseded = {a.get('supersedes') for a in p['assessments'] if a.get('supersedes')}
         run_ids = {r['id'] for r in runs}
         assessments = [a for a in p['assessments'] if a['runId'] in run_ids and a['id'] not in superseded]
         artifact_ids = {artifact_id for record in runs + decisions + assessments for artifact_id in record.get('artifactIds', [])}
         artifacts = [a for a in p['artifacts'] if a['id'] in artifact_ids or a.get('nodeId') in selected or a.get('runId') in run_ids]
-        edges = [e for e in p['edges'] if e['source'] in selected or e['target'] in selected]
         boundary_ids = ({r['nodeId'] for r in runs} | {e[endpoint] for e in edges for endpoint in ('source', 'target')}) - selected
         def compact(records, fields):
             return [{key: record.get(key) for key in fields} for record in records]

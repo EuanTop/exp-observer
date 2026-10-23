@@ -1,6 +1,7 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { Box, ChevronDown, Clock3, Diamond, Layers, Minus } from "lucide-react";
 import { kinds, type CanvasData } from "../model";
+import type { NodePresentation } from "../node-presentation";
 import { formatDuration, formatTokens } from "../usage";
 import { Badge, kindIcon } from "./Primitives";
 
@@ -51,13 +52,19 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
   const { node: n, children, expanded } = data;
   const container = data.container === true;
   const Icon = container ? Layers : kindIcon[n.kind] || Box;
-  const presentation = data.presentation ?? {
+  const presentation: NodePresentation = data.presentation ?? {
     headline: n.title || "未命名节点",
+    context: "",
     summary: n.summary || "",
     conclusion: "",
     source: "",
   };
   const processing = data.processing === true;
+  const hasPause = !!(
+    presentation.pauseReason ||
+    presentation.resumeWhen ||
+    presentation.nextAction
+  );
   return (
     <div
       className={`research-node ${selected ? "is-selected" : ""} ${processing ? "is-processing" : ""} ${n.importance === "critical" ? "is-critical" : ""} ${!processing && n.status === "failed" ? "state-failed" : ""} ${!processing && n.status === "paused" ? "state-paused" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${container ? "is-container" : ""}`}
@@ -99,9 +106,25 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
         <Badge status={processing ? "running" : n.status || "未记录"} />
       </div>
       <div
-        className={`node-content ${presentation.conclusion ? "has-conclusion" : ""}`}
+        className={`node-content ${presentation.conclusion ? "has-conclusion" : ""} ${hasPause ? "has-pause" : ""}`}
       >
         <h3 title={presentation.headline}>{presentation.headline}</h3>
+        {!expanded && hasPause && (
+          <div className="node-pause-details">
+            {presentation.pauseReason && (
+              <p title={presentation.pauseReason}>
+                <span>暂停：</span>
+                {presentation.pauseReason}
+              </p>
+            )}
+            {(presentation.resumeWhen || presentation.nextAction) && (
+              <p title={presentation.resumeWhen || presentation.nextAction}>
+                <span>{presentation.resumeWhen ? "恢复：" : "下一步："}</span>
+                {presentation.resumeWhen || presentation.nextAction}
+              </p>
+            )}
+          </div>
+        )}
         {!expanded && presentation.summary && (
           <p title={presentation.summary}>{presentation.summary}</p>
         )}

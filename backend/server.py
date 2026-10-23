@@ -144,7 +144,7 @@ class Handler(BaseHTTPRequestHandler):
         method = 'GET' if self.command == 'HEAD' else self.command
         store = self.server.store
         if path == '/api/health' and method == 'GET':
-            return self._send({'ok': True, 'version': __version__})
+            return self._send({'ok': True, 'app': 'ExpObserver', 'version': __version__})
         if path == '/api/workspaces':
             if method == 'GET':
                 return self._send({'workspaces': store.list_workspaces()})
@@ -247,6 +247,15 @@ def main(argv=None):
         except ImportError:
             pass
     server = Server(('127.0.0.1', args.port), store, recovery=True)
+    try:
+        from .recovery import load_client
+        client = load_client()
+        registry = client.state_directory() / ('platform-' + str(server.server_port) + '.json')
+        client.ensure_directory(registry.parent)
+        client.save_task(registry, {'appRoot': str(Path(__file__).resolve().parents[1]),
+                                    'dataDir': str(Path(args.data_dir).expanduser().resolve())})
+    except (OSError, ValueError):
+        pass  # Optional startup discovery must not prevent serving research.
     print(f'ExpObserver http://127.0.0.1:{server.server_port}', flush=True)
     if args.open and not args.no_browser:
         import threading

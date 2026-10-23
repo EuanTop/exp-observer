@@ -9,6 +9,8 @@ Follow the user's research objective, budget and deliverables. Choose methods fr
 
 Use `scripts/exp_observer.py` relative to this Skill with Python 3.10+. Examples use `python3`; on Windows use `py -3` or the installed interpreter. The default address is `http://127.0.0.1:4317`; `EXP_OBSERVER_URL` or global `--url URL` selects another server.
 
+The client automatically reuses or starts the local platform. A complete portable Skill from the release carries its runtime for offline first use; source-only copies can provision the official release in the background. No installation detour is needed during research. If startup is blocked, keep working with the local queue. `--no-autostart` (before the command) or `EXP_OBSERVER_AUTOSTART=0` keeps deliberate offline operation; local `status` never starts a service.
+
 ## Join or begin an experiment
 
 With an experiment ID, use `context --project ID` once. If unavailable, continue from research files and any dated cache; missing context does not mean an empty experiment. Keep the supplied ID.
@@ -34,6 +36,8 @@ python3 <skill>/scripts/exp_observer.py event --project ID --question "What affe
 Start with the suggested types **question, experiment, finding**. These are suggestions, not phases or a closed vocabulary: use `record --kind TYPE` for any research-specific type that communicates the work better. Use `--finding` for a substantive discovery or `--correction` when revising an earlier judgment. Each change is a separate ordinary node linked to the stated question; earlier findings remain intact. `--after "Earlier finding title"` relates a change to a retained finding, defaulting to `revises` for a correction, `leads_to` for a direction or `related_to` for a finding; `--relation supports` can explicitly state support. No causal relationships are inferred from prose or recording order.
 
 New follow-up questions are questions, not “direction” nodes. For parallel questions arising from one result, repeat `event --question "New question" --after "Earlier finding"`: each becomes a branch with its own state. The legacy `--direction` option remains for an explicit change of approach; do not use it as a default step or for every new branch.
+
+When a result triggers a new question, include its title/ID with `--after` in that same record. Independent questions may remain roots. When an answer combines earlier findings, repeat `--summarizes "Finding title/ID"` on its `event --finding` call; this retains the reasoning links without treating every incorporated result as scientific support.
 
 Retain different discoveries even when one script produced them. Repeat measurements of the same question reuse its identity; routine steps need no event. The last substantive finding can also update its question with `--status completed` or `--status paused --next-action TEXT`; `--pause-reason TEXT` and `--resume-when TEXT` retain why it stopped and what would restart it. Omitted fields preserve existing values. Do not invent stages, fill a node quota or create completion-only findings.
 

@@ -52,6 +52,8 @@ Windows 双击 `start.bat`，或运行 `py -3 start.py`；macOS 也可以双击 
 
 将 [`skills/exp-observer`](skills/exp-observer) 复制到 Agent 宿主支持的 Skill 目录，或直接把 [`SKILL.md`](skills/exp-observer/SKILL.md) 的路径交给 Agent。独立客户端随 Skill 分发，研究项目无需把 ExpObserver 导入为依赖。
 
+发行包中的完整 Skill 会自动唤起已安装的平台；移植到新电脑时，可从随包运行组件直接启动。请复制整个 Skill（含 `assets/`）。只需 Python 3.10+，无需 Node 或 pip。启动受限时继续本地暂存；`--no-autostart` 或 `EXP_OBSERVER_AUTOSTART=0` 可保持离线模式，`status` 始终只读本地状态。
+
 界面中的**连接 Agent**会复制包含实际 Skill 路径、本地服务地址和当前实验 ID 的指令。粘贴到新 Agent 对话，再补充你的研究任务即可。
 
 可以这样下达指令：

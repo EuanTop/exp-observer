@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -23,7 +24,9 @@ FILES = (
     'skills/exp-observer/agents/openai.yaml',
     'skills/exp-observer/references/records.md',
     'skills/exp-observer/scripts/exp_observer.py',
+    'skills/exp-observer/scripts/bootstrap.py',
 )
+BUNDLED_RUNTIME = 'skills/exp-observer/assets/platform.zip'
 ASSET_SUFFIXES = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp',
                   '.avif', '.ico', '.woff', '.woff2', '.ttf', '.otf', '.wasm'}
 
@@ -83,6 +86,12 @@ def sha256(path):
 
 def package_release(root, output):
     inputs = release_inputs(root)
+    runtime = io.BytesIO()
+    with zipfile.ZipFile(runtime, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for relative, source in sorted(inputs.items()):
+            if relative == 'start.py' or relative.startswith(('backend/', 'dist/', 'skills/exp-observer/', 'licenses/')) or relative in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
+                archive.writestr('exp-observer/' + relative, source.read_bytes())
+    runtime_bytes = runtime.getvalue()
     output = Path(output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix='.exp-observer-release-', suffix='.zip', dir=output.parent)
@@ -96,6 +105,8 @@ def package_release(root, output):
                 entry.external_attr = (stat.S_IFREG | permissions) << 16
                 entry.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(entry, source.read_bytes())
+            archive.writestr('exp-observer/' + BUNDLED_RUNTIME, runtime_bytes)
+            archive.writestr('exp-observer/' + BUNDLED_RUNTIME.replace('.zip', '.sha256'), hashlib.sha256(runtime_bytes).hexdigest() + '\n')
         os.replace(temporary, output)
     finally:
         if os.path.exists(temporary):

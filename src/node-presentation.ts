@@ -9,6 +9,9 @@ export type NodePresentation = {
   summary: string;
   source: string;
   conclusion?: string;
+  pauseReason?: string;
+  resumeWhen?: string;
+  nextAction?: string;
 };
 
 // Preserve the research question/work as the title. Show recorded findings in
@@ -65,12 +68,22 @@ export function nodePresentation(
         : "";
   const distinctConclusion =
     conclusion !== summary && conclusion !== text(node.title) ? conclusion : "";
+  const pauseReason = node.status === "paused" ? text(node.pauseReason) : "";
+  const resumeWhen = node.status === "paused" ? text(node.resumeWhen) : "";
+  const nextAction =
+    node.status === "paused" && !resumeWhen ? text(node.nextAction) : "";
   return {
     headline: text(node.title) || "未命名节点",
     context: "",
-    summary,
+    summary:
+      summary && [pauseReason, resumeWhen, nextAction].includes(summary)
+        ? ""
+        : summary,
     conclusion: distinctConclusion,
     source: distinctConclusion ? source : "",
+    ...(pauseReason ? { pauseReason } : {}),
+    ...(resumeWhen ? { resumeWhen } : {}),
+    ...(nextAction ? { nextAction } : {}),
   };
 }
 

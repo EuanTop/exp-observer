@@ -41,6 +41,10 @@ export type ResearchEdge = {
   relation: string;
   label?: string;
   basis?: string;
+  // View-only trace metadata; these are never stored as research relations.
+  spinePath?: string[];
+  spineEdges?: string[];
+  spineNodes?: string[];
 };
 export type Run = {
   id: string;
@@ -189,6 +193,7 @@ export const relations: Record<string, string> = {
   motivates: "触发",
   compares: "对比",
   has_finding: "发现",
+  summarizes: "汇总",
   has_correction: "纠正",
   has_direction: "方向调整",
   related_to: "关联",

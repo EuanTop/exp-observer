@@ -106,6 +106,59 @@ class SemanticEventTests(unittest.TestCase):
         self.assertEqual(self.project()['nodes'][-1]['kind'], 'ablation_note')
         self.assertEqual(self.project()['nodes'][-1]['importance'], 'critical')
 
+    def test_answer_summarizes_actual_findings_and_offline_retries_preserve_the_graph(self):
+        _, first = self.invoke('event', '--project', 'study', '--question', '中心问题', '--finding', '第一次观察')
+        _, second = self.invoke('event', '--project', 'study', '--question', '派生问题', '--after', first['nodeId'],
+                                '--finding', '限制先前判断的证据')
+        # Opening the derived question with a finding uses --after for that
+        # finding's relationship; a question-only call records its origin.
+        self.invoke('event', '--project', 'study', '--question', '派生问题', '--after', first['nodeId'])
+        self.client.offline = True
+        arguments = ('event','--project','study','--question','中心问题','--finding','综合后限定的回答',
+                     '--summarizes','第一次观察','--summarizes',second['nodeId'],'--request-id','final-answer')
+        _, pending = self.invoke(*arguments)
+        self.assertTrue(pending['pending'])
+        self.client.offline = False
+        _, received = self.invoke(*arguments)
+        before = self.project()
+        self.assertFalse(received['pending'])
+        self.invoke(*arguments)
+        self.assertEqual(before, self.project())
+        summary = [e for e in before['edges'] if e['target'] == received['nodeId']]
+        self.assertEqual({e['source'] for e in summary if e['relation']=='summarizes'}, {first['nodeId'],second['nodeId']})
+        self.assertFalse(any(e['relation']=='supports' for e in summary))
+        self.assertTrue(any(e['source']==first['nodeId'] and e['target']==second['questionId'] and e['relation']=='branches' for e in before['edges']))
+
+    def test_finding_resolves_execution_title_on_existing_question_without_creating_a_work_node(self):
+        _, question = self.invoke('event','--project','study','--question','原问题')
+        _, executed = self.invoke('execute','--project','study','--question','原问题','--title','实际测量',
+                                 '--',sys.executable,'-c','print(42)')
+        self.client.offline = True
+        _, finding = self.invoke('event','--project','study','--question','原问题','--finding','测量所得发现',
+                                '--evidence','实际测量','--request-id','measured-result')
+        self.assertFalse(any('Reference title' in w for w in finding.get('recordingWarnings',[])))
+        self.client.offline = False
+        self.invoke('sync','--project','study')
+        p = self.project()
+        self.assertEqual(len(p['nodes']),2)
+        edge = next(e for e in p['edges'] if e['relation']=='supports')
+        self.assertEqual((edge['source'],edge['target'],edge['runIds']), (question['nodeId'],finding['nodeId'],[executed['runId']]))
+        scoped = self.store.context('study', finding['nodeId'])
+        self.assertEqual([r['id'] for r in scoped['runs']], [executed['runId']])
+        self.assertIn(question['nodeId'], [n['id'] for n in scoped['boundaryNodes']])
+        with self.assertRaisesRegex(StoreError, 'source node'):
+            self.store.batch('study', {'operations': [{'op':'edge.add','data':{
+                'source':finding['nodeId'], 'target':question['nodeId'], 'runIds':[executed['runId']]}}]})
+        # A later conversation with only a dated context also resolves it.
+        self.invoke('context','--project','study')
+        for path in self.root.joinpath('.exp-observer-runs/outbox').glob('*.json'):
+            if not path.name.startswith('project-'):
+                path.unlink()
+        _, another = self.invoke('event','--project','study','--question','原问题','--finding','进一步解释',
+                                '--evidence',executed['runId'])
+        self.assertFalse(any('Reference title' in w for w in another.get('recordingWarnings',[])))
+        self.assertEqual(next(e for e in self.project()['edges'] if e['target']==another['nodeId'] and e['relation']=='supports')['runIds'],[executed['runId']])
+
     def test_same_question_keeps_distinct_findings_correction_and_direction(self):
         _, question = self.invoke('event', '--project', 'study', '--question', '什么影响确认收益？',
             '--reason', '核对用户操作的实际收益。', '--notes', '保留问题的原始范围。')
@@ -331,15 +384,15 @@ class SemanticEventTests(unittest.TestCase):
                   '--request-id', 'old-format')
         self.invoke(*legacy)
         path = next(path for path in (self.root / '.exp-observer-runs' / 'outbox').glob('*.json')
-                    if json.loads(path.read_text()).get('requestId') == 'old-format')
-        old = json.loads(path.read_text())
+                    if json.loads(path.read_text(encoding='utf-8')).get('requestId') == 'old-format')
+        old = json.loads(path.read_text(encoding='utf-8'))
         for field in ('next_action', 'pause_reason', 'resume_when'):
             old['intent'].pop(field)
         cli.save_task(path, old)
         self.client.offline = False
         _, receipt = self.invoke(*legacy)
         self.assertFalse(receipt['pending'])
-        self.assertEqual(json.loads(path.read_text())['operations'], old['operations'])
+        self.assertEqual(json.loads(path.read_text(encoding='utf-8'))['operations'], old['operations'])
         with self.assertRaisesRegex(cli.ClientError, 'different work'):
             self.invoke(*legacy, '--next-action', 'A different retry')
         paused = ('event', '--project', 'study', '--question', 'Frozen paused question', '--finding', 'Latest finding',
@@ -366,7 +419,7 @@ class SemanticEventTests(unittest.TestCase):
         _, opened = self.invoke('event', '--project', 'study', '--question', 'Exact retained question')
         outbox = self.root / '.exp-observer-runs' / 'outbox'
         for path in outbox.glob('*.json'):
-            task = json.loads(path.read_text())
+            task = json.loads(path.read_text(encoding='utf-8'))
             if task.get('kind') != 'project':
                 task['capturedAt'] = '2020-01-01T00:00:00Z'
                 cli.save_task(path, task)

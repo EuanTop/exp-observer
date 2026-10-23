@@ -52,6 +52,8 @@ An open question stays static. Flowing outlines indicate a locally observed comm
 
 Copy [`skills/exp-observer`](skills/exp-observer) into your agent host's supported Skill directory, or give the agent the path to [`SKILL.md`](skills/exp-observer/SKILL.md). The standalone client travels with the Skill; the research project does not need to import ExpObserver as a dependency.
 
+The portable release Skill automatically starts an installed local platform, or extracts its bundled runtime on a new computer. Copy the whole Skill, including `assets/`. Python 3.10+ is enough; Node and pip are unnecessary. If startup is restricted, research records remain queued locally. `--no-autostart` or `EXP_OBSERVER_AUTOSTART=0` keeps deliberate offline use; `status` never starts a service.
+
 The interface's **Connect Agent** action copies an instruction with the actual Skill path, local server address and current experiment ID. Paste it into a new agent conversation and add your research task.
 
 A useful instruction is:

@@ -27,7 +27,27 @@ export function estimateCardHeight(p: NodePresentation, width = 368): number {
   return Math.ceil(
     103 +
       lines(p.headline, 16, 3) * 24 +
-      (p.summary ? 8 + lines(p.summary, 12, p.conclusion ? 2 : 4) * 19.2 : 0) +
+      (p.pauseReason ? 8 + lines(`暂停：${p.pauseReason}`, 12, 2) * 19.2 : 0) +
+      (p.resumeWhen || p.nextAction
+        ? 6 +
+          lines(
+            `${p.resumeWhen ? "恢复" : "下一步"}：${p.resumeWhen || p.nextAction}`,
+            12,
+            2,
+          ) *
+            19.2
+        : 0) +
+      (p.summary
+        ? 8 +
+          lines(
+            p.summary,
+            12,
+            p.conclusion || p.pauseReason || p.resumeWhen || p.nextAction
+              ? 2
+              : 4,
+          ) *
+            19.2
+        : 0) +
       (p.conclusion
         ? 4 + lines(`${p.source || "结论"}：${p.conclusion}`, 12, 2) * 19.2
         : 0),

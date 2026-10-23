@@ -22,8 +22,8 @@ jobs:
         with:
           python-version: '3.10'
       - run: npm ci
-      - run: npm test
       - run: npm run build
+      - run: npm test
       - run: python scripts/package_release.py
       - uses: actions/upload-artifact@v4
         with:
@@ -48,11 +48,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
       - uses: actions/download-artifact@v4
         with:
           name: exp-observer-release
           path: .context/release
-      - run: python -m unittest discover -s tests -p test_distribution.py -v
+      - run: npm ci
+      - run: npm test
         env:
           EXP_OBSERVER_RELEASE_ZIP: .context/release/exp-observer.zip
 

@@ -2,6 +2,7 @@ import { ancestry, isVisualContainer, type Project } from "./model";
 
 /** A view projection only. Recorded nodes/relations are never changed. */
 export function researchSpine(project: Project): Project {
+  const known = new Set(project.nodes.map((n) => n.id));
   const kept = new Set(
     project.nodes.filter((n) => n.importance === "critical").map((n) => n.id),
   );
@@ -24,44 +25,90 @@ export function researchSpine(project: Project): Project {
         parentId: parent && kept.has(parent.id) ? parent.id : null,
       };
     });
-  const edges = project.edges.filter(
+  // Capture chronology is useful in the complete view, but is not a link in
+  // the research spine, even when both chronological endpoints are retained.
+  const semantic = project.edges.filter(
+    (e) =>
+      e.relation !== "recorded_after" &&
+      known.has(e.source) &&
+      known.has(e.target),
+  );
+  const edges = semantic.filter(
     (e) => kept.has(e.source) && kept.has(e.target),
   );
-  const pairs = new Set(edges.map((e) => `${e.source}:${e.target}`));
   const outgoing = new Map<string, typeof project.edges>();
-  for (const edge of project.edges) {
-    // Record chronology must not turn into a scientific relationship.
-    if (edge.relation === "recorded_after") continue;
+  for (const edge of semantic)
     outgoing.set(edge.source, [...(outgoing.get(edge.source) || []), edge]);
-  }
+
   for (const source of kept) {
-    const queue = (outgoing.get(source) || []).map((e) => ({
-      id: e.target,
-      path: [e.id],
-    }));
-    const visited = new Set([source]);
+    const queue = [source];
+    const shortest = new Map<string, string[]>([[source, []]]);
+    const traversed: typeof project.edges = [];
+    // Stop at the next visible node. Retain the traversed subgraph instead of
+    // enumerating every path: merging branches and feedback can be exponential.
     for (let index = 0; index < queue.length; index++) {
-      const { id, path } = queue[index];
-      if (visited.has(id)) continue;
-      visited.add(id);
-      if (kept.has(id)) {
-        const pair = `${source}:${id}`;
-        if (path.length > 1 && !pairs.has(pair)) {
-          pairs.add(pair);
-          edges.push({
-            id: `spine:${source}:${id}`,
-            source,
-            target: id,
-            relation: "collapsed_path",
-            basis: "unknown",
-            label: `经 ${path.length - 1} 个隐藏节点`,
-            spinePath: path,
-          } as (typeof edges)[number]);
+      const id = queue[index];
+      for (const edge of outgoing.get(id) || []) {
+        if (edge.target === source) continue;
+        traversed.push(edge);
+        if (!shortest.has(edge.target)) {
+          shortest.set(edge.target, [...shortest.get(id)!, edge.id]);
+          if (!kept.has(edge.target)) queue.push(edge.target);
         }
-        continue;
       }
-      for (const next of outgoing.get(id) || [])
-        queue.push({ id: next.target, path: [...path, next.id] });
+    }
+    const incoming = new Map<string, typeof project.edges>();
+    for (const edge of traversed)
+      incoming.set(edge.target, [...(incoming.get(edge.target) || []), edge]);
+    for (const target of kept) {
+      if (target === source || !shortest.has(target)) continue;
+      const pending = [target],
+        visited = new Set([target]);
+      const pathEdges = new Set<string>(),
+        hiddenNodes = new Set<string>();
+      for (let index = 0; index < pending.length; index++) {
+        for (const edge of incoming.get(pending[index]) || []) {
+          // A direct edge is already retained with its actual semantics. It
+          // must not suppress a separate folded route through hidden work.
+          if (edge.source === source && edge.target === target) continue;
+          pathEdges.add(edge.id);
+          if (edge.source !== source && !visited.has(edge.source)) {
+            visited.add(edge.source);
+            hiddenNodes.add(edge.source);
+            pending.push(edge.source);
+          }
+        }
+      }
+      if (!hiddenNodes.size) continue;
+      const trace = new Map<string, string[]>([[source, []]]),
+        traceQueue = [source];
+      for (
+        let index = 0;
+        index < traceQueue.length && !trace.has(target);
+        index++
+      ) {
+        const id = traceQueue[index];
+        for (const edge of outgoing.get(id) || []) {
+          if (!pathEdges.has(edge.id) || trace.has(edge.target)) continue;
+          trace.set(edge.target, [...trace.get(id)!, edge.id]);
+          traceQueue.push(edge.target);
+        }
+      }
+      edges.push({
+        id: `spine:${source}:${target}`,
+        source,
+        target,
+        relation: "collapsed_path",
+        basis: "unknown",
+        label: `经 ${hiddenNodes.size} 个隐藏节点`,
+        spinePath: trace.get(target),
+        spineEdges: traversed
+          .filter((e) => pathEdges.has(e.id))
+          .map((e) => e.id),
+        spineNodes: project.nodes
+          .filter((n) => hiddenNodes.has(n.id))
+          .map((n) => n.id),
+      });
     }
   }
   return { ...project, nodes, edges };

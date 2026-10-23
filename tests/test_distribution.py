@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 from urllib.request import urlopen
 import zipfile
 
-from scripts.package_release import FILES, ROOT, package_release, sha256
+from scripts.package_release import FILES, ROOT, BUNDLED_RUNTIME, package_release, sha256
 
 
 class DistributionTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class DistributionTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'do not distribute')
         package_release(self.root, self.output)
-        expected = set(FILES) | {'dist/index.html', 'dist/assets/app.js', 'dist/assets/app.css'}
+        expected = set(FILES) | {'dist/index.html', 'dist/assets/app.js', 'dist/assets/app.css', BUNDLED_RUNTIME, BUNDLED_RUNTIME.replace('.zip', '.sha256')}
         with zipfile.ZipFile(self.output) as archive:
             self.assertEqual(set(archive.namelist()), {'exp-observer/' + name for name in expected})
             launcher = archive.getinfo('exp-observer/start.command')
@@ -101,7 +101,7 @@ class DistributionSmokeTests(unittest.TestCase):
             empty_path = temporary / 'no external executables'
             empty_path.mkdir()
             environment = dict(os.environ, PATH=str(empty_path), PYTHONIOENCODING='utf-8', PYTHONNOUSERSITE='1',
-                               EXP_OBSERVER_STATE_DIR=str(temporary / 'recovery-state'))
+                               EXP_OBSERVER_STATE_DIR=str(temporary / 'recovery-state'), EXP_OBSERVER_AUTOSTART='0')
             # Prepare work with only the extracted portable Skill, before the app exists.
             with socket.socket() as reserved:
                 reserved.bind(('127.0.0.1', 0))
