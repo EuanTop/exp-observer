@@ -3041,12 +3041,31 @@ p {
 /* State remains visible when selected; the separate focus ring stays blue. */
 .research-node.state-failed {
   border: 2px solid #dc4444;
-  box-shadow: 0 0 0 1px #dc444415, 0 4px 14px #00000012;
+  box-shadow:
+    0 0 0 1px #dc444415,
+    0 4px 14px #00000012;
 }
 .research-node.state-paused {
   border: 2px solid #9a6b38;
-  box-shadow: 0 0 0 1px #9a6b3815, 0 4px 14px #00000012;
+  box-shadow:
+    0 0 0 1px #9a6b3815,
+    0 4px 14px #00000012;
 }
 :root[data-theme="dark"] .research-node.state-paused {
   border-color: #c59a66;
+}
+
+.usage-collection {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.usage-collection summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.usage-collection[open] summary {
+  margin-bottom: 12px;
 }

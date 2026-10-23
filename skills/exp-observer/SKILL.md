@@ -19,7 +19,7 @@ For a new experiment without an ID, prepare it once:
 python3 <skill>/scripts/exp_observer.py init --name "Research task"
 ```
 
-Keep the returned ID across conversations. This works offline; `event --project ID` can also prepare a missing project without `init`.
+Keep the returned ID across conversations. This works offline; `event --project ID` can also prepare a missing project without `init`. After a confirmed missing project (for example a cleared platform), the client restores its readable name from retained metadata when available. If that metadata is missing, use `init --id ID --name "Readable research name"` once, preserving the ID; this repairs a placeholder without replacing a human-renamed project. An offline connection is not evidence that the project was deleted.
 
 ## Record at natural boundaries
 
@@ -51,7 +51,7 @@ Use `event --notes TEXT` for full reasoning, comparisons and limitations. `--not
 
 Attach existing JSON with `--metrics-file results.json --artifact results.json`. Nested values are preserved; other root types use `result`. Files stay unchanged.
 
-For an existing command you want captured:
+For a command you are about to run and want measured execution records for, use the capture entry instead of running the same command directly:
 
 ```sh
 python3 <skill>/scripts/exp_observer.py execute --project ID --title "Actual command" -- python3 experiment.py
@@ -72,6 +72,8 @@ A workspace network denial is an expected local-queue mode. Do not request a san
 Recovery never reruns experiments or rereads changed source evidence. Do not reformat outputs, repeat experiments or diagnose the platform merely to complete a record. Manual `sync` is optional recovery.
 
 Before your final brief result, call `status --project ID` once from the research working directory. It reads local receipts and dated context without HTTP or polling. `researchReview.openQuestions` prompts you to check locally known active/running questions you actually touched; it does not assess conclusions or prove global state. No local question/context means research review is unknown. Keep this review separate from `deliveryState`. Background recovery may have replaced an earlier pending receipt with `synced`; use this latest `deliveryState`, not an old `pending` response, when describing registration. Say registered for `synced`, or saved locally awaiting background reception for `pending`. This does not test HTTP reachability: a past client connection error is not evidence that the service is down, and historical warnings do not make an acknowledged record pending. Respect the reported local scope; unknown or partial status does not confirm registration. A synced receipt confirms registration rather than scientific success.
+
+Execution counts refer to captured commands, not the number of research findings. A finding recorded after direct execution does not create command timing retroactively. Keep existing results and evidence; never rerun a completed experiment to fill missing statistics.
 
 Host adapters collect provider-reported Token counters automatically from supported local runtimes; recording does not require the Agent to estimate or count tokens. Work-window attribution is separate from measured counters. Keep unavailable or ambiguous usage unknown, and do not bind a conversation exclusively to an experiment.
 

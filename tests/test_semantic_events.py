@@ -69,6 +69,25 @@ class SemanticEventTests(unittest.TestCase):
                 ((cwd or self.root) / '.exp-observer-runs' / 'outbox').glob('*.json')
                 if not path.name.startswith('project-')]
 
+    def test_readable_catalog_metadata_survives_platform_reset_without_init(self):
+        # This project was created outside the Skill: only context can preserve
+        # its human name. Resuming does not require rerunning the old work.
+        self.invoke('context', '--project', 'study')
+        self.store = Store(self.root / 'reset-platform')
+        self.client.store = self.store
+        self.invoke('event', '--project', 'study', '--question', '恢复后继续研究')
+        self.assertEqual(self.project()['name'], 'Isolated semantic study')
+        self.assertEqual(len(self.project()['nodes']), 1)
+
+    def test_explicit_init_repairs_placeholder_but_preserves_a_real_remote_name(self):
+        self.store.batch('study', {'operations': [{'op':'project.update','data':{'name':'study'}}]})
+        self.invoke('event', '--project', 'study', '--question', '已有研究')
+        self.invoke('init', '--id', 'study', '--name', '可读研究名称')
+        self.assertEqual(self.project()['name'], '可读研究名称')
+        self.store.batch('study', {'operations': [{'op':'project.update','data':{'name':'用户后来改的名称'}}]})
+        self.invoke('init', '--id', 'study', '--name', '可读研究名称')
+        self.assertEqual(self.project()['name'], '用户后来改的名称')
+
     def test_parallel_followups_are_questions_and_importance_applies_to_actual_event(self):
         _, first = self.invoke('event', '--project', 'study', '--question', '中心问题',
                                '--finding', '决定下一步的证据', '--importance', 'critical',

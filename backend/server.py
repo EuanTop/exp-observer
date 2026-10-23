@@ -174,6 +174,12 @@ class Handler(BaseHTTPRequestHandler):
             tail = parts[3:]
             if not tail and method == 'GET':
                 return self._send(store.get_project(project_id))
+            if tail == ['usage-status'] and method == 'GET':
+                store.get_project(project_id)
+                recovery = self.server.recovery
+                importer = recovery.host_usage if recovery is not None else None
+                return self._send(importer.status(project_id) if importer is not None else {
+                    'projectId': project_id, 'adapters': [], 'available': False})
             if tail == ['runtime'] and method == 'GET':
                 store.get_project(project_id)
                 recovery = self.server.recovery

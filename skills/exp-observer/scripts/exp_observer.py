@@ -321,6 +321,51 @@ def project_plan_path(outbox, url, project_id):
     return Path(outbox) / ('project-' + key + '.json')
 
 
+def remember_project(outbox, url, project):
+    """Retain only readable catalog metadata, never a second research report."""
+    project_id = project.get('id') or project.get('projectId')
+    name = project.get('name')
+    if not isinstance(name, str) or not name.strip() or name in (project_id, '未命名研究'):
+        return
+    path = Path(outbox).parent / 'context' / ('project-' + hashlib.sha256(
+        json.dumps([url, project_id], ensure_ascii=False).encode('utf-8')).hexdigest() + '.json')
+    if path.parent.is_symlink():
+        return
+    ensure_directory(path.parent)
+    save_task(path, {'version': 1, 'url': url, 'cachedAt': stamp(),
+                     'project': {'id': project_id, 'name': name, 'description': project.get('description', '')}})
+
+
+def retained_project_metadata(outbox, url, project_id, queue_root=None):
+    candidates = []
+    for directory in ancestor_outboxes(outbox, queue_root):
+        context_dir = directory.parent / 'context'
+        for path in context_dir.glob('*.json'):
+            try:
+                if path.is_symlink() or path.stat().st_size > 2 * 1024 * 1024:
+                    continue
+                if queue_root is not None and not path.resolve().is_relative_to(queue_root):
+                    continue
+                cached = json.loads(path.read_text(encoding='utf-8'))
+                at = local_timestamp(cached.get('cachedAt'))
+                context = cached.get('context')
+                if isinstance(context, dict):
+                    expected = hashlib.sha256(json.dumps([url, project_id, cached.get('nodeId')], ensure_ascii=False).encode('utf-8')).hexdigest() + '.json'
+                    if path.name != expected or context.get('projectId') != project_id:
+                        continue
+                    metadata = {'id': project_id, 'name': context.get('name'), 'description': context.get('description', '')}
+                else:
+                    metadata = cached.get('project', {})
+                    if cached.get('url') != url or metadata.get('id') != project_id:
+                        continue
+                name = metadata.get('name')
+                if at is not None and isinstance(name, str) and name.strip() and name not in (project_id, '未命名研究'):
+                    candidates.append((at, str(path), metadata))
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+    return max(candidates, key=lambda candidate: candidate[:2]) if candidates else None
+
+
 def prepare_project(outbox, url, metadata, implicit=False):
     """First writer freezes a creation plan; later captures never edit it."""
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', metadata['id']):
@@ -329,6 +374,9 @@ def prepare_project(outbox, url, metadata, implicit=False):
     with task_lock(path):
         if path.exists():
             plan = json.loads(path.read_text(encoding='utf-8'))
+            if plan.get('implicit') and not implicit:
+                plan.update(project=metadata, implicit=False, preparedAt=stamp(), state='ready', repairPlaceholder=True)
+                persist_task(path, plan)
             return path, plan
         plan = {'version': 1, 'kind': 'project', 'url': url, 'projectId': metadata['id'],
                 'project': metadata, 'implicit': implicit, 'preparedAt': stamp(), 'state': 'ready',
@@ -338,19 +386,40 @@ def prepare_project(outbox, url, metadata, implicit=False):
 
 
 def ensure_project(client, path, plan):
-    """Create only after a confirmed not_found. Never update an existing project."""
+    """Recover metadata after not_found; explicit init may repair only a placeholder."""
     try:
         project = client.project(plan['projectId'])
     except ClientError as exc:
         if not str(exc).startswith('not_found:'):
             raise
         try:
-            project = client.request('/api/projects', plan['project'])
+            metadata = dict(plan['project'])
+            retained = retained_project_metadata(path.parent, client.url, plan['projectId'], client.queue_root)
+            if retained and (plan.get('implicit') or retained[0] > (local_timestamp(plan.get('preparedAt')) or 0)):
+                metadata.update(retained[2])
+            project = client.request('/api/projects', metadata)
         except ClientError as creation_error:
             if not str(creation_error).startswith('conflict:'):
                 raise
             # A concurrent creator may have won after our GET.
             project = client.project(plan['projectId'])
+    if plan.get('repairPlaceholder') and project.get('name') in (plan['projectId'], '未命名研究'):
+        for attempt in range(3):
+            try:
+                project = client.apply(plan['projectId'], [{'op': 'project.update', 'data': {
+                    'name': plan['project']['name'], 'description': plan['project'].get('description', '')}}],
+                    project['revision'], 'restore-name-' + uuid4().hex)
+                break
+            except ClientError as exc:
+                if exc.code != 'revision_conflict' or attempt == 2:
+                    raise
+                project = client.project(plan['projectId'])
+                if project.get('name') not in (plan['projectId'], '未命名研究'):
+                    break
+    try:
+        remember_project(path.parent, client.url, project)
+    except OSError:
+        pass
     if plan['state'] != 'synced':
         plan['state'] = 'synced'
         save_task(path, plan)
@@ -540,6 +609,7 @@ def context(client, args):
     try:
         ensure_directory(cache_path.parent)
         save_task(cache_path, {'cachedAt': fetched_at, 'nodeId': args.node, 'context': result})
+        remember_project(workspace / 'outbox', client.url, result)
     except OSError as exc:
         result.setdefault('recordingWarnings', []).append(f'Context cache unavailable: {exc}')
     result.update({'availability': 'available', 'pending': bool(pending), 'fetchedAt': fetched_at})
@@ -704,8 +774,19 @@ def capture_project_plan(outbox, url, project_id, queue_root=None):
     if plans:
         _, _, _, path, plan = min(plans, key=lambda entry: entry[:3])
         return path, plan
-    return prepare_project(outbox, url,
-        {'id': project_id, 'name': project_id, 'description': '', 'sourceRoots': []}, implicit=True)
+    retained = retained_project_metadata(outbox, url, project_id, queue_root)
+    metadata = {'id': project_id, 'name': '未命名研究', 'description': '', 'sourceRoots': []}
+    if retained:
+        metadata.update(retained[2])
+    path, plan = prepare_project(outbox, url, metadata, implicit=True)
+    if not retained:
+        warning = 'Readable project metadata is unavailable; use init --id ' + project_id + ' --name NAME once to restore its name.'
+        if warning not in plan['recordingWarnings']:
+            with task_lock(path):
+                plan = read_queue_task(path)
+                plan['recordingWarnings'].append(warning)
+                persist_task(path, plan)
+    return path, plan
 
 
 def capture_relationship(client, args, path, task):
@@ -814,7 +895,9 @@ def sync_task(client, path, task):
                     raise ClientError('Project preparation is outside the connected research directory.', code='path_not_allowed')
         with task_lock(plan_path):
             plan = json.loads(plan_path.read_text(encoding='utf-8'))
-            ensure_project(client, plan_path, plan)
+            catalog = ensure_project(client, plan_path, plan)
+            if catalog.get('name') in (task['projectId'], '未命名研究'):
+                warnings.append('Project name metadata is unavailable; restore it once with init --id ' + task['projectId'] + ' --name NAME.')
         # All operations (including timestamps) are frozen before the first send.
         client.apply(task['projectId'], task['operations'], request_id='capture-' + task['taskId'])
         if task['artifacts']:

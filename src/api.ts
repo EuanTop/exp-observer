@@ -12,6 +12,22 @@ export type RuntimeSnapshot = {
   checkedAt: string;
   active: NonNullable<Project["runtimeActivity"]>;
 };
+export type UsageCollection = {
+  projectId: string;
+  available?: boolean;
+  adapters: {
+    source: string;
+    state: string;
+    eligibleCaptures: number;
+    candidateLogs: number;
+    readableLogs: number;
+    nativeUsageRecords: number;
+    matchedReceipts: number;
+    collectedRecords: number;
+    unassignedRecords: number;
+    message?: string;
+  }[];
+};
 type WorkspaceList = { workspaces: ResearchWorkspace[] };
 export class ApiError extends Error {
   constructor(
@@ -53,6 +69,10 @@ export const api = {
   list: () => request<{ projects: ProjectSummary[] }>("/api/projects"),
   project: (id: string) =>
     request<Project>(`/api/projects/${encodeURIComponent(id)}`),
+  usageStatus: (id: string) =>
+    request<UsageCollection>(
+      `/api/projects/${encodeURIComponent(id)}/usage-status`,
+    ),
   runtime: (id: string) =>
     request<RuntimeSnapshot>(`/api/projects/${encodeURIComponent(id)}/runtime`),
   create: (name: string) =>

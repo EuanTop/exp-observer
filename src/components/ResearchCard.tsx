@@ -159,9 +159,11 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
                 e.stopPropagation();
                 data.onInspect?.(n.id, "runs");
               }}
-              title="查看该节点的运行记录"
+              title="查看平台捕获的命令执行"
             >
-              {data.usage?.runCount ?? data.runs ?? 0} 次运行
+              {(data.usage?.runCount ?? data.runs ?? 0) > 0
+                ? `${data.usage?.runCount ?? data.runs} 次执行`
+                : "未采集执行"}
             </button>
           )}
           <UsageStats data={data} />

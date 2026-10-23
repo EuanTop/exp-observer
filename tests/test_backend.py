@@ -492,6 +492,16 @@ class HTTPAndCLITests(unittest.TestCase):
     def cli(self, *args, input=None):
         return subprocess.run([sys.executable, str(CLI), '--url', self.url, *args], input=input, text=True, encoding='utf-8', capture_output=True, cwd=self.root, timeout=20)
 
+    def test_collection_status_is_read_only_and_reports_disabled_recovery(self):
+        before = self.store.get_project('study')
+        status = self.request('/api/projects/study/usage-status')
+        self.assertEqual(status, {'projectId':'study','adapters':[],'available':False})
+        self.assertEqual(self.store.get_project('study'), before)
+        with self.assertRaises(HTTPError) as error:
+            self.request('/api/projects/missing/usage-status')
+        self.assertEqual(error.exception.code,404)
+        error.exception.close()
+
     def test_agent_setup_uses_repo_paths_and_actual_custom_port(self):
         setup = self.request('/api/agent-setup')
         self.assertEqual(setup['url'], self.url)

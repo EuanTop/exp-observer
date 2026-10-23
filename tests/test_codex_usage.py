@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from backend.codex_usage import CodexSessionAdapter, recorded_cli_projects
 from backend.host_usage import observer_origin
 
@@ -52,6 +53,74 @@ class CodexUsageTests(unittest.TestCase):
     def read(self):
         self.path.write_text(''.join(json.dumps(e)+'\n' for e in self.events))
         return self.adapter.read(self.projects)
+
+    def test_long_lived_thread_is_found_by_hint_outside_capture_dates(self):
+        receipt = self.capture()
+        task_path = self.outbox / 'r1.json'
+        task = json.loads(task_path.read_text())
+        task['hostUsage'] = {'host':'codex','threadId':SID}
+        task_path.write_text(json.dumps(task))
+        old = self.root / 'codex/sessions/2026/10/19'
+        old.mkdir()
+        self.path = old / self.path.name
+        self.tokens()
+        self.call(receipt, command=r'python.exe -X utf8 -B C:\AgentSkills\exp_observer.py record --project study')
+        self.assertEqual(self.read()['study'][0]['inputTokens'], 100)
+
+    def test_legacy_long_thread_without_hint_is_discovered_by_recent_write(self):
+        receipt = self.capture()
+        old = self.root / 'codex/sessions/2026/10/01'
+        old.mkdir()
+        self.path = old / self.path.name
+        self.tokens()
+        self.call(receipt)
+        self.assertEqual(self.read()['study'][0]['nodeId'], 'a')
+
+    def test_large_session_is_read_incrementally_and_partial_tail_is_not_lost(self):
+        receipt=self.capture()
+        self.tokens()
+        self.call(receipt)
+        with self.path.open('wb') as stream:
+            # A sparse oversized irrelevant line models a long transcript
+            # without retaining 65 MiB of prose in a test fixture.
+            stream.seek(65 * 1024 * 1024)
+            stream.write(b'\n')
+            stream.write(''.join(json.dumps(e)+'\n' for e in self.events).encode())
+        rows=self.adapter.read(self.projects)['study']
+        self.assertEqual(len(rows),1)
+        partial=json.dumps({'type':'token_usage_record','timestamp':AT+'06.000Z',
+                            'payload':{'response_id':'response-2','usage':{'input_tokens':20,'output_tokens':0}}}).encode()
+        with self.path.open('ab') as stream:
+            stream.write(partial[:len(partial)//2])
+        self.assertEqual(len(self.adapter.read(self.projects)['study']),1)
+        with self.path.open('ab') as stream:
+            stream.write(partial[len(partial)//2:]+b'\n')
+            stream.write(json.dumps({'type':'event_msg','timestamp':AT+'07.000Z','payload':{'type':'task_complete'}}).encode()+b'\n')
+        rows=self.adapter.read(self.projects)['study']
+        self.assertEqual(len(rows),2)
+        self.assertEqual(sum(r['inputTokens'] for r in rows),120)
+
+    def test_collection_diagnostics_distinguish_missing_log_unmatched_receipt_and_no_usage(self):
+        receipt=self.capture()
+        task_path=self.outbox/'r1.json'
+        task=json.loads(task_path.read_text())
+        task['hostUsage']={'threadId':SID,'host':'codex'}
+        task_path.write_text(json.dumps(task))
+        with patch('backend.codex_usage.time.monotonic', return_value=0):
+            self.adapter.read(self.projects)
+        self.assertEqual(self.adapter.diagnostics['study']['state'],'log-not-found')
+        self.tokens()
+        self.read()
+        self.assertEqual(self.adapter.diagnostics['study']['state'],'receipt-unmatched')
+        self.call(receipt)
+        self.read()
+        diagnostic=self.adapter.diagnostics['study']
+        self.assertEqual(diagnostic['state'],'collected')
+        self.assertEqual(diagnostic['matchedReceipts'],1)
+        self.assertEqual(diagnostic['collectedRecords'],1)
+        self.events=[e for e in self.events if e['type']!='token_usage_record' and e.get('payload',{}).get('type')!='token_count']
+        self.read()
+        self.assertEqual(self.adapter.diagnostics['study']['state'],'no-usage')
 
     def test_native_response_ids_counters_and_cache_are_replayed_once(self):
         receipt = self.capture()
@@ -120,3 +189,5 @@ class CodexUsageTests(unittest.TestCase):
             return recorded_cli_projects({'name':'exec_command','arguments':json.dumps({'cmd':cmd})})
         self.assertEqual(parse("cat <<'TXT'\npython3 exp_observer.py record --project study\nTXT"),set())
         self.assertEqual(parse("python3 exp_observer.py record --project study --notes \"$(cat <<'TXT'\nraw analysis\nTXT\n)\""),{(observer_origin('http://localhost:4317'),'study')})
+        self.assertEqual(parse('python.exe -X utf8 -B C:\\Skills\\exp_observer.py `\n record `\n --project study'),
+                         {(observer_origin('http://localhost:4317'), 'study')})

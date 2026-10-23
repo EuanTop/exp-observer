@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, ExitStack
 from copy import deepcopy
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -14,6 +15,8 @@ import unittest
 from unittest.mock import patch
 
 from backend.recovery import Recovery
+from backend.codex_usage import CodexSessionAdapter
+from backend.host_usage import HostUsageImporter
 from backend.server import Server
 from backend.store import Store, StoreError
 from tests.test_capture import cli, working_directory
@@ -92,6 +95,47 @@ class RecoveryTests(unittest.TestCase):
 
     def read_tasks(self, cwd=None):
         return [json.loads(path.read_text(encoding='utf-8')) for path in self.task_paths(cwd)]
+
+    def test_old_windows_session_imports_through_recovery_and_http_without_double_counting(self):
+        self.start(automatic=False)
+        _, receipt = self.invoke('record', '--project', 'windows-study', '--title', 'Measured finding')
+        path = next(p for p in self.task_paths() if not p.name.startswith('project-'))
+        task = cli.read_queue_task(path)
+        sid = '11111111-2222-3333-4444-555555555555'
+        task['hostUsage'] = {'host': 'codex', 'threadId': sid}
+        cli.save_task(path, task)
+        at = datetime.fromisoformat(task['capturedAt'].replace('Z', '+00:00'))
+        old = self.root / 'codex' / 'sessions' / '2026' / '01' / '01'
+        old.mkdir(parents=True)
+        events = []
+        def emit(kind, payload, offset=0):
+            events.append({'type': kind, 'timestamp': (at + timedelta(seconds=offset)).isoformat(), 'payload': payload})
+        emit('session_meta', {'id': sid, 'model_provider': 'openai'}, -2)
+        emit('turn_context', {'model': 'measured-model'}, -2)
+        emit('event_msg', {'type': 'task_started'}, -2)
+        emit('token_usage_record', {'response_id': 'native-response', 'usage': {
+            'input_tokens': 100, 'output_tokens': 7, 'cached_input_tokens': 80}}, -1)
+        command = ('& "C:\\Program Files\\Python\\python.exe" -X utf8 -B '
+                   '"C:\\Agent Skills\\exp_observer.py" --url ' + self.url + ' record --project windows-study')
+        emit('response_item', {'type': 'function_call', 'name': 'exec_command', 'call_id': 'record',
+                              'arguments': json.dumps({'cmd': command})})
+        emit('response_item', {'type': 'function_call_output', 'call_id': 'record', 'output': json.dumps(receipt)})
+        emit('event_msg', {'type': 'task_complete'}, 1)
+        (old / ('rollout-test-' + sid + '.jsonl')).write_text(''.join(json.dumps(e) + '\n' for e in events), encoding='utf-8')
+        recovery = Recovery(self.url, self.state, store=self.store)
+        adapter = CodexSessionAdapter([self.root / 'codex'], url=self.url)
+        recovery.host_usage = HostUsageImporter(self.store, [adapter], interval=0, url=self.url)
+        self.server.recovery = recovery
+        for _ in range(2):
+            recovery.drain_once()
+        project = self.client.project('windows-study')
+        self.assertEqual(len(project['usageRecords']), 1)
+        row = project['usageRecords'][0]
+        self.assertEqual((row['inputTokens'], row['outputTokens'], row['cacheReadTokens']), (100, 7, 80))
+        self.assertEqual(row['nodeId'], receipt['nodeId'])
+        self.assertEqual(project['runs'], [])
+        status = self.client.request('/api/projects/windows-study/usage-status')['adapters'][0]
+        self.assertEqual((status['state'], status['matchedReceipts'], status['collectedRecords']), ('collected', 1, 1))
 
     def test_background_acknowledgement_replaces_stale_pending_without_http(self):
         _, original = self.invoke('record', '--project', 'authoritative', '--title', 'Actual finding',

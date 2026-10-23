@@ -153,3 +153,9 @@ HTTP routes and storage contract: see the repository's `docs/contract.md` when d
 The suggested types are `question`, `experiment`, `finding`. `record --kind TYPE` also accepts domain-specific types. Parallel follow-up questions remain questions, with `branches` links; the legacy `--direction` event is optional, not a required research phase.
 
 `event` and `record` accept `--importance normal|critical` and `--importance-reason TEXT`. An event marks its new finding, or the question if no finding is supplied. Omitted importance preserves existing values. Marking identifies the narrative needed to understand the central question, decisive evidence, changed judgments, current answer and material unresolved questions. It does not certify evidence quality.
+
+## Catalog recovery and collection diagnostics
+
+The client retains a small readable project metadata snapshot alongside its context cache. If an existing ID is absent after a platform reset, recovery uses the retained name and description. With no metadata, it creates an unnamed placeholder and reports that gap. `init --id ID --name NAME` can upgrade an implicit plan and repair a placeholder; it does not replace a real remote name. Metadata recovery does not reconstruct files that were deleted from the research directory.
+
+`GET /api/projects/ID/usage-status` exposes collector states and counts for matched captures, discovered/read logs, native usage events and imported records. Missing logs, unmatched receipts and no host usage are separate states. This endpoint diagnoses collection rather than scientific progress. Codex sessions are found by thread filename across creation dates; long logs are streamed once, then incrementally read. Windows Python runtime options such as `-X utf8 -B` are supported.

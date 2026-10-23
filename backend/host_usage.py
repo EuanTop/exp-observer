@@ -42,9 +42,13 @@ def cli_calls(command):
     shell wrappers, here-documents, substitutions and diagnostic snippets cannot
     become a research-agent binding merely by mentioning a project ID.
     """
-    if not isinstance(command, str) or any(part in command for part in ('<<', '$(', '`')):
+    if not isinstance(command, str):
         return set()
-    lexer = shlex.shlex(command, posix=os.name != 'nt', punctuation_chars='\n;&|<>()')
+    windows = os.name == 'nt' or bool(re.search(r'[A-Za-z]:[\\/]|\b(?:python[\d.]*|py)\.exe\b', command, re.I))
+    command = re.sub(r'`\r?\n', ' ', command) if windows else command.replace('\\\n', ' ')
+    if any(part in command for part in ('<<', '$(', '`')):
+        return set()
+    lexer = shlex.shlex(command, posix=not windows, punctuation_chars='\n;&|<>()')
     lexer.whitespace = ' \t\r'
     lexer.whitespace_split = True
     try:
@@ -61,14 +65,22 @@ def cli_calls(command):
     statements.append(current)
     calls = set()
     for args in statements:
-        args = [arg.strip('"\'') if os.name == 'nt' else arg for arg in args]
+        args = [arg.strip('"\'') if windows else arg for arg in args]
         if not args:
             continue
         executable = args.pop(0).replace('\\', '/').rsplit('/', 1)[-1]
         if re.fullmatch(r'(?:python(?:\d+(?:\.\d+)*)?|py)(?:\.exe)?', executable, re.I):
-            while args and args[0] in ('-u', '-B', '-3'):
-                args.pop(0)
-            if not args or args.pop(0).replace('\\', '/').rsplit('/', 1)[-1] != 'exp_observer.py':
+            while args:
+                flag = args[0]
+                if flag in ('-u', '-B', '-E', '-I', '-s', '-S', '-P', '-q', '-O', '-OO', '-b', '-bb') or re.fullmatch(r'-3(?:\.\d+)?', flag):
+                    args.pop(0)
+                elif flag in ('-X', '-W') and len(args) >= 2 and not args[1].startswith('-'):
+                    del args[:2]
+                elif flag.startswith(('-X', '-W')) and len(flag) > 2:
+                    args.pop(0)
+                else:
+                    break
+            if not args or args.pop(0).replace('\\', '/').rsplit('/', 1)[-1].lower() != 'exp_observer.py':
                 continue
         elif executable != 'exp_observer.py':
             continue
@@ -339,6 +351,10 @@ class HostUsageImporter:
         self.url = url
         self.next_poll = 0
 
+    def status(self, project_id):
+        return {'projectId': project_id, 'adapters': [dict(adapter.diagnostics[project_id])
+                for adapter in self.adapters if project_id in getattr(adapter, 'diagnostics', {})]}
+
     def drain_once(self, outboxes=()):
         if time.monotonic() < self.next_poll:
             return []
@@ -392,6 +408,9 @@ class HostUsageImporter:
                     if result['imported'] or result['updated']:
                         results.append({'projectId': project['id'], 'source': adapter.source, **result, 'pending': False})
             except (OSError, sqlite3.Error, StoreError, ValueError, KeyError, TypeError, AttributeError, OverflowError) as exc:
+                if hasattr(adapter, 'diagnostics'):
+                    adapter.diagnostics = {p['id']: {**getattr(adapter, 'diagnostics', {}).get(p['id'], {}),
+                        'source': adapter.source, 'state': 'error', 'message': str(exc)} for p in projects}
                 results.append({'source': adapter.source, 'pending': True,
                                 'recordingWarnings': ['Optional host usage import is unavailable: ' + str(exc)]})
         return results

@@ -62,6 +62,22 @@ class HostUsageTests(unittest.TestCase):
         (outbox / (key + '.json')).write_text(json.dumps(task))
         return outbox
 
+    def test_windows_python_options_and_quoted_paths_are_recognized(self):
+        for cmd in [
+            r'python.exe -X utf8 -B C:\skills\exp_observer.py event --project study',
+            r'& "C:\Program Files\Python\python.exe" -X utf8 -B "C:\Agent Skills\exp_observer.py" event --project study',
+            r'py.exe -3.12 -Xutf8 -W ignore C:\skills\exp_observer.py record --project study',
+            'python3 -X utf8 -B /skill/exp_observer.py event --project study',
+        ]:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(cli_projects(cmd), {'study'})
+        for cmd in [
+            r'python.exe -X utf8 -c "print(1)" C:\skills\exp_observer.py event --project study',
+            r'python.exe -m other exp_observer.py event --project study',
+            r'Write-Output "python.exe -X utf8 C:\skills\exp_observer.py event --project study"',
+        ]:
+            self.assertEqual(cli_projects(cmd), set())
+
     def test_only_actual_top_level_cli_commands_bind(self):
         actual = "find . -maxdepth 1\npython3 /installed/exp_observer.py record --project study --title '字形研究'\npython3 /installed/exp_observer.py execute --project study -- python3 run.py"
         self.assertEqual(cli_projects(actual), {'study'})

@@ -1,3 +1,4 @@
+import { UsageCollection } from "./UsageCollection";
 import type { HostUsageRecord, Project } from "../model";
 import { getProjectHostUsage, formatUsageTime } from "../usage";
 
@@ -8,7 +9,7 @@ const modelName = (model: string) =>
 
 export function ProjectHostUsage({ project }: { project: Project }) {
   const usage = getProjectHostUsage(project);
-  if (!usage.recordCount) return null;
+  if (!usage.recordCount) return <UsageCollection projectId={project.id} />;
   return (
     <section className="project-host-usage">
       <div className="inspector-section-title">
@@ -47,6 +48,7 @@ export function ProjectHostUsage({ project }: { project: Project }) {
           </dl>
         </div>
       ))}
+      <UsageCollection projectId={project.id} />
       <p className="usage-scope">
         保留宿主原始计数，缓存单列，不额外叠加到输入 Token。
       </p>

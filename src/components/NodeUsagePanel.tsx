@@ -6,6 +6,7 @@ import {
   formatUsageTime,
 } from "../usage";
 import { uid, type Operation, type Project, type ResearchNode } from "../model";
+import { UsageCollection } from "./UsageCollection";
 import { NodeHostUsage } from "./HostUsage";
 
 export function NodeUsagePanel({
@@ -83,6 +84,7 @@ export function NodeUsagePanel({
           该节点尚无可确认归属的步骤计时或 Token 数据
         </div>
       )}
+      <UsageCollection projectId={project.id} />
       <NodeHostUsage records={usage.hostUsage} />
       {usage.observations.map((o) => (
         <div className="observation-card" key={o.id}>

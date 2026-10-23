@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 
 from .host_usage import observer_origin, timestamp, cli_calls
 
@@ -82,6 +83,10 @@ def recorded_cli_projects(payload):
     commands = [args.get('cmd', '') for name, args in tool_invocations(payload) if name == 'exec_command']
     found = set()
     for command in commands:
+        # PowerShell continuation joins one invocation; it is not a new
+        # statement containing only flags. Other backticks remain rejected.
+        if re.search(r'[A-Za-z]:[\\/]|\b(?:python[\d.]*|py)\.exe\b', command, re.I):
+            command = re.sub(r'`\r?\n', ' ', command)
         # Heredoc bodies can contain arbitrary code. They never prove an
         # invocation; literal CLI lines outside those bodies can still do so.
         delimiter = None
@@ -111,7 +116,10 @@ class CodexSessionAdapter:
         self.outboxes = ()
         self.cache = {}
         self.discovered = {}
+        self.path_index = (0, ())
+        self.stream_states = {}
         self.warnings = []
+        self.diagnostics = {}
 
     def captures(self, projects):
         by_id = {p['id']: p for p in projects}
@@ -141,8 +149,10 @@ class CodexSessionAdapter:
         return tasks
 
     def paths(self, tasks):
-        # Explicit host hints make new captures cheap. Legacy captures discover
-        # only their recording dates, and still require an exact output receipt.
+        # A session lives under its creation date, even months after it resumes.
+        # Index filenames/stat metadata once; read transcript bodies only for
+        # matching IDs or recently written legacy candidates. A hint is never
+        # proof of ownership: import still requires an exact output receipt.
         days, hints, legacy = set(), set(), False
         for task in tasks.values():
             day = datetime.fromtimestamp(timestamp(task.get('capturedAt') or task['startedAt']), timezone.utc)
@@ -152,13 +162,25 @@ class CodexSessionAdapter:
                 hints.add(hint)
             else:
                 legacy = True
+        if not tasks:
+            return []
+        if time.monotonic() >= self.path_index[0]:
+            index = []
+            for root in self.roots:
+                for path in root.glob('**/rollout-*.jsonl'):
+                    try:
+                        if not path.is_symlink() and path.resolve().is_relative_to(root):
+                            index.append((path, path.stat().st_mtime))
+                    except OSError:
+                        continue
+            self.path_index = time.monotonic() + 10, tuple(index)
+        earliest = min(timestamp(t.get('capturedAt') or t['startedAt']) for t in tasks.values())
         found = set()
-        for root in self.roots:
-            for day in sorted(days):
-                directory = root / day
-                for path in directory.glob('rollout-*.jsonl'):
-                    if (legacy or any(hint in path.name for hint in hints)) and not path.is_symlink() and path.resolve().is_relative_to(root):
-                        found.add(path)
+        for path, modified in self.path_index[1]:
+            if any(hint in path.name for hint in hints):
+                found.add(path)
+            elif legacy and (modified >= earliest or '/'.join(path.parts[-4:-1]) in days):
+                found.add(path)
         return sorted(found)
 
     def parse(self, path):
@@ -167,16 +189,35 @@ class CodexSessionAdapter:
         cached = self.cache.get(path)
         if cached and cached[0] == key:
             return cached[1]
-        if stat.st_size > 64 * 1024 * 1024:
-            return []
-        turns, current, session, model, provider = [], None, None, 'unknown', 'unknown'
-        calls, polls, sessions = {}, {}, {}
-        with path.open(encoding='utf-8') as stream:
-            for line in stream:
+        state = self.stream_states.get(path)
+        appended = (state is not None and state['identity'] == (stat.st_dev, stat.st_ino)
+                    and stat.st_size > state['size'] and stat.st_size >= state['offset'])
+        if appended:
+            turns, current, session, model, provider = (state[k] for k in ('turns','current','session','model','provider'))
+            calls, polls, sessions = (state[k] for k in ('calls','polls','sessions'))
+            offset = state['offset']
+        else:
+            turns, current, session, model, provider = [], None, None, 'unknown', 'unknown'
+            calls, polls, sessions, offset = {}, {}, {}, 0
+        with path.open('rb') as stream:
+            stream.seek(offset)
+            while stream.tell() < stat.st_size:
+                start = stream.tell()
+                line = stream.readline(min(4 * 1024 * 1024 + 1, stat.st_size - start))
                 if len(line) > 4 * 1024 * 1024:
+                    # Skip an oversized payload in bounded chunks, rather than
+                    # allocating the whole line or discarding the whole session.
+                    while line and not line.endswith(b'\n') and stream.tell() < stat.st_size:
+                        line = stream.readline(min(1024 * 1024, stat.st_size - stream.tell()))
+                    if not line.endswith(b'\n'):
+                        stream.seek(start)
+                        break
                     continue
+                if not line.endswith(b'\n'):
+                    stream.seek(start)
+                    break
                 try:
-                    event = json.loads(line)
+                    event = json.loads(line.decode('utf-8-sig'))
                     payload = event.get('payload') or {}
                     kind, at = event.get('type'), event.get('timestamp')
                     timestamp(at)
@@ -203,6 +244,10 @@ class CodexSessionAdapter:
                         call_id = payload.get('call_id')
                         calls[call_id] = recorded_cli_projects(payload)
                         polls[call_id] = [args.get('session_id') for name, args in tool_invocations(payload) if name == 'write_stdin']
+                        while len(calls) > 512:
+                            evicted = next(iter(calls))
+                            del calls[evicted]
+                            polls.pop(evicted, None)
                     if kind == 'response_item' and payload.get('type') in ('function_call_output', 'custom_tool_call_output'):
                         call_id = payload.get('call_id')
                         actual = set(calls.get(call_id, set()))
@@ -215,21 +260,37 @@ class CodexSessionAdapter:
                                 current['anchors'].append((at, {k: receipt[k] for k in ('projectId', 'requestId', 'nodeId')}))
                 except (ValueError, TypeError, KeyError, AttributeError):
                     continue
+            offset = stream.tell()
+        self.stream_states[path] = {'identity': (stat.st_dev,stat.st_ino), 'size':stat.st_size, 'offset':offset,
+            'turns':turns, 'current':current, 'session':session, 'model':model, 'provider':provider,
+            'calls':calls, 'polls':polls, 'sessions':sessions}
         value = (session, provider, turns)
         self.cache[path] = key, value
         while len(self.cache) > 128:
-            del self.cache[next(iter(self.cache))]
+            evicted = next(iter(self.cache))
+            del self.cache[evicted]
+            self.stream_states.pop(evicted, None)
         return value
 
     def read(self, projects):
         self.warnings = []
         tasks = self.captures(projects)
+        diagnostics = {p['id']: {'source': self.source, 'state': 'no-captures',
+            'eligibleCaptures': sum(t['projectId'] == p['id'] for t in tasks.values()),
+            'candidateLogs': 0, 'readableLogs': 0, 'unreadableLogs': 0, 'nativeUsageRecords': 0,
+            'matchedReceipts': 0, 'collectedRecords': 0, 'unassignedRecords': 0}
+            for p in projects}
         if not tasks or observer_origin(self.url) is None:
+            self.diagnostics = diagnostics
             return {}
         result, seen = defaultdict(list), set()
         unresolved = {key: task for key, task in tasks.items() if key not in self.discovered}
         paths = {path for key, path in self.discovered.items() if key in tasks}
         paths.update(self.paths(unresolved))
+        for project_id, diagnostic in diagnostics.items():
+            hints = {t.get('hostUsage', {}).get('threadId') for t in tasks.values() if t['projectId'] == project_id}
+            diagnostic['candidateLogs'] = sum(any(h and h in path.name for h in hints) for path in paths) if hints - {None} else len(paths)
+            diagnostic['state'] = 'log-not-found' if diagnostic['eligibleCaptures'] else 'no-captures'
         for path in sorted(paths):
             try:
                 parsed = self.parse(path)
@@ -238,6 +299,15 @@ class CodexSessionAdapter:
                 session, provider, turns = parsed
                 if not isinstance(session, str) or not UUID.fullmatch(session):
                     continue
+                related = {t['projectId'] for t in tasks.values() if t.get('hostUsage', {}).get('threadId') == session}
+                related.update(receipt.get('projectId') for turn in turns for _, receipt in turn['anchors']
+                               if tuple(receipt.get(k) for k in ('projectId','requestId','nodeId')) in tasks)
+                for project_id in related:
+                    diagnostic = diagnostics[project_id]
+                    diagnostic['readableLogs'] += 1
+                    diagnostic['nativeUsageRecords'] += sum(len(t['raw'] or t['fallback']) for t in turns)
+                    diagnostic['matchedReceipts'] += sum(tuple(r.get(k) for k in ('projectId','requestId','nodeId')) in tasks
+                                                        and r.get('projectId') == project_id for t in turns for _, r in t['anchors'])
                 previous_total = None
                 for turn in turns:
                     last_total = previous_total
@@ -318,6 +388,25 @@ class CodexSessionAdapter:
                         result[project_id].append(record)
                         seen.add(source_ref)
             except (OSError, ValueError, TypeError):
+                for project_id, diagnostic in diagnostics.items():
+                    if any(t['projectId'] == project_id and t.get('hostUsage', {}).get('threadId')
+                           and t['hostUsage']['threadId'] in path.name for t in tasks.values()):
+                        diagnostic['unreadableLogs'] += 1
                 self.warnings.append({'source': self.source, 'pending': True,
                                       'recordingWarnings': ['A Codex usage log could not be read.']})
+        for project_id, diagnostic in diagnostics.items():
+            rows = result.get(project_id, [])
+            diagnostic['collectedRecords'] = len(rows)
+            diagnostic['unassignedRecords'] = sum(not r.get('nodeId') for r in rows)
+            if not diagnostic['eligibleCaptures']:
+                continue
+            if rows:
+                diagnostic['state'] = 'collected'
+            elif diagnostic['unreadableLogs']:
+                diagnostic['state'] = 'log-unreadable'
+            elif diagnostic['matchedReceipts']:
+                diagnostic['state'] = 'awaiting-checkpoint' if diagnostic['nativeUsageRecords'] else 'no-usage'
+            elif diagnostic['candidateLogs']:
+                diagnostic['state'] = 'receipt-unmatched'
+        self.diagnostics = diagnostics
         return dict(result)
