@@ -1488,6 +1488,11 @@ def main(argv=None):
                 startup = ensure_platform(args.url, Path.cwd().resolve(), state_directory())
                 if startup.get('state') in ('occupied', 'unavailable'):
                     client.startup_unavailable = 'Local platform startup is unavailable; retain research in the local queue.'
+                elif startup.get('state') == 'ready' and args.command in ('init', 'context', 'record', 'event', 'execute', 'sync'):
+                    try:
+                        client.request('/api/workspaces', {'path': str(Path.cwd().resolve())})
+                    except ClientError:
+                        pass  # Directory discovery cannot block the actual research record.
             except (ImportError, OSError, ValueError):
                 # Older partial Skill copies still retain local records.
                 pass

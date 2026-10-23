@@ -76,9 +76,9 @@ class BootstrapTests(unittest.TestCase):
                 if bootstrap.probe(self.url) != 'ready': break
                 time.sleep(.05)
 
-    def invoke(self, *arguments):
+    def invoke(self, *arguments, cwd=None):
         result = subprocess.run([sys.executable, str(self.skill/'scripts/exp_observer.py'), '--url', self.url, *arguments],
-                                cwd=self.workspace, env=self.env, capture_output=True, timeout=15)
+                                cwd=cwd or self.workspace, env=self.env, capture_output=True, timeout=15)
         diagnostics = '\n'.join(path.read_text(encoding='utf-8',errors='replace')[-8000:] for path in self.state.glob('*') if path.suffix in ('.log','.json')) if self.state.exists() else 'No startup state written'
         self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace') + '\n' + diagnostics)
         return json.loads(result.stdout)
@@ -104,6 +104,15 @@ class BootstrapTests(unittest.TestCase):
             self.assertIn(b'/assets/', response.read())
         with urlopen(self.url+'/api/workspaces') as response:
             self.assertEqual(json.load(response)['workspaces'][0]['path'], str(self.workspace))
+
+    def test_running_platform_also_connects_a_new_research_directory(self):
+        self.invoke('init', '--id', 'first', '--name', 'First research')
+        other = self.root/'another research 研究'
+        other.mkdir()
+        self.invoke('init', '--id', 'second', '--name', 'Second research', cwd=other)
+        with urlopen(self.url+'/api/workspaces') as response:
+            paths = {w['path'] for w in json.load(response)['workspaces']}
+        self.assertEqual(paths, {str(self.workspace), str(other)})
 
     def test_concurrent_first_use_starts_one_platform_and_preserves_all_records(self):
         with ThreadPoolExecutor(max_workers=4) as pool:
