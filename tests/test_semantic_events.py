@@ -166,6 +166,45 @@ class SemanticEventTests(unittest.TestCase):
                     '--request-id', 'cached-旧分组')
         self.assertEqual(before, self.project())
 
+    def test_offline_container_update_without_title_preserves_identity_children_and_retry(self):
+        _, outer = self.invoke('event', '--project', 'study', '--question', '外层问题', '--container')
+        _, inner = self.invoke('record', '--project', 'study', '--title', '保留的内部标题',
+                               '--kind', 'robustness_check', '--container', '--independent')
+        _, finding = self.invoke('event', '--project', 'study', '--question', '保留的内部标题',
+                                 '--finding', '内部实际发现')
+        before = {n['id']: n for n in self.project()['nodes']}
+        (self.root / '保留指标.json').write_text(json.dumps({'observed_ratio': 2.5}), encoding='utf-8')
+        args = ('record', '--project', 'study', '--node', inner['nodeId'], '--parent', '外层问题',
+                '--summary', '当前检查范围', '--conclusion', '保留实际结果及限制',
+                '--metrics-file', '保留指标.json', '--request-id', 'update-container-without-title')
+        self.client.offline = True
+        _, result = self.invoke(*args)
+        self.assertTrue(result['pending'])
+        self.invoke(*args)
+        task = next(t for t in self.tasks() if t['requestId'] == 'update-container-without-title')
+        update = next(o['data'] for o in task['operations'] if o['op'] == 'node.update' and o['data']['id'] == inner['nodeId'])
+        self.assertNotIn('title', update)
+        self.assertEqual(next(o['data'] for o in task['operations'] if o['op'] == 'run.add')['title'], '')
+        self.client.offline = False
+        self.invoke('sync', '--project', 'study')
+        nodes = {n['id']: n for n in self.project()['nodes']}
+        node = nodes[inner['nodeId']]
+        self.assertEqual(node['title'], before[inner['nodeId']]['title'])
+        self.assertEqual(node['kind'], 'robustness_check')
+        self.assertTrue(node['isContainer'])
+        self.assertEqual(node['parentId'], outer['nodeId'])
+        self.assertEqual(nodes[finding['nodeId']]['parentId'], inner['nodeId'])
+        self.assertEqual((node['summary'], node['conclusion']), ('当前检查范围', '保留实际结果及限制'))
+        frozen = self.project()
+        self.invoke(*args)
+        self.assertEqual(frozen, self.project())
+        self.assertEqual(len(frozen['nodes']), len(before))
+        with patch.object(self.client, 'request') as request:
+            for arguments in [(), ('--title', ''), ('--title', '  '), ('--node', inner['nodeId'], '--title', '')]:
+                with self.subTest(arguments=arguments), self.assertRaisesRegex(cli.ClientError, 'nonempty'):
+                    self.invoke('record', '--project', 'study', *arguments)
+            request.assert_not_called()
+
     def test_execute_parent_is_explicit_and_retry_never_reruns(self):
         _, parent = self.invoke('event', '--project', 'study', '--question', '所属子问题')
         self.assertFalse({'parent', 'container'} & self.tasks()[0]['intent'].keys())

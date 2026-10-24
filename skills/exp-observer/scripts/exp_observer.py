@@ -99,7 +99,7 @@ def parser():
     init.add_argument('--source-root', action='append', default=[])
     record = commands.add_parser('record', help='Record work; generate IDs, references and a durable retry automatically')
     record.add_argument('--project', required=True)
-    record.add_argument('--title', required=True)
+    record.add_argument('--title', help='Required for a new record; omit on --node updates to preserve its title')
     record.add_argument('--summary')
     record.add_argument('--conclusion', help='The substantive finding displayed directly on the node')
     record.add_argument('--importance', choices=('normal', 'critical'), help='Legacy importance metadata (retained for compatibility)')
@@ -980,6 +980,10 @@ def capture_inputs(args):
 
 
 def record(client, args):
+    if args.title is None and not args.node:
+        raise ClientError('Creating a record requires a nonempty --title; --node updates may omit it.')
+    if args.title is not None and not args.title.strip():
+        raise ClientError('--title must be nonempty when supplied.')
     notes, notes_error, metrics, metrics_warning = capture_inputs(args)
     intent = {'command': 'record', **{key: getattr(args, key) for key in
               ('title', 'summary', 'conclusion', 'kind', 'node', 'after', 'relation', 'independent', 'parent', 'status', 'artifact', 'importance', 'importance_reason')},
@@ -1008,7 +1012,9 @@ def record(client, args):
         task.update({'capturedAt': at, 'status': 'recorded'})
         if metrics_warning:
             task['recordingWarnings'].append(metrics_warning)
-        node = {'id': task['nodeId'], 'title': args.title}
+        node = {'id': task['nodeId']}
+        if args.title is not None:
+            node['title'] = args.title
         if args.conclusion is not None:
             node['conclusion'] = args.conclusion
         if notes is not None:
@@ -1033,7 +1039,7 @@ def record(client, args):
         capture_relationship(client, args, path, task)
         if intent['hasMetrics']:
             task['operations'].append({'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
-                'title': args.title, 'status': 'completed', 'startedAt': None, 'finishedAt': None, 'capturedAt': at,
+                'title': args.title or '', 'status': 'completed', 'startedAt': None, 'finishedAt': None, 'capturedAt': at,
                 'metrics': metrics, 'origin': 'observed', 'configuration': {'capturedExternalResult': True}}})
         persist_task(path, task)
         artifacts = list(args.artifact)

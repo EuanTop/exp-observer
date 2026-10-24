@@ -45,7 +45,7 @@ As you finish, check only questions you actually worked on: mark resolved work c
 
 ## Organize research by subproblem
 
-The project overview is the outermost research graph with containers closed; it is the main research story. No separate important-node selection is needed. Use a meaningful question as a container when its exploration needs its own space. `event --container` keeps that question's findings inside it. `--parent "Exact parent title/ID"` nests a question and makes both it and its parent containers, preserving their research types. Later calls reuse that ownership from local records or dated context. Keep container titles concise and its summary/conclusion current with `record --node ID --title "Question" --summary TEXT --conclusion TEXT`; do not create a second summary document.
+The project overview is the outermost research graph with containers closed; it is the main research story. No separate important-node selection is needed. Use a meaningful question as a container when its exploration needs its own space. `event --container` keeps that question's findings inside it. `--parent "Exact parent title/ID"` nests a question and makes both it and its parent containers, preserving their research types. Later calls reuse that ownership from local records or dated context. Keep container titles concise and its summary/conclusion current with `record --node ID --summary TEXT --conclusion TEXT`; do not create a second summary document.
 
 ```sh
 python3 <skill>/scripts/exp_observer.py event --project ID --question "What affects confirmation time?" --container
@@ -71,7 +71,7 @@ python3 <skill>/scripts/exp_observer.py execute --project ID --title "Actual com
 
 This captures timing, exit code and stdout/stderr independently of future findings. Add `--artifact PATH` for results. `event --evidence "Actual command"` links an actual finding to that captured evidence; several findings can reuse it. For repeated measurements, `execute --question "Exact question" --title "Actual measurement" -- COMMAND...` retains another run of the same question. Never rerun work just to split its findings.
 
-The older `record` entry remains available for direct edits. Its `--node` option replaces supplied fields on that node; use `event` for a new finding or correction.
+The older `record` entry remains available for direct edits. Its `--node` option replaces supplied fields on that node; omit `--title` to keep the current title. New records require a nonempty title; use `event` for a new finding or correction.
 
 ## Let recording recover separately
 
