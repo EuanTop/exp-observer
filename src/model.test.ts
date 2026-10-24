@@ -42,50 +42,43 @@ const p = (nodes: ResearchNode[], edges: any[] = []): Project => ({
 });
 const actions = { onToggle: () => {}, onEnter: () => {} };
 describe("nested research graph", () => {
-  it("keeps ordinary questions as cards even when they have logical children", () => {
-    const question = { ...n("q"), kind: "question", collapsed: true };
-    const finding = {
-      ...n("f", "q"),
-      kind: "finding",
-      position: { x: 10, y: 350 },
-    };
+  it("treats existing logical parents as closed containers without changing research records", () => {
+    const question = { ...n("q"), kind: "question", isContainer: false };
+    const finding = { ...n("f", "q"), kind: "finding" };
     const project = p([question, finding]);
     const canvas = toCanvas(project, null, [], actions);
+    expect(canvas.nodes.map((n) => n.id)).toEqual(["q"]);
     expect(canvas.nodes[0].data).toMatchObject({
-      container: false,
+      container: true,
       expanded: false,
       children: 1,
     });
-    expect(canvas.nodes[0].style).toMatchObject({
-      width: NODE_SIZE.w,
-      height: expect.any(Number),
-    });
-    expect(canvas.nodes[1].parentId).toBeUndefined();
-    expect(canvas.nodes[1].position).toEqual(finding.position);
+    expect(canvas.nodes[0].style?.width).toBe(NODE_SIZE.w);
+    expect(toCanvas(project, "q", [], actions).nodes.map((n) => n.id)).toEqual([
+      "f",
+    ]);
+    expect(question.isContainer).toBe(false);
     expect(project.nodes[1].parentId).toBe("q");
   });
-  it("uses only explicit containers for visual parents and preserves custom node kinds", () => {
-    const group = { ...n("group"), kind: "question", isContainer: true };
-    const question = { ...n("q", "group"), kind: "question" };
-    const finding = { ...n("f", "q"), kind: "finding" };
-    const canvas = toCanvas(p([group, question, finding]), null, [], actions);
+  it("opens only the requested nesting level and preserves custom node kinds", () => {
+    const project = p([
+      { ...n("group"), kind: "question", isContainer: true },
+      { ...n("q", "group"), kind: "custom-analysis" },
+      { ...n("f", "q"), kind: "finding" },
+    ]);
+    const canvas = toCanvas(project, null, [], actions, {
+      expandedIds: new Set(["group"]),
+    });
+    expect(canvas.nodes.map((n) => n.id)).toEqual(["group", "q"]);
+    expect(canvas.nodes[0].data.expanded).toBe(true);
+    expect(canvas.nodes[1].parentId).toBe("group");
+    expect(canvas.nodes[1].data.node.kind).toBe("custom-analysis");
+    expect(canvas.nodes[1].data.expanded).toBe(false);
     expect(
-      canvas.nodes.find((node) => node.id === "group")?.data.expanded,
-    ).toBe(true);
-    expect(canvas.nodes.find((node) => node.id === "f")?.parentId).toBe(
-      "group",
-    );
-    expect(canvas.nodes.find((node) => node.id === "q")?.data.container).toBe(
-      false,
-    );
-    const plainGroup = toCanvas(
-      p([{ ...n("a"), isContainer: false }, n("b", "a")]),
-      null,
-      [],
-      actions,
-    );
-    expect(plainGroup.nodes[0].data.expanded).toBe(false);
-    expect(plainGroup.nodes[1].parentId).toBeUndefined();
+      toCanvas(project, null, [], actions, {
+        expandedIds: new Set(["group", "q"]),
+      }).nodes.map((n) => n.id),
+    ).toEqual(["group", "q", "f"]);
   });
   it("keeps capture order faint and unlabelled without inventing scientific relationships", () => {
     const project = p(
@@ -121,6 +114,8 @@ describe("nested research graph", () => {
     const project = p([n("a", null, true), n("b", "a"), n("c", "b")]);
     expect(toCanvas(project, "a", [], actions).nodes.map((n) => n.id)).toEqual([
       "b",
+    ]);
+    expect(toCanvas(project, "b", [], actions).nodes.map((n) => n.id)).toEqual([
       "c",
     ]);
   });

@@ -4,7 +4,6 @@ import {
   Box,
   CheckCircle2,
   ChevronRight,
-  Diamond,
   FileText,
   FlaskConical,
   GitBranch,
@@ -18,6 +17,7 @@ import {
 import { useEffect, useState } from "react";
 import {
   descendants,
+  isResearchContainer,
   kinds,
   isExecutionRun,
   relations,
@@ -139,6 +139,7 @@ export function NodeInspector({
   onClose,
   onBranch,
   onChild,
+  onEnter,
   onDelete,
   onArtifact,
   onSelect,
@@ -153,6 +154,7 @@ export function NodeInspector({
   onClose: () => void;
   onBranch: () => void;
   onChild: () => void;
+  onEnter: () => void;
   onDelete: () => void;
   onArtifact: (a: Artifact) => void;
   onSelect: (id: string) => void;
@@ -191,8 +193,6 @@ export function NodeInspector({
               typeof draft.tags === "string"
                 ? (draft.tags as string).split(",")
                 : draft.tags,
-            importance: draft.importance || "normal",
-            importanceReason: draft.importanceReason || "",
             pauseReason: draft.pauseReason || "",
             resumeWhen: draft.resumeWhen || "",
           },
@@ -255,26 +255,11 @@ export function NodeInspector({
               </option>
             ))}
           </select>
-          <button
-            className={`importance-toggle ${node.importance === "critical" ? "selected" : ""}`}
-            aria-pressed={node.importance === "critical"}
-            disabled={busy || editing}
-            onClick={() =>
-              void mutate([
-                {
-                  op: "node.update",
-                  data: {
-                    id: node.id,
-                    importance:
-                      node.importance === "critical" ? "normal" : "critical",
-                  },
-                },
-              ])
-            }
-          >
-            <Diamond size={12} />
-            脉络节点
-          </button>
+          {isResearchContainer(project.nodes, node) && (
+            <button className="button" onClick={onEnter}>
+              进入容器 <ChevronRight size={13} />
+            </button>
+          )}
         </div>
         <div className="detail-tabs">
           {[
@@ -307,6 +292,7 @@ export function NodeInspector({
                   显示方式
                   <select
                     value={
+                      children.length > 0 ||
                       (draft.isContainer ?? draft.kind === "group")
                         ? "container"
                         : "node"
@@ -318,36 +304,12 @@ export function NodeInspector({
                       })
                     }
                   >
-                    <option value="node">普通节点</option>
+                    <option value="node" disabled={children.length > 0}>
+                      普通节点
+                    </option>
                     <option value="container">容器分组</option>
                   </select>
                 </label>
-                <label>
-                  节点重要性
-                  <select
-                    value={draft.importance || "normal"}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        importance: e.target.value as "normal" | "critical",
-                      })
-                    }
-                  >
-                    <option value="normal">普通节点</option>
-                    <option value="critical">脉络节点</option>
-                  </select>
-                </label>
-                {draft.importance === "critical" && (
-                  <label>
-                    为何保留在研究脉络中
-                    <textarea
-                      value={draft.importanceReason || ""}
-                      onChange={(e) =>
-                        setDraft({ ...draft, importanceReason: e.target.value })
-                      }
-                    />
-                  </label>
-                )}
                 {node.status === "paused" && (
                   <>
                     <label>
@@ -461,15 +423,6 @@ export function NodeInspector({
                 <p className="inspector-summary">
                   {node.summary || "暂无摘要"}
                 </p>
-                {node.importance === "critical" && node.importanceReason && (
-                  <div className="node-context-note critical-note">
-                    <strong>
-                      <Diamond size={12} />
-                      影响主结论
-                    </strong>
-                    <p>{node.importanceReason}</p>
-                  </div>
-                )}
                 {node.status === "paused" &&
                   (node.pauseReason || node.resumeWhen) && (
                     <div className="node-context-note pause-note">

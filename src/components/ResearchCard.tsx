@@ -1,5 +1,13 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Box, ChevronDown, Clock3, Diamond, Layers, Minus } from "lucide-react";
+import {
+  Activity,
+  Box,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  Layers,
+  Minus,
+} from "lucide-react";
 import { kinds, type CanvasData } from "../model";
 import type { NodePresentation } from "../node-presentation";
 import { formatDuration, formatTokens } from "../usage";
@@ -67,7 +75,7 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
   );
   return (
     <div
-      className={`research-node ${selected ? "is-selected" : ""} ${processing ? "is-processing" : ""} ${n.importance === "critical" ? "is-critical" : ""} ${!processing && n.status === "failed" ? "state-failed" : ""} ${!processing && n.status === "paused" ? "state-paused" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${container ? "is-container" : ""}`}
+      className={`research-node ${selected ? "is-selected" : ""} ${processing ? "is-processing" : ""} ${(container || !processing) && n.status === "failed" ? "state-failed" : ""} ${(container || !processing) && n.status === "paused" ? "state-paused" : ""} kind-${n.kind} ${expanded ? "container-expanded" : ""} ${container ? "is-container" : ""}`}
       aria-label={processing ? `${presentation.headline}，处理中` : undefined}
     >
       {processing && (
@@ -92,18 +100,29 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
           <span className="node-kind-icon">
             <Icon size={13} />
           </span>
-          {container ? "探索容器" : kinds[n.kind] || n.kind || "研究节点"}
-          {n.importance === "critical" && (
-            <span
-              className="node-critical-mark"
-              title={n.importanceReason || "研究脉络节点"}
-            >
-              <Diamond size={10} />
-              关键
+          {kinds[n.kind] || n.kind || "研究节点"}
+          {container && n.kind !== "group" ? " · 容器" : ""}
+          {container && processing && (
+            <span title="容器内有执行正在运行" aria-label="内部执行中">
+              <Activity size={12} />
             </span>
           )}
         </div>
-        <Badge status={processing ? "running" : n.status || "未记录"} />
+        <Badge
+          status={processing && !container ? "running" : n.status || "未记录"}
+        />
+        {!expanded && container && children > 0 && (
+          <button
+            className="node-inline-expand nodrag"
+            title="就地展开容器"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onToggle(n.id);
+            }}
+          >
+            <ChevronDown size={13} />
+          </button>
+        )}
       </div>
       <div
         className={`node-content ${presentation.conclusion ? "has-conclusion" : ""} ${hasPause ? "has-pause" : ""}`}
@@ -163,17 +182,16 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
         </>
       ) : (
         <div className="node-footer">
-          {container && children ? (
+          {container ? (
             <button
               className="expand-link nodrag"
               onClick={(e) => {
                 e.stopPropagation();
-                data.onToggle(n.id);
+                data.onEnter(n.id);
               }}
             >
-              <Layers size={11} />
-              {children} 子节点
-              <ChevronDown size={10} />
+              <ChevronRight size={11} />
+              进入 · {children} 个节点
             </button>
           ) : (
             <button

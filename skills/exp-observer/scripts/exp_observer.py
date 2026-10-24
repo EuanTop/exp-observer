@@ -102,8 +102,8 @@ def parser():
     record.add_argument('--title', required=True)
     record.add_argument('--summary')
     record.add_argument('--conclusion', help='The substantive finding displayed directly on the node')
-    record.add_argument('--importance', choices=('normal', 'critical'), help='Mark a node essential to understanding the research story')
-    record.add_argument('--importance-reason', help='Why the condensed research story needs this node')
+    record.add_argument('--importance', choices=('normal', 'critical'), help='Legacy importance metadata (retained for compatibility)')
+    record.add_argument('--importance-reason', help='Legacy importance explanation')
     record.add_argument('--kind', help='Natural research type, e.g. question, experiment, finding or decision; omitted updates preserve the type')
     notes = record.add_mutually_exclusive_group()
     notes.add_argument('--notes', help='Full analysis retained in the node notes')
@@ -112,7 +112,8 @@ def parser():
     record.add_argument('--after', help='Related node ID or exact locally recorded title')
     record.add_argument('--relation', default='leads_to', help='Meaning of an explicit --after relationship')
     record.add_argument('--independent', action='store_true', help='Omit the automatic record-order connection')
-    record.add_argument('--parent')
+    record.add_argument('--parent', help='Exact retained parent title/ID; promotes the parent to a container')
+    record.add_argument('--container', action='store_true', help='Allow this node to contain nested research')
     record.add_argument('--status', default=None, help='Node status (default for new nodes: active)')
     record.add_argument('--metrics-file', help='UTF-8 JSON; nested objects are preserved and other root values use a result key')
     record.add_argument('--artifact', action='append', default=[])
@@ -120,13 +121,15 @@ def parser():
     event = commands.add_parser('event', help='Retain a question, finding, correction or change of direction; manage identities automatically')
     event.add_argument('--project', required=True)
     event.add_argument('--question', required=True, help='Natural question, or an exact retained question title/ID; the same wording reuses its identity')
+    event.add_argument('--container', action='store_true', help='Keep this question and its findings in a research container')
+    event.add_argument('--parent', help='Exact retained parent title/ID for this question')
     event.add_argument('--reason', help='Why pursue this question or retain this change')
     change = event.add_mutually_exclusive_group()
     change.add_argument('--finding', help='A substantive finding, retained as its own event')
     change.add_argument('--correction', help='A corrected judgment, retained separately from the earlier finding')
     change.add_argument('--direction', help='A change in research direction, retained as its own event')
-    event.add_argument('--importance', choices=('normal', 'critical'), help='Importance of the finding, or the question when no finding is supplied')
-    event.add_argument('--importance-reason', help='Why this node belongs in the research spine')
+    event.add_argument('--importance', choices=('normal', 'critical'), help='Legacy importance of the finding, or otherwise the question')
+    event.add_argument('--importance-reason', help='Legacy importance explanation')
     event.add_argument('--after', help='Earlier node title or ID; a new question branches from it')
     event.add_argument('--relation', help='Meaning of --after (default: revises for correction, leads_to for direction, related_to for finding)')
     event.add_argument('--evidence', action='append', default=[], help='Execution/evidence node title or ID supporting this event; repeat as needed')
@@ -184,6 +187,7 @@ def parser():
             cmd.add_argument('--output', help='Save original range bytes to this file instead of printing text')
         if command == 'execute':
             cmd.add_argument('--title', required=True)
+            cmd.add_argument('--parent', help='Exact retained parent title/ID for the execution node')
             cmd.add_argument('--question', help='Exact research question title/ID; retain a run of that question without creating a finding')
             cmd.add_argument('--after', help='Related node ID or exact locally recorded title')
             cmd.add_argument('--relation', default='leads_to')
@@ -524,7 +528,7 @@ def local_context(outbox, client, project_id, node_id=None):
                 for index, operation in enumerate(task.get('operations', [])):
                     data = operation.get('data', {})
                     detail = {'op': operation['op'], **{key: data[key] for key in
-                              ('id', 'title', 'kind', 'status', 'nodeId', 'source', 'target', 'parentId', 'nextAction', 'pauseReason', 'resumeWhen') if key in data}}
+                              ('id', 'title', 'kind', 'status', 'nodeId', 'source', 'target', 'parentId', 'isContainer', 'collapsed', 'nextAction', 'pauseReason', 'resumeWhen') if key in data}}
                     for field, limit in (('summary', 512), ('conclusion', 512)):
                         if isinstance(data.get(field), str):
                             detail[field] = data[field][:limit]
@@ -533,7 +537,7 @@ def local_context(outbox, client, project_id, node_id=None):
                     if isinstance(data.get('notes'), str):
                         detail.update({'notes': data['notes'], 'hasNotes': bool(data['notes'])})
                     if operation['op'] in ('node.add', 'node.update', 'node.ensure') and isinstance(data.get('id'), str):
-                        fields = ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'notes', 'importance', 'importanceReason', 'nextAction', 'pauseReason', 'resumeWhen')
+                        fields = ('id', 'title', 'kind', 'status', 'parentId', 'isContainer', 'collapsed', 'summary', 'conclusion', 'notes', 'importance', 'importanceReason', 'nextAction', 'pauseReason', 'resumeWhen')
                         node_updates.append(((task.get('capturedAt') or task.get('startedAt') or '', path.name, index),
                                              operation['op'], {key: data[key] for key in fields if key in data}))
                     record['operations'].append(detail)
@@ -565,7 +569,7 @@ def local_context(outbox, client, project_id, node_id=None):
     for key, node in nodes.items():
         if node_id and key not in scoped:
             continue
-        detail = {field: node[field] for field in ('id', 'title', 'kind', 'status', 'parentId', 'nextAction', 'pauseReason', 'resumeWhen') if field in node}
+        detail = {field: node[field] for field in ('id', 'title', 'kind', 'status', 'parentId', 'isContainer', 'collapsed', 'nextAction', 'pauseReason', 'resumeWhen') if field in node}
         for field in ('summary', 'conclusion'):
             if isinstance(node.get(field), str):
                 detail[field] = node[field][:512]
@@ -982,6 +986,8 @@ def record(client, args):
               'notes': notes, 'notesFile': args.notes_file,
               'metrics': metrics, 'hasMetrics': args.metrics_file is not None and metrics_warning is None,
               'metricsFile': args.metrics_file}
+    if args.container:
+        intent['container'] = True
     path, task = task_identity(client, args, intent)
     # Missing/unreadable source text must not prevent a stable request from
     # returning or delivering its existing frozen analysis. New work still fails.
@@ -1009,14 +1015,21 @@ def record(client, args):
             node['notes'] = notes
         if args.kind is not None:
             node['kind'] = args.kind
-        for option, field in (('summary', 'summary'), ('parent', 'parentId'), ('status', 'status'), ('importance', 'importance'), ('importance_reason', 'importanceReason')):
+        for option, field in (('summary', 'summary'), ('status', 'status'), ('importance', 'importance'), ('importance_reason', 'importanceReason')):
             if getattr(args, option) is not None:
                 node[field] = getattr(args, option)
         if not args.node:
             node.setdefault('status', 'active')
             node.setdefault('kind', 'finding')
             node['createdAt'] = at
-        task['operations'] = [{'op': 'node.update' if args.node else 'node.add', 'data': node}]
+        parent = parent_reference(client, path.parent, args.project, args.parent, exclude=path, child_id=node['id'])
+        if parent and parent['id'] == node['id']:
+            raise ClientError('A research node cannot contain itself.')
+        if parent:
+            node['parentId'] = parent['id']
+        if args.container:
+            node['isContainer'] = True
+        task['operations'] = parent_operations(parent) + [{'op': 'node.update' if args.node else 'node.add', 'data': node}]
         capture_relationship(client, args, path, task)
         if intent['hasMetrics']:
             task['operations'].append({'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
@@ -1087,6 +1100,33 @@ def exact_reference(nodes, value):
     return matches[0] if matches else None
 
 
+def parent_reference(client, outbox, project_id, value, exclude=None, child_id=None):
+    if value is None:
+        return None
+    nodes = semantic_nodes(client, outbox, project_id, exclude=exclude)
+    parent = exact_reference(nodes, value)
+    if parent is None and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value):
+        # Explicit identifiers retain the established offline reference contract:
+        # validation at delivery may find a node absent from this local snapshot.
+        return {'id': value}
+    if parent is None:
+        raise ClientError('Parent was not found in retained local records or dated context: ' + value
+                          + '. Read context or record the parent before nesting work.')
+    by_id = {node['id']: node for node in nodes}
+    ancestor, seen = parent['id'], set()
+    while ancestor and ancestor not in seen:
+        if ancestor == child_id:
+            raise ClientError('Containment would create a cycle; choose another parent.')
+        seen.add(ancestor)
+        ancestor = by_id.get(ancestor, {}).get('parentId')
+    return parent
+
+
+def parent_operations(parent):
+    return ([{'op': 'node.update', 'data': {'id': parent['id'], 'isContainer': True}}]
+            if parent and not parent.get('isContainer') else [])
+
+
 def semantic_question(client, outbox, project_id, text, exclude=None):
     title = text.strip()
     if not title:
@@ -1097,8 +1137,16 @@ def semantic_question(client, outbox, project_id, text, exclude=None):
         key = hashlib.sha256(json.dumps([client.url, project_id, title], ensure_ascii=False).encode('utf-8')).hexdigest()[:32]
         existing = {'id': 'question-' + key, 'title': title}
     question = {'id': existing['id'], 'title': existing.get('title') or title}
-    question.update({field: existing[field] for field in ('nextAction', 'pauseReason', 'resumeWhen') if field in existing})
-    return question | {'kind': 'question', 'status': existing.get('status') or 'active'}, nodes
+    question.update({field: existing[field] for field in ('nextAction', 'pauseReason', 'resumeWhen', 'parentId', 'isContainer', 'collapsed')
+                     if field in existing and (existing[field] is not None or field == 'parentId')})
+    # Containment is structural: existing children establish ownership even
+    # when an older record has a stale false flag. Legacy groups default to
+    # containers unless deliberately disabled and without any children.
+    owns_children = any(node.get('parentId') == existing['id'] for node in nodes)
+    legacy_container = existing.get('kind') in ('group', 'container') and existing.get('isContainer') is not False
+    if existing.get('isContainer') or owns_children or legacy_container:
+        question['isContainer'] = True
+    return question | {'kind': existing.get('kind') or 'question', 'status': existing.get('status') or 'active'}, nodes
 
 
 def event(client, args):
@@ -1121,6 +1169,10 @@ def event(client, args):
               'metricsFile': args.metrics_file}
     if args.summarizes:
         intent['summarizes'] = args.summarizes
+    if args.container:
+        intent['container'] = True
+    if args.parent is not None:
+        intent['parent'] = args.parent
     path, task = task_identity(client, args, intent)
     if notes_error is not None and (not args.request_id or not path.is_file()):
         raise notes_error
@@ -1134,15 +1186,24 @@ def event(client, args):
         if notes_error is not None:
             raise notes_error
         question, nodes = semantic_question(client, path.parent, args.project, question_text, exclude=path)
+        parent = parent_reference(client, path.parent, args.project, args.parent, exclude=path, child_id=question['id'])
+        if parent and parent['id'] == question['id']:
+            raise ClientError('A research question cannot contain itself.')
+        if parent:
+            question['parentId'] = parent['id']
+        if args.container or parent:
+            question['isContainer'] = True
         if args.reason is not None:
             question['summary'] = args.reason
         task.update(questionId=question['id'], eventType=event_type or 'question', capturedAt=stamp(), status='recorded')
         if metrics_warning:
             task['recordingWarnings'].append(metrics_warning)
-        task['operations'] = [{'op': 'node.ensure', 'data': question}]
+        task['operations'] = parent_operations(parent) + [{'op': 'node.ensure', 'data': question}]
         if event_type:
             node = {'id': task['nodeId'], 'title': change, 'kind': event_type, 'status': 'completed',
                     'conclusion': change, 'createdAt': task['capturedAt']}
+            if question.get('isContainer'):
+                node['parentId'] = question['id']
             if args.reason is not None:
                 node['summary'] = args.reason
             if notes is not None:
@@ -1160,6 +1221,12 @@ def event(client, args):
         if event_type:
             node.update(importance)
         update = {'id': question['id'], **(importance if not event_type else {})}
+        if args.container or parent:
+            update['isContainer'] = True
+        if parent:
+            update['parentId'] = parent['id']
+        if args.reason is not None and question.get('isContainer'):
+            update['summary'] = args.reason
         for option, field in (('status', 'status'), ('next_action', 'nextAction'),
                               ('pause_reason', 'pauseReason'), ('resume_when', 'resumeWhen')):
             value = getattr(args, option)
@@ -1374,6 +1441,8 @@ def execute(client, args):
               'relation': args.relation, 'independent': args.independent}
     if args.question is not None:
         intent['question'] = args.question
+    if args.parent is not None:
+        intent['parent'] = args.parent
     path, task = task_identity(client, args, intent)
     with ExitStack() as stack:
         durable = True
@@ -1391,6 +1460,9 @@ def execute(client, args):
         if args.question is not None:
             question, _ = semantic_question(client, path.parent, args.project, args.question, exclude=path)
             task['nodeId'] = task['questionId'] = question['id']
+        parent = parent_reference(client, path.parent, args.project, args.parent, exclude=path, child_id=task['nodeId'])
+        if parent and parent['id'] == task['nodeId']:
+            raise ClientError('A research node cannot contain itself.')
         directory = Path(task['captureRoot']) / task['taskId']
         stdout = stderr = None
         try:
@@ -1433,6 +1505,9 @@ def execute(client, args):
             if task['status'] == 'cancelled':
                 node['pauseReason'] = 'Command interrupted'
             task['operations'].insert(0, {'op': 'node.add', 'data': node})
+        if parent:
+            task['operations'] = parent_operations(parent) + task['operations']
+            task['operations'].append({'op': 'node.update', 'data': {'id': task['nodeId'], 'parentId': parent['id']}})
         if question is None or args.after:
             capture_relationship(client, args, path, task)
         if durable:

@@ -1120,10 +1120,10 @@ class Store:
         def compact(records, fields):
             return [{key: record.get(key) for key in fields} for record in records]
         return {'projectId': p['id'], 'name': p['name'], 'revision': p['revision'], 'description': p['description'],
-                'nodes': [{**{k: n.get(k) for k in ('id', 'title', 'kind', 'status', 'parentId', 'summary', 'conclusion', 'nextAction', 'importance', 'importanceReason', 'pauseReason', 'resumeWhen')},
+                'nodes': [{**{k: n.get(k) for k in ('id', 'title', 'kind', 'status', 'parentId', 'isContainer', 'collapsed', 'summary', 'conclusion', 'nextAction', 'importance', 'importanceReason', 'pauseReason', 'resumeWhen')},
                            'hasNotes': bool(n.get('notes')),
                            **({'notes': n.get('notes', '')} if node_id else {})} for n in nodes],
-                'boundaryNodes': compact([n for n in p['nodes'] if n['id'] in boundary_ids], ('id', 'title', 'kind', 'status', 'importance')),
+                'boundaryNodes': compact([n for n in p['nodes'] if n['id'] in boundary_ids], ('id', 'title', 'kind', 'status', 'parentId', 'isContainer', 'collapsed', 'importance')),
                 'edges': edges,
                 'runs': [{k: r.get(k) for k in ('id', 'nodeId', 'title', 'status', 'metrics', 'artifactIds', 'origin')} for r in runs],
                 'assessments': compact(assessments, ('id', 'runId', 'rubric', 'metrics', 'conclusion', 'limitations', 'artifactIds', 'supersedes', 'createdAt')),

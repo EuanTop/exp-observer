@@ -445,7 +445,7 @@ export function CreateDialog({
               summary,
               parentId: commonParent,
               position,
-              collapsed: false,
+              collapsed: true,
             },
           },
           ...roots.map((n) => ({
@@ -465,14 +465,14 @@ export function CreateDialog({
               status: "proposed",
               parentId: parentId || null,
               position,
-              collapsed: false,
+              collapsed: true,
             },
           },
         ];
         if (parentId)
           ops.push({
             op: "node.update",
-            data: { id: parentId, collapsed: false },
+            data: { id: parentId, isContainer: true },
           });
         if (source)
           ops.push({

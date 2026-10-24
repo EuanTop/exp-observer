@@ -9,7 +9,7 @@ python3 <skill>/scripts/exp_observer.py event --project ID --question "Is the me
 
 `event --question TEXT` retains an active question; optional `--reason` supplies context. The question can be a retained ID or exact title from this directory, its ancestor queues or a previously fetched compact context. An unseen title receives a stable identity derived from URL, project and the title with surrounding whitespace removed. Internal whitespace and case remain significant; ambiguous titles require an existing ID. There is no approximate matching or lookup inferred from analysis prose.
 
-One optional `--finding TEXT`, `--correction TEXT` or `--direction TEXT` creates a separate ordinary node with that actual change as its title and conclusion. It is linked to the question by `has_finding`, `has_correction` or `has_direction`; these associations claim no scientific causality. Neither question nor event is wrapped in a parent container. Existing questions and earlier findings retain their metadata. Only an explicit `--status` changes question status. `--next-action`, `--pause-reason` and `--resume-when` update the question's `nextAction`, `pauseReason` and `resumeWhen`; omitted fields preserve their existing values. Supplied notes without a change update that question's native analysis. A final substantive finding can update these fields in the same invocation:
+One optional `--finding TEXT`, `--correction TEXT` or `--direction TEXT` creates a separate ordinary node with that actual change as its title and conclusion. It is linked to the question by `has_finding`, `has_correction` or `has_direction`; these associations claim no scientific causality. Without containment options, question and event retain the legacy root-level behavior. A question marked `--container` owns its later findings; an explicit `--parent TITLE_OR_ID` nests the question and makes it a container as well. The referenced parent is promoted to a container without changing its research type, in the same atomic batch. Existing questions and earlier findings retain their metadata. Only an explicit `--status` changes question status. `--next-action`, `--pause-reason` and `--resume-when` update the question's `nextAction`, `pauseReason` and `resumeWhen`; omitted fields preserve their existing values. Supplied notes without a change update that question's native analysis. A final substantive finding can update these fields in the same invocation:
 
 ```sh
 python3 <skill>/scripts/exp_observer.py event --project ID --question "Is the measurement boundary complete?" --finding "The remaining condition has no measurements yet" --status paused --next-action "Measure that condition" --pause-reason "This round's authorized budget is spent" --resume-when "Further measurement is authorized"
@@ -93,14 +93,14 @@ Node states describe work, rather than scientific truth:
 | `rejected` | Deliberately excluded from this study |
 | `failed` | Execution error prevented completion |
 
-Runs retain their own status. Execution failure is distinct from a research conclusion. Optional `importance` is independently `normal` (default) or `critical`, with `importanceReason` for its significance.
+Runs retain their own status. Execution failure is distinct from a research conclusion. Legacy importance fields remain readable for compatibility; the project overview now comes from the outermost hierarchy with containers closed.
 
 Example of parking started work while opening another direction, in one atomic batch:
 
 ```json
 [
   {"op":"node.update","data":{"id":"EXISTING-NODE","status":"paused","pauseReason":"A newly observed counterexample changes the next priority","resumeWhen":"After the counterexample is explained","nextAction":"Finish the remaining repeated measurements"}},
-  {"op":"node.add","data":{"id":"counterexample-review","title":"Explain the observed counterexample","status":"proposed","importance":"critical","importanceReason":"The retained result conflicts with the current conclusion"}},
+  {"op":"node.add","data":{"id":"counterexample-review","title":"Explain the observed counterexample","status":"proposed"}},
   {"op":"edge.add","data":{"id":"pivot-review","source":"EXISTING-NODE","target":"counterexample-review","relation":"leads_to","basis":"observed","label":"Investigate the retained conflicting output"}}
 ]
 ```
@@ -111,7 +111,7 @@ Operations:
 
 | Operation | Data |
 |---|---|
-| `node.add` | id?, title, kind?, status?, parentId?, summary?, conclusion?, notes?, nextAction?, importance?, importanceReason?, pauseReason?, resumeWhen?, tags? |
+| `node.add` | id?, title, kind?, status?, parentId?, isContainer?, collapsed?, summary?, conclusion?, notes?, nextAction?, importance?, importanceReason?, pauseReason?, resumeWhen?, tags? |
 | `node.ensure` | explicit id plus creation fields; existing ID or alias preserves all metadata |
 | `node.update` | id plus changed fields; omitted fields preserved |
 | `node.merge` | id, target; folds a leaf into existing work, preserving runs, evidence, observations and decisions; original metadata remains in history |
@@ -148,11 +148,13 @@ The example values above illustrate shape only; replace with actual results. Use
 
 HTTP routes and storage contract: see the repository's `docs/contract.md` when developing an adapter. Agent research generally needs only this reference and the client.
 
-## Node types and research spine
+## Node types and research hierarchy
 
-The suggested types are `question`, `experiment`, `finding`. `record --kind TYPE` also accepts domain-specific types. Parallel follow-up questions remain questions, with `branches` links; the legacy `--direction` event is optional, not a required research phase.
+The suggested types are `question`, `experiment`, `finding`; `record --kind TYPE` also accepts domain-specific types. Parallel follow-up questions remain questions, with explicit reasoning links; no required research phases are added.
 
-`event` and `record` accept `--importance normal|critical` and `--importance-reason TEXT`. An event marks its new finding, or the question if no finding is supplied. Omitted importance preserves existing values. Marking identifies the narrative needed to understand the central question, decisive evidence, changed judgments, current answer and material unresolved questions. It does not certify evidence quality.
+The outermost cards, with containers closed, form the main research story. `event --container` makes its question a container; `record --container` does so for any typed node. `event --parent TITLE_OR_ID` nests the question, marks it as a container and retains its findings/corrections inside it, including later calls. `record --parent TITLE_OR_ID` attaches that record. `execute --parent TITLE_OR_ID` attaches a new experiment; with `--question` or `--node` it moves the existing execution owner only when explicitly requested. A referenced parent becomes `isContainer:true` without changing `kind`.
+
+Parents resolve by exact retained ID or unique title from local ancestor queues and dated context, without extra online lookups. Missing or ambiguous parent titles fail clearly before execution; explicit unresolved IDs retain their identity pending ordinary server validation. The client does not invent ownership. Containment adds no causal edges. Keep a concise current `summary`/`conclusion` on the container via a deliberate `record --node ID` update. Nested subproblems may have their own containers, without another importance workflow. Omitted hierarchy options preserve legacy stable request fingerprints and existing frozen retries.
 
 ## Catalog recovery and collection diagnostics
 

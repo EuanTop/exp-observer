@@ -16,25 +16,26 @@ export function OutlineTree({
   onSelect: (id: string) => void;
   depth?: number;
 }) {
-  const [closed, setClosed] = useState<string[]>([]);
+  const [opened, setOpened] = useState<string[]>([]);
   return (
     <>
       {nodes
         .filter((n) => n.parentId === parentId)
         .map((n) => {
           const children = nodes.some((c) => c.parentId === n.id);
-          const Icon = isVisualContainer(n) ? Layers : kindIcon[n.kind] || Box;
+          const Icon =
+            children || isVisualContainer(n) ? Layers : kindIcon[n.kind] || Box;
           return (
             <div key={n.id}>
               <div
-                className={`tree-row ${selected === n.id ? "selected" : ""} ${n.importance === "critical" ? "is-critical" : ""}`}
+                className={`tree-row ${selected === n.id ? "selected" : ""}`}
                 style={{ paddingLeft: 12 + depth * 13 }}
               >
                 <button
                   className="tree-expand"
-                  aria-label={closed.includes(n.id) ? "展开路径" : "折叠路径"}
+                  aria-label={!opened.includes(n.id) ? "展开路径" : "折叠路径"}
                   onClick={() =>
-                    setClosed((p) =>
+                    setOpened((p) =>
                       p.includes(n.id)
                         ? p.filter((id) => id !== n.id)
                         : [...p, n.id],
@@ -42,7 +43,7 @@ export function OutlineTree({
                   }
                 >
                   {children ? (
-                    closed.includes(n.id) ? (
+                    !opened.includes(n.id) ? (
                       <ChevronRight size={11} />
                     ) : (
                       <ChevronDown size={11} />
@@ -57,7 +58,7 @@ export function OutlineTree({
                   <StatusMark status={n.status} className="tree-status" />
                 </button>
               </div>
-              {children && !closed.includes(n.id) && (
+              {children && opened.includes(n.id) && (
                 <OutlineTree
                   nodes={nodes}
                   parentId={n.id}

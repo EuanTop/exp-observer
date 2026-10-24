@@ -44,7 +44,17 @@ const project = (
   activity: [],
 });
 const canvas = (p: Project, scope: string | null = null) =>
-  toCanvas(p, scope, [], { onToggle() {}, onEnter() {} });
+  toCanvas(
+    p,
+    scope,
+    [],
+    { onToggle() {}, onEnter() {} },
+    {
+      expandedIds: new Set(
+        p.nodes.filter((n) => !n.collapsed).map((n) => n.id),
+      ),
+    },
+  );
 const boxes = (result: Awaited<ReturnType<typeof layoutCanvas>>) =>
   result.nodes.map((n) => ({
     id: n.id,

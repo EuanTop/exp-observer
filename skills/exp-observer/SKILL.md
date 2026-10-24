@@ -43,9 +43,17 @@ Retain different discoveries even when one script produced them. Repeat measurem
 
 As you finish, check only questions you actually worked on: mark resolved work completed; pause unresolved work you are no longer advancing and leave its next action; keep genuinely ongoing work active. A turn ending does not pause the whole experiment or unrelated questions.
 
-## Keep a readable research spine
+## Organize research by subproblem
 
-Use `--importance critical --importance-reason TEXT` on `event` or `record` when hiding other nodes would otherwise lose the research story. On `event`, it marks the finding when supplied, otherwise the question. Select the central question, decisive evidence or interpretation that changes the answer, the resulting decision/conclusion, and unresolved forks necessary to explain what remains. A routine command, failure or completed step is not automatically important. There is no quota; revise importance as the story develops. Read just the marked nodes in order: can another researcher understand the question, why the judgment changed, the current answer and what remains open?
+The project overview is the outermost research graph with containers closed; it is the main research story. No separate important-node selection is needed. Use a meaningful question as a container when its exploration needs its own space. `event --container` keeps that question's findings inside it. `--parent "Exact parent title/ID"` nests a question and makes both it and its parent containers, preserving their research types. Later calls reuse that ownership from local records or dated context. Keep container titles concise and its summary/conclusion current with `record --node ID --title "Question" --summary TEXT --conclusion TEXT`; do not create a second summary document.
+
+```sh
+python3 <skill>/scripts/exp_observer.py event --project ID --question "What affects confirmation time?" --container
+python3 <skill>/scripts/exp_observer.py event --project ID --question "Does backtracking explain the delay?" --parent "What affects confirmation time?" --reason "Check the observed navigation detours"
+python3 <skill>/scripts/exp_observer.py event --project ID --question "Does backtracking explain the delay?" --finding "Backtracking offsets part of the gain"
+```
+
+Containment expresses research ownership; `--after`, `--evidence` and `--summarizes` retain actual reasoning relationships separately. Independent work may stay at the outermost level. Add containers when useful, without grouping quotas or mandatory stages. `execute --parent "Question title/ID"` puts a new experiment inside that container; `execute --question "Question title/ID"` instead adds a run to the existing question without moving it. Parent titles must resolve exactly before a new command runs; explicit IDs remain subject to normal reference validation.
 
 ## Keep analysis in the experiment
 

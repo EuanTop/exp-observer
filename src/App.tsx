@@ -46,13 +46,14 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type RuntimeSnapshot } from "./api";
-import { researchSpine } from "./research-spine";
+import { BoundaryInspector } from "./components/BoundaryInspector";
 import {
   ancestry,
+  boundaryRelations,
+  isResearchContainer,
   descendants,
   kinds,
   isExecutionRun,
-  isVisualContainer,
   toCanvas,
   uid,
   type Artifact,
@@ -121,7 +122,8 @@ export default function App() {
     const saved = localStorage.getItem("exp-observer-motion");
     return saved === "on" || saved === "off" ? saved : "system";
   });
-  const [spineOnly, setSpineOnly] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [boundaryIds, setBoundaryIds] = useState<string[]>([]);
   const [runtime, setRuntime] = useState<RuntimeSnapshot | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasData>>([]),
     [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -208,6 +210,8 @@ export default function App() {
         setProject(p);
         setSelected([]);
         setScope(null);
+        setExpandedIds(new Set());
+        setBoundaryIds([]);
         setEdgeId(null);
         localStorage.setItem("exp-observer-project", id);
         setError("");
@@ -303,19 +307,31 @@ export default function App() {
     },
     [notify],
   );
-  const toggle = useCallback(
-    (id: string) => {
-      const n = pRef.current?.nodes.find((n) => n.id === id);
-      if (n)
-        void mutate([
-          { op: "node.update", data: { id, collapsed: !n.collapsed } },
-        ]);
-    },
-    [mutate],
-  );
+  useEffect(() => {
+    if (project && scope && !project.nodes.some((node) => node.id === scope)) {
+      setScope(null);
+      setExpandedIds(new Set());
+      setSelected([]);
+      setBoundaryIds([]);
+      setEdgeId(null);
+      setInspector(false);
+    }
+  }, [project, scope]);
+  const toggle = useCallback((id: string) => {
+    setExpandedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   const enter = useCallback(
     (id: string) => {
       setScope(id);
+      setExpandedIds(new Set());
+      setBoundaryIds([]);
+      setEdgeId(null);
+      setInspector(false);
       setSelected([]);
       setTimeout(
         () => flow.fitView({ padding: 0.22, duration: motionDuration(350) }),
@@ -326,6 +342,7 @@ export default function App() {
   );
   const inspectNode = useCallback((id: string, tab: NodeTab) => {
     setSelected([id]);
+    setBoundaryIds([]);
     setEdgeId(null);
     setInspectorTab(tab);
     setInspector(true);
@@ -337,7 +354,7 @@ export default function App() {
     if (!project) return;
     const canvas = toCanvas(
       {
-        ...(spineOnly ? researchSpine(project) : project),
+        ...project,
         runtimeActivity:
           runtime?.projectId === project.id ? runtime.active : [],
       },
@@ -348,6 +365,7 @@ export default function App() {
         onEnter: enter,
         onInspect: inspectNode,
       },
+      { expandedIds },
     );
     const measured = new Map<string, { width: number; height: number }>(
       (JSON.parse(measuredSizes) as [string, number, number][]).map(
@@ -369,7 +387,7 @@ export default function App() {
           })),
         );
         setEdges(arranged.edges);
-        const key = `${project.id}:${scope}:${spineOnly}`;
+        const key = `${project.id}:${scope}`;
         if (fittedLayout.current !== key) {
           fittedLayout.current = key;
           setTimeout(() => {
@@ -405,7 +423,7 @@ export default function App() {
     flow,
     notify,
     measuredSizes,
-    spineOnly,
+    expandedIds,
   ]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -448,18 +466,11 @@ export default function App() {
     setInspectorTab("overview");
     const n = project?.nodes.find((n) => n.id === id);
     if (!n) return;
-    const ancestors = ancestry(project!.nodes, n.id);
-    const hiddenAncestor = ancestors
-      .slice(0, -1)
-      .find((a) => isVisualContainer(a) && a.collapsed);
-    if (hiddenAncestor) {
-      setScope(n.parentId || null);
-      setSelected([n.id]);
-    } else {
-      if (scope && !descendants(project!.nodes, scope).includes(id))
-        setScope(n.parentId || null);
-      setSelected([id]);
-    }
+    // Search and outline navigation open the owning level directly.
+    setScope(n.parentId || null);
+    setExpandedIds(new Set());
+    setBoundaryIds([]);
+    setSelected([n.id]);
     setNodes((current) =>
       current.map((item) => ({ ...item, selected: item.id === id })),
     );
@@ -511,7 +522,7 @@ export default function App() {
       (n) =>
         !ancestry(p.nodes, n.id)
           .slice(0, -1)
-          .some((a) => movingIds.has(a.id) && isVisualContainer(a)),
+          .some((a) => movingIds.has(a.id) && isResearchContainer(p.nodes, a)),
     );
     const changes = new Map<string, Operation>();
     for (const root of roots) {
@@ -522,7 +533,9 @@ export default function App() {
         dy = pos.y - original.position.y;
       for (const id of [
         root.id,
-        ...(isVisualContainer(original) ? descendants(p.nodes, root.id) : []),
+        ...(isResearchContainer(p.nodes, original)
+          ? descendants(p.nodes, root.id)
+          : []),
       ]) {
         const existing = p.nodes.find((n) => n.id === id)!;
         const rendered = byId.get(id);
@@ -550,20 +563,22 @@ export default function App() {
     if (!project) return;
     try {
       const arranged = await layoutCanvas(
-        toCanvas(project, scope, selected, {
-          onToggle: toggle,
-          onEnter: enter,
-          onInspect: inspectNode,
-        }),
+        toCanvas(
+          project,
+          scope,
+          selected,
+          {
+            onToggle: toggle,
+            onEnter: enter,
+            onInspect: inspectNode,
+          },
+          { expandedIds },
+        ),
         { resetManual: true },
       );
       // Explicit relayout releases manual pins. Automatic view coordinates are
       // computed by the same ELK engine used on load and incoming updates.
-      const visibleScope = new Set(
-        scope
-          ? descendants(project.nodes, scope)
-          : project.nodes.map((n) => n.id),
-      );
+      const visibleScope = new Set(arranged.nodes.map((node) => node.id));
       const ops = project.nodes
         .filter((n) => visibleScope.has(n.id))
         .map((n) => ({
@@ -848,9 +863,7 @@ export default function App() {
                   : mainTabs.find((t) => t.id === view)?.label}
               </h1>
               {view === "graph" && (
-                <span className="toolbar-count">
-                  {spineOnly ? nodes.length : graphCount} 个节点
-                </span>
+                <span className="toolbar-count">{nodes.length} 个节点</span>
               )}
               {project?.id === "retrieval-demo" && (
                 <span className="origin-tag">模拟研究</span>
@@ -864,17 +877,31 @@ export default function App() {
                 )}
                 {view === "graph" && (
                   <>
-                    <button
-                      className={`button spine-toggle ${spineOnly ? "selected" : ""}`}
-                      aria-pressed={spineOnly}
-                      title="隐藏非脉络节点；折叠路径可点击展开"
-                      onClick={() => {
-                        setSpineOnly(!spineOnly);
-                        setScope(null);
-                      }}
-                    >
-                      {spineOnly ? "全部节点" : "只看脉络"}
-                    </button>
+                    {scope && boundaryRelations(project!, scope).length > 0 && (
+                      <button
+                        className="button"
+                        onClick={() => {
+                          setBoundaryIds(
+                            boundaryRelations(project!, scope).map(
+                              (edge) => edge.id,
+                            ),
+                          );
+                          setSelected([]);
+                          setEdgeId(null);
+                          setInspector(true);
+                        }}
+                      >
+                        边界关系 {boundaryRelations(project!, scope).length}
+                      </button>
+                    )}
+                    {expandedIds.size > 0 && (
+                      <button
+                        className="button"
+                        onClick={() => setExpandedIds(new Set())}
+                      >
+                        收起容器
+                      </button>
+                    )}
                     <IconButton
                       label="自动布局"
                       onClick={() => void layout()}
@@ -955,29 +982,32 @@ export default function App() {
                         onConnect={onConnect}
                         onSelectionChange={handleSelection}
                         onNodeClick={(_, n) => {
+                          setBoundaryIds([]);
                           setInspectorTab("overview");
                           setSelected([n.id]);
                           setEdgeId(null);
                           setInspector(true);
                         }}
                         onEdgeClick={(_, e) => {
-                          if (e.id.startsWith("spine:")) {
-                            setSpineOnly(false);
-                            return;
-                          }
-                          setEdgeId(e.id);
                           setSelected([]);
+                          if (e.data?.boundary) {
+                            setBoundaryIds(
+                              (e.data.originals as Project["edges"]).map(
+                                (edge) => edge.id,
+                              ),
+                            );
+                            setEdgeId(null);
+                          } else {
+                            setBoundaryIds([]);
+                            setEdgeId(e.id);
+                          }
                           setInspector(true);
                         }}
                         onPaneClick={() => {
                           setEdgeId(null);
                         }}
                         onNodeDoubleClick={(_, n) => {
-                          if (
-                            isVisualContainer(n.data.node) &&
-                            project.nodes.some((c) => c.parentId === n.id)
-                          )
-                            enter(n.id);
+                          if (n.data.container) enter(n.id);
                         }}
                         onNodeDragStart={() => {
                           dragging.current = true;
@@ -1003,6 +1033,7 @@ export default function App() {
                         panOnDrag={[1, 2]}
                         panOnScroll
                         zoomOnScroll={false}
+                        zoomOnDoubleClick={false}
                         deleteKeyCode={null}
                         colorMode={theme === "light" ? "light" : "dark"}
                         proOptions={{ hideAttribution: true }}
@@ -1036,6 +1067,10 @@ export default function App() {
                             <button
                               onClick={() => {
                                 setScope(null);
+                                setExpandedIds(new Set());
+                                setBoundaryIds([]);
+                                setInspector(false);
+                                setSelected([]);
                                 setTimeout(
                                   () =>
                                     flow.fitView({
@@ -1046,7 +1081,7 @@ export default function App() {
                                 );
                               }}
                             >
-                              全景
+                              研究脉络
                             </button>
                             {ancestry(project.nodes, scope).map((n) => (
                               <span key={n.id}>
@@ -1060,7 +1095,7 @@ export default function App() {
                         ) : (
                           <span className="canvas-label">
                             <span className="tiny-dot accent" />
-                            探索视图
+                            主脉络
                           </span>
                         )}
                       </div>
@@ -1131,7 +1166,20 @@ export default function App() {
                     </div>
                     {inspector && (
                       <aside className="inspector">
-                        {selectedNode ? (
+                        {boundaryIds.length > 0 ? (
+                          <BoundaryInspector
+                            project={project}
+                            edges={project.edges.filter((edge) =>
+                              boundaryIds.includes(edge.id),
+                            )}
+                            onSelect={selectNode}
+                            onClose={() => setInspector(false)}
+                            onEdit={(id) => {
+                              setBoundaryIds([]);
+                              setEdgeId(id);
+                            }}
+                          />
+                        ) : selectedNode ? (
                           <NodeInspector
                             key={selectedNode.id}
                             node={selectedNode}
@@ -1148,6 +1196,7 @@ export default function App() {
                                 parentId: selectedNode.parentId,
                               })
                             }
+                            onEnter={() => enter(selectedNode.id)}
                             onChild={() =>
                               setDialog({
                                 type: "node",
@@ -1301,6 +1350,13 @@ export default function App() {
           }}
           onNodeCreated={(id) => {
             setView("graph");
+            setScope(
+              pRef.current?.nodes.find((node) => node.id === id)?.parentId ||
+                null,
+            );
+            setExpandedIds(new Set());
+            setBoundaryIds([]);
+            setEdgeId(null);
             setSelected([id]);
             setInspector(true);
           }}

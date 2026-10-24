@@ -23,7 +23,11 @@ const elk = () =>
     ({ default: ELK }) => new ELK(),
   ));
 const relation = (edge: Edge) =>
-  String((edge.data?.original as { relation?: string })?.relation ?? "");
+  String(
+    edge.data?.layoutRelation ??
+      (edge.data?.original as { relation?: string })?.relation ??
+      "",
+  );
 const size = (node: Node) => ({
   width: Number(node.style?.width ?? 368),
   height:
@@ -51,12 +55,25 @@ export function layoutLinks(
   edges: Edge[],
 ): { links: Edge[]; hidden: Set<string> } {
   const known = new Set(ids);
-  const semantic = edges.filter(
-    (e) =>
-      relation(e) !== "recorded_after" &&
-      known.has(e.source) &&
-      known.has(e.target),
-  );
+  const semantic = edges
+    .filter(
+      (e) =>
+        relation(e) !== "recorded_after" &&
+        known.has(e.source) &&
+        known.has(e.target),
+    )
+    .map((edge) =>
+      relation(edge) === "revisits"
+        ? // A revisit points back to earlier work. Rank it in the forward direction,
+          // then reverse its route below; the retained research edge never changes.
+          {
+            ...edge,
+            source: edge.target,
+            target: edge.source,
+            data: { ...edge.data, layoutReversed: true },
+          }
+        : edge,
+    );
   const incoming = new Set(semantic.map((e) => e.target));
   const links = [...semantic];
   const hidden = new Set<string>();
@@ -245,6 +262,8 @@ async function compute(
         ...(section.bendPoints ?? []),
         section.endPoint,
       ].map(point);
+      if (links.find((link) => link.id === edge.id)?.data?.layoutReversed)
+        points.reverse();
       const label = edge.labels?.[0];
       const middle = points[Math.floor(points.length / 2)];
       routes.set(edge.id, {

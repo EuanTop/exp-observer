@@ -41,10 +41,7 @@ export type ResearchEdge = {
   relation: string;
   label?: string;
   basis?: string;
-  // View-only trace metadata; these are never stored as research relations.
-  spinePath?: string[];
-  spineEdges?: string[];
-  spineNodes?: string[];
+  runIds?: string[];
 };
 export type Run = {
   id: string;
@@ -261,6 +258,27 @@ export function visualParent(
   }
 }
 
+/** Parentage is ownership; every parent with children is a navigable container.
+ * Explicit empty containers are useful while a branch is still being opened. */
+export function isResearchContainer(
+  nodes: ResearchNode[],
+  node: ResearchNode,
+): boolean {
+  return (
+    isVisualContainer(node) || nodes.some((child) => child.parentId === node.id)
+  );
+}
+
+export function boundaryRelations(
+  project: Project,
+  scope: string,
+): ResearchEdge[] {
+  const inside = new Set([scope, ...descendants(project.nodes, scope)]);
+  return project.edges.filter(
+    (edge) => inside.has(edge.source) !== inside.has(edge.target),
+  );
+}
+
 export function toCanvas(
   project: Project,
   scope: string | null,
@@ -270,7 +288,18 @@ export function toCanvas(
     onEnter: (id: string) => void;
     onInspect?: (id: string, tab: NodeTab) => void;
   },
+  view: { expandedIds?: ReadonlySet<string> } = {},
 ): { nodes: Node<CanvasData>[]; edges: Edge[] } {
+  // Expansion is view state, independent of scientific records and other readers.
+  const original = project;
+  project = {
+    ...project,
+    nodes: project.nodes.map((node) => ({
+      ...node,
+      isContainer: isResearchContainer(project.nodes, node),
+      collapsed: !view.expandedIds?.has(node.id),
+    })),
+  };
   const byId = new Map(project.nodes.map((n) => [n.id, n]));
   const within = new Set(
     scope ? descendants(project.nodes, scope) : project.nodes.map((n) => n.id),
@@ -321,6 +350,7 @@ export function toCanvas(
         (r) => r.nodeId === n.id && isExecutionRun(r),
       );
       const d = size(n);
+      const memberIds = new Set([n.id, ...descendants(project.nodes, n.id)]);
       return {
         id: n.id,
         type: "research",
@@ -334,9 +364,12 @@ export function toCanvas(
         style: { width: d.w, height: d.h },
         zIndex: container && children.length && !n.collapsed ? 0 : 2,
         data: {
-          node: n,
+          node: original.nodes.find((node) => node.id === n.id)!,
           presentation: nodePresentation(project, n),
-          processing: isNodeProcessing(project, n),
+          processing: project.nodes.some(
+            (member) =>
+              memberIds.has(member.id) && isNodeProcessing(project, member),
+          ),
           children: children.length,
           container,
           runs: runs.length,
@@ -358,15 +391,43 @@ export function toCanvas(
     }
     return id;
   }
-  const dedup = new Set<string>();
+  // Collapse endpoints to their visible owner. Group parallel boundary links,
+  // retaining EVERY original relation for inspection rather than losing duplicates.
+  const groups = new Map<
+    string,
+    { source: string; target: string; originals: ResearchEdge[] }
+  >();
+  const resolved = project.edges.flatMap((edge) => {
+    const source = resolve(edge.source),
+      target = resolve(edge.target);
+    if (!source || !target || source === target) return [];
+    const boundary = source !== edge.source || target !== edge.target;
+    if (boundary && edge.relation === "recorded_after") return [];
+    return [{ edge, source, target, boundary }];
+  });
+  const boundaryPairs = new Set(
+    resolved
+      .filter((item) => item.boundary)
+      .map(({ source, target }) => JSON.stringify([source, target])),
+  );
+  for (const { edge, source, target } of resolved) {
+    const pair = JSON.stringify([source, target]);
+    const key = boundaryPairs.has(pair) ? pair : edge.id;
+    const group = groups.get(key) || { source, target, originals: [] };
+    group.originals.push(edge);
+    groups.set(key, group);
+  }
   const edges: Edge[] = [];
-  for (const e of project.edges) {
-    const source = resolve(e.source),
-      target = resolve(e.target);
-    if (!source || !target || source === target) continue;
-    const key = `${source}:${target}:${e.relation}`;
-    if (dedup.has(key)) continue;
-    dedup.add(key);
+  for (const { source, target, originals } of groups.values()) {
+    const e = originals[0];
+    const boundary = originals.some(
+      (edge) => edge.source !== source || edge.target !== target,
+    );
+    const mixed = new Set(originals.map((edge) => edge.relation)).size > 1;
+    const basis =
+      new Set(originals.map((edge) => edge.basis || "unknown")).size === 1
+        ? e.basis
+        : "unknown";
     const sourceNode = byId.get(source)!,
       targetNode = byId.get(target)!;
     const sourceSize = dimensions.get(source)!,
@@ -376,26 +437,28 @@ export function toCanvas(
       { ...targetNode.position, width: targetSize.w, height: targetSize.h },
     );
     edges.push({
-      id: e.id,
+      id: boundary ? `boundary:${e.id}` : e.id,
       source,
       target,
       type: "research",
       sourceHandle,
       targetHandle,
-      label:
-        e.relation === "recorded_after"
+      label: mixed
+        ? `关联 · ${originals.length}`
+        : e.relation === "recorded_after"
           ? ""
           : e.relation === "has_direction"
             ? relations[e.relation]
-            : e.label || relations[e.relation] || e.relation,
+            : (e.label || relations[e.relation] || e.relation) +
+              (originals.length > 1 ? ` · ${originals.length}` : ""),
       style: {
-        stroke: e.basis === "hypothesis" ? "#94a3b8" : "#71717a",
+        stroke: basis === "hypothesis" ? "#94a3b8" : "#71717a",
         strokeWidth: e.relation === "recorded_after" ? 1 : 1.4,
         opacity: e.relation === "recorded_after" ? 0.35 : 1,
         strokeDasharray:
           e.relation === "recorded_after"
             ? "3 6"
-            : e.basis === "hypothesis" || e.relation === "collapsed_path"
+            : basis === "hypothesis" || e.relation === "collapsed_path"
               ? "5 5"
               : undefined,
       },
@@ -411,10 +474,13 @@ export function toCanvas(
       },
       data: {
         original: e,
+        layoutRelation: mixed ? "related_to" : e.relation,
+        originals,
+        boundary,
         orderOnly: e.relation === "recorded_after",
         active:
-          isNodeProcessing(project, sourceNode) ||
-          isNodeProcessing(project, targetNode),
+          result.find((node) => node.id === source)?.data.processing ||
+          result.find((node) => node.id === target)?.data.processing,
       },
     });
   }

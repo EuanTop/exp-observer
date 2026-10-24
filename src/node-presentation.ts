@@ -41,10 +41,21 @@ export function nodePresentation(
         !replaced.has(assessment.id) &&
         text(assessment.conclusion),
     );
+  const latestFinding = [...(project.nodes ?? [])]
+    .reverse()
+    .find(
+      (child) =>
+        child.parentId === node.id &&
+        ["finding", "correction", "decision"].includes(child.kind) &&
+        child.status === "completed" &&
+        (text(child.conclusion) || text(child.title)),
+    );
   const conclusion =
     text(node.conclusion) ||
     text(decision?.conclusion) ||
-    text(assessment?.conclusion);
+    text(assessment?.conclusion) ||
+    text(latestFinding?.conclusion) ||
+    text(latestFinding?.title);
   // Show recorded prose, never manufacture a result from metrics or status.
   const paragraphs = text(node.notes).split(/\n\s*\n/);
   const notesPreview = (
@@ -65,7 +76,9 @@ export function nodePresentation(
       ? "决策"
       : text(assessment?.conclusion)
         ? `评估 · ${assessment!.rubric}`
-        : "";
+        : latestFinding
+          ? "最近发现"
+          : "";
   const distinctConclusion =
     conclusion !== summary && conclusion !== text(node.title) ? conclusion : "";
   const pauseReason = node.status === "paused" ? text(node.pauseReason) : "";

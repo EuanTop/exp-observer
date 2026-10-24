@@ -69,6 +69,140 @@ class SemanticEventTests(unittest.TestCase):
                 ((cwd or self.root) / '.exp-observer-runs' / 'outbox').glob('*.json')
                 if not path.name.startswith('project-')]
 
+    def test_offline_nested_questions_own_findings_and_frozen_retries_do_not_duplicate(self):
+        self.client.offline = True
+        _, outer = self.invoke('event', '--project', 'study', '--question', '总体研究', '--container')
+        args = ('event', '--project', 'study', '--question', '局地子问题', '--parent', '总体研究',
+                '--finding', '第一条真实发现', '--request-id', 'nested-first')
+        _, first = self.invoke(*args)
+        self.invoke(*args)
+        child = self.root / 'nested 研究'
+        child.mkdir()
+        _, second = self.invoke('event', '--project', 'study', '--question', '局地子问题',
+                                '--correction', '保留限制后的判断', cwd=child)
+        self.client.offline = False
+        self.invoke('sync', '--project', 'study')
+        self.invoke('sync', '--project', 'study', cwd=child)
+        p = self.project()
+        nodes = {n['id']: n for n in p['nodes']}
+        self.assertEqual(len(nodes), 4)
+        self.assertTrue(nodes[outer['nodeId']]['isContainer'])
+        self.assertTrue(nodes[first['questionId']]['isContainer'])
+        self.assertEqual(nodes[first['questionId']]['parentId'], outer['nodeId'])
+        self.assertEqual(nodes[first['nodeId']]['parentId'], first['questionId'])
+        self.assertEqual(nodes[second['nodeId']]['parentId'], first['questionId'])
+        self.assertEqual({e['relation'] for e in p['edges']}, {'has_finding', 'has_correction'})
+        before = self.project()
+        self.invoke(*args)
+        self.assertEqual(before, self.project())
+        with working_directory(child):
+            local = cli.local_context(self.root / '.exp-observer-runs/outbox', self.client, 'study')
+        self.assertTrue(next(n for n in local[3] if n['id'] == first['questionId'])['isContainer'])
+
+    def test_parent_titles_resolve_from_dated_context_preserving_custom_types(self):
+        self.store.batch('study', {'operations': [{'op': 'node.add', 'data': {
+            'id': 'typed-parent', 'title': '定制容器', 'kind': 'synthesis', 'collapsed': True}}]})
+        self.invoke('context', '--project', 'study')
+        self.client.offline = True
+        _, child = self.invoke('record', '--project', 'study', '--title', '内部观察',
+                               '--kind', 'ablation_note', '--parent', '定制容器', '--container', '--independent')
+        self.client.offline = False
+        self.invoke('sync', '--project', 'study')
+        p = self.project()
+        parent = next(n for n in p['nodes'] if n['id'] == 'typed-parent')
+        self.assertEqual(parent['kind'], 'synthesis')
+        self.assertTrue(parent['isContainer'])
+        self.assertTrue(parent['collapsed'])
+        observed = next(n for n in p['nodes'] if n['id'] == child['nodeId'])
+        self.assertEqual((observed['kind'], observed['parentId'], observed['isContainer']),
+                         ('ablation_note', 'typed-parent', True))
+        context_parent = next(n for n in self.store.context('study')['nodes'] if n['id'] == 'typed-parent')
+        self.assertTrue(context_parent['isContainer'])
+        self.assertTrue(context_parent['collapsed'])
+        self.invoke('context', '--project', 'study')
+        for path in self.root.joinpath('.exp-observer-runs/outbox').glob('*.json'):
+            if not path.name.startswith('project-'):
+                path.unlink()
+        _, finding = self.invoke('event', '--project', 'study', '--question', '定制容器', '--finding', '从缓存继续的发现')
+        nodes = {n['id']: n for n in self.project()['nodes']}
+        self.assertEqual(nodes[finding['nodeId']]['parentId'], 'typed-parent')
+        self.assertEqual(nodes['typed-parent']['kind'], 'synthesis')
+
+    def test_cached_legacy_groups_and_structural_parents_own_later_findings(self):
+        self.store.batch('study', {'operations': [
+            {'op': 'node.add', 'data': {'id': 'legacy-group', 'title': '旧分组', 'kind': 'group'}},
+            {'op': 'node.add', 'data': {'id': 'logical-parent', 'title': '已有内部实验的问题',
+                                      'kind': 'question', 'isContainer': False}},
+            {'op': 'node.add', 'data': {'id': 'retained-child', 'title': '已有实验',
+                                      'kind': 'experiment', 'parentId': 'logical-parent'}},
+            {'op': 'node.add', 'data': {'id': 'plain-question', 'title': '独立普通问题', 'kind': 'question'}},
+            {'op': 'node.add', 'data': {'id': 'disabled-group', 'title': '明确关闭的空分组',
+                                      'kind': 'group', 'isContainer': False}},
+        ]})
+        # No creation queues exist for these nodes: later calls have only a
+        # dated server context, just as a fresh conversation would.
+        self.invoke('context', '--project', 'study')
+        self.client.offline = True
+        results = []
+        for title in ('旧分组', '已有内部实验的问题', '独立普通问题', '明确关闭的空分组'):
+            args = ('event', '--project', 'study', '--question', title, '--finding', title + '的新发现',
+                    '--request-id', 'cached-' + title)
+            _, result = self.invoke(*args)
+            self.assertTrue(result['pending'])
+            self.invoke(*args)
+            results.append(result)
+        self.client.offline = False
+        self.invoke('sync', '--project', 'study')
+        nodes = {n['id']: n for n in self.project()['nodes']}
+        self.assertEqual(len(nodes), 9)
+        for result, owner in zip(results, ('legacy-group', 'logical-parent', None, None)):
+            self.assertEqual(nodes[result['nodeId']].get('parentId'), owner)
+        self.assertEqual(nodes['legacy-group']['kind'], 'group')
+        self.assertEqual(nodes['logical-parent']['kind'], 'question')
+        self.assertFalse(nodes['logical-parent']['isContainer'])  # No metadata rewrite is needed.
+        self.assertFalse(nodes['disabled-group']['isContainer'])
+        before = self.project()
+        self.invoke('event', '--project', 'study', '--question', '旧分组', '--finding', '旧分组的新发现',
+                    '--request-id', 'cached-旧分组')
+        self.assertEqual(before, self.project())
+
+    def test_execute_parent_is_explicit_and_retry_never_reruns(self):
+        _, parent = self.invoke('event', '--project', 'study', '--question', '所属子问题')
+        self.assertFalse({'parent', 'container'} & self.tasks()[0]['intent'].keys())
+        marker = self.root / '执行次数.txt'
+        script = "from pathlib import Path; p=Path('执行次数.txt'); p.write_text(p.read_text(encoding='utf-8')+'x' if p.exists() else 'x', encoding='utf-8')"
+        args = ('execute', '--project', 'study', '--title', '实际命令', '--parent', '所属子问题',
+                '--independent', '--request-id', 'nested-execution', '--', sys.executable, '-c', script)
+        _, result = self.invoke(*args)
+        self.invoke(*args)
+        self.assertEqual(marker.read_text(encoding='utf-8'), 'x')
+        node = next(n for n in self.project()['nodes'] if n['id'] == result['nodeId'])
+        self.assertEqual(node['parentId'], parent['nodeId'])
+        self.invoke('execute', '--project', 'study', '--question', '所属子问题', '--title', '复用问题',
+                    '--', sys.executable, '-c', 'print(42)')
+        retained = next(n for n in self.project()['nodes'] if n['id'] == parent['nodeId'])
+        self.assertFalse(retained.get('parentId'))
+        self.assertEqual(len(self.project()['nodes']), 2)
+        with patch.object(cli, 'run_command') as run:
+            with self.assertRaisesRegex(cli.ClientError, 'cycle'):
+                self.invoke('execute', '--project', 'study', '--question', '所属子问题',
+                            '--parent', result['nodeId'], '--title', '不能嵌套到自己的后代',
+                            '--', sys.executable, '-c', 'print(42)')
+            run.assert_not_called()
+
+    def test_unknown_and_ambiguous_parents_fail_before_commands_execute(self):
+        self.invoke('record', '--project', 'study', '--title', '重名父节点', '--independent')
+        self.invoke('record', '--project', 'study', '--title', '重名父节点', '--independent')
+        for title, message in [('不存在的父节点', 'Parent was not found'), ('重名父节点', 'ambiguous')]:
+            with self.subTest(title=title), patch.object(cli, 'run_command') as run:
+                with self.assertRaisesRegex(cli.ClientError, message):
+                    self.invoke('execute', '--project', 'study', '--title', '不能执行', '--parent', title,
+                                '--', sys.executable, '-c', 'print(42)')
+                run.assert_not_called()
+            with self.assertRaisesRegex(cli.ClientError, message):
+                self.invoke('event', '--project', 'study', '--question', '不能丢失归属', '--parent', title)
+        self.assertEqual(len(self.project()['nodes']), 2)
+
     def test_readable_catalog_metadata_survives_platform_reset_without_init(self):
         # This project was created outside the Skill: only context can preserve
         # its human name. Resuming does not require rerunning the old work.
