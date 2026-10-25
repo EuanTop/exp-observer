@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -38,19 +39,43 @@ def origin(url):
         return None
 
 
-def probe(url, *, allow_bind=True):
-    # Windows can defer a refused TCP connection beyond the HTTP deadline.
-    # A successful exclusive bind proves this local port has no listener, without
-    # waiting for the network stack. Close it immediately; the launch lock still
-    # coordinates actual startup. If binding is denied, use the health check.
-    if allow_bind and os.name == 'nt' and origin(url) is not None:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reserved:
-                reserved.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-                reserved.bind(('127.0.0.1', origin(url)))
-            return 'missing'
-        except OSError:
-            pass
+def windows_listener(port):
+    """Read the IPv4 listener table without reserving or connecting a port.
+
+    GetExtendedTcpTable / MIB_TCPROW_OWNER_PID (six DWORD fields):
+    https://learn.microsoft.com/windows/win32/api/iphlpapi/nf-iphlpapi-getextendedtcptable
+    Unknown API results fall back to the normal HTTP identity check.
+    """
+    try:
+        import ctypes
+        get_table = ctypes.WinDLL('iphlpapi').GetExtendedTcpTable
+        get_table.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32),
+                              ctypes.c_int, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        get_table.restype = ctypes.c_uint32
+        length = ctypes.c_uint32(0)
+        buffer = None
+        for _ in range(3):
+            result = get_table(buffer, ctypes.byref(length), 0, socket.AF_INET, 3, 0)
+            if result == 122 and 4 <= length.value <= 8 * 1024 * 1024:
+                buffer = ctypes.create_string_buffer(length.value)
+                continue
+            if result or buffer is None or length.value < 4:
+                return None
+            data = buffer.raw[:length.value]
+            count = struct.unpack_from('<I', data)[0]
+            if count > (len(data) - 4) // 24:
+                return None
+            return any(state == 2 and address in (0, 0x0100007f) and socket.ntohs(local & 0xffff) == port
+                       for state, address, local, _, _, _ in struct.iter_unpack('<6I', data[4:4+24*count]))
+    except (OSError, AttributeError, ValueError, struct.error):
+        return None
+
+
+def probe(url):
+    # A refused Windows connection can exceed a short HTTP deadline. Query the
+    # OS listener table instead of binding the port our child will need.
+    if os.name == 'nt' and origin(url) is not None and windows_listener(origin(url)) is False:
+        return 'missing'
     # Bypass proxy settings for a local service; do not follow redirects to a
     # different destination or mistake another listener for this application.
     class NoRedirect(HTTPRedirectHandler):
@@ -225,9 +250,7 @@ def ensure_platform(url, workspace, state, *, provision=False):
     status_path = state / ('launch-' + str(port) + '.json')
     previous = read_json(status_path)
     launching = previous.get('state') in ('starting', 'provisioning') and time.time() - previous.get('at', 0) < 30
-    # Binding is useful to detect a stopped Windows service, but it must never
-    # compete with a platform child that is about to bind this same port.
-    health = probe(url, allow_bind=not launching)
+    health = probe(url)
     if health != 'missing':
         return {'state': health}
     if launching:
@@ -269,7 +292,7 @@ def ensure_platform(url, workspace, state, *, provision=False):
             write_json(status_path, value)
             deadline = time.monotonic() + 2
             while time.monotonic() < deadline and process.poll() is None:
-                if probe(url, allow_bind=False) == 'ready':
+                if probe(url) == 'ready':
                     value['state'] = 'ready'; break
                 time.sleep(.05)
             write_json(status_path, value)

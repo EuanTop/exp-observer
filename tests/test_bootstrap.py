@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,52 @@ from backend.store import Store
 SPEC = importlib.util.spec_from_file_location('observer_bootstrap', ROOT/'skills/exp-observer/scripts/bootstrap.py')
 bootstrap = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bootstrap)
+
+
+class WindowsListenerTests(unittest.TestCase):
+    def table(self, rows, count=None):
+        import ctypes
+        data = struct.pack('<I', len(rows) if count is None else count) + b''.join(struct.pack('<6I', *row) for row in rows)
+        def get_table(buffer, length, ordered, family, table_class, reserved):
+            self.assertEqual((family, table_class, reserved), (socket.AF_INET, 3, 0))
+            ctypes.cast(length, ctypes.POINTER(ctypes.c_uint32)).contents.value = len(data)
+            if buffer is None:
+                return 122
+            ctypes.memmove(buffer, data, len(data))
+            return 0
+        return type('IPHelper', (), {'GetExtendedTcpTable': staticmethod(get_table)})()
+
+    def test_listener_table_filters_address_state_and_network_ordered_port(self):
+        import ctypes
+        port = 4317
+        for row, expected in [
+            ((2, 0x0100007f, socket.htons(port), 0, 0, 123), True),
+            ((2, 0, socket.htons(port), 0, 0, 123), True),
+            ((11, 0x0100007f, socket.htons(port), 0, 0, 123), False),
+            ((2, 0x0100a8c0, socket.htons(port), 0, 0, 123), False),
+            ((2, 0x0100007f, socket.htons(port+1), 0, 0, 123), False),
+        ]:
+            with self.subTest(row=row), patch.object(ctypes, 'WinDLL', return_value=self.table([row]), create=True), \
+                 patch.object(bootstrap.socket, 'socket', side_effect=AssertionError('probe must not bind or connect')):
+                self.assertIs(bootstrap.windows_listener(port), expected)
+
+    def test_truncated_listener_table_remains_unknown(self):
+        import ctypes
+        with patch.object(ctypes, 'WinDLL', return_value=self.table([], count=1), create=True):
+            self.assertIsNone(bootstrap.windows_listener(4317))
+        with patch.object(ctypes, 'WinDLL', side_effect=OSError('unavailable'), create=True):
+            self.assertIsNone(bootstrap.windows_listener(4317))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows IP Helper native test')
+    def test_native_probe_distinguishes_listening_from_merely_bound_and_closed_ports(self):
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            port = listener.getsockname()[1]
+            self.assertIs(bootstrap.windows_listener(port), False)
+            listener.listen()
+            self.assertIs(bootstrap.windows_listener(port), True)
+        with patch.object(bootstrap.socket, 'socket', side_effect=AssertionError('must not reserve a port')):
+            self.assertEqual(bootstrap.probe(f'http://127.0.0.1:{port}'), 'missing')
 
 
 @unittest.skipUnless((ROOT/'dist/index.html').is_file() or os.environ.get('EXP_OBSERVER_RELEASE_ZIP'), 'Build the portable runtime first')
@@ -135,7 +182,7 @@ class BootstrapTests(unittest.TestCase):
             time.sleep(.05)
         diagnostics = '\n'.join(path.read_text(encoding='utf-8', errors='replace')[-8000:]
                                 for path in self.state.glob('*') if path.suffix in ('.log', '.json'))
-        self.assertEqual(len(projects), 4, diagnostics)
+        self.assertEqual(len(projects), 4, json.dumps(results, ensure_ascii=True)+'\n'+diagnostics)
         self.assertEqual(len(list((self.state/'runtime').iterdir())), 1)
 
     def test_known_installation_reuses_its_data_directory_without_a_bundle(self):
@@ -192,11 +239,10 @@ class BootstrapTests(unittest.TestCase):
                  patch.object(bootstrap, 'probe', return_value=health) as probe, \
                  patch.object(bootstrap, 'detached', side_effect=AssertionError('must not spawn')):
                 self.assertEqual(bootstrap.ensure_platform(self.url, self.workspace, self.state)['state'], expected)
-            probe.assert_called_once_with(self.url, allow_bind=False)
+            probe.assert_called_once_with(self.url)
 
     def test_child_readiness_checks_do_not_bind_the_port_the_child_needs(self):
-        # Model the child becoming ready on the second readiness check. Both
-        # checks must be HTTP-only; the initial stopped-service probes may bind.
+        # Model the child becoming ready on the second readiness check.
         state = self.root/'readiness-state'
         process = type('Child', (), {'pid':999999, 'poll':lambda self: None})()
         with patch.object(bootstrap, 'probe', side_effect=['missing', 'missing', 'unavailable', 'ready']) as probe, \
@@ -205,8 +251,7 @@ class BootstrapTests(unittest.TestCase):
              patch.object(bootstrap.time, 'sleep'):
             result = bootstrap.ensure_platform(self.url, self.workspace, state)
         self.assertEqual(result['state'], 'ready')
-        self.assertEqual([call.kwargs for call in probe.call_args_list],
-                         [{'allow_bind':True}, {}, {'allow_bind':False}, {'allow_bind':False}])
+        self.assertEqual(probe.call_count, 4)
 
     def test_source_only_skill_provisions_in_background_without_waiting_for_a_download(self):
         state = self.root/'source-only-state'
