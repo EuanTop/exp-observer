@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLocale } from "./i18n";
+
+beforeEach(() => setLocale("zh-CN"));
 import { isNodeProcessing, nodePresentation } from "./node-presentation";
 import { NODE_SIZE, toCanvas, type Project, type ResearchNode } from "./model";
 import { createElement } from "react";

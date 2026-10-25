@@ -16,9 +16,9 @@
   <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-![ExpObserver showing the main story of a real research study, with collapsed containers and paused follow-up questions](docs/screenshots/research-workspace.png)
+![ExpObserver's English interface showing a real agent research session, with nested questions, execution timing and measured usage](docs/screenshots/platform-workspace.en.png)
 
-<p align="center"><sub>A real exploratory study: follow the main story, then enter a container to inspect the work behind it.</sub></p>
+<p align="center"><sub>Follow a real agent research session. Open a question to inspect its experiments, evidence, and next steps.</sub></p>
 
 ## Research you can follow
 
@@ -29,15 +29,7 @@
 
 Your agent chooses the research approach. ExpObserver preserves how it develops, including negative results and unfinished questions. Records, revision history, and evidence stay on your computer.
 
-## A real study, in 28 minutes
-
-**Can a smartphone activity classifier stay reliable for a new person — with a smaller model?** An independent agent explored UCI HAR, trained small models locally, investigated a persistent failure, and left one causal question paused with a clear next step.
-
-![Measured results of four frozen models on unseen test participants](examples/har-study/evidence/test-results.png)
-
-The English case includes the research graph, measured usage, and six original evidence files. **272 inputs retained 96.06% test accuracy; a 128-input linear model reduced weights and biases to 3,096 bytes.**
-
-[Explore the English case and load it into ExpObserver →](examples/har-study/README.md)
+The workspace above comes from a real research session. [Open the same example →](examples/har-study/README.md)
 
 ## Quick start
 
@@ -61,12 +53,14 @@ Then give your agent a research task:
 
 The Skill can wake the installed platform when it is closed. Records queue locally if the service is unavailable.
 
+The interface defaults to **English**. Choose **简体中文** in the language selector; your choice is remembered. In compact windows, open **More tools** to find it.
+
 <details>
 <summary><strong>A closer look: explore a research step and reference it in your next conversation</strong></summary>
 
-![An English HAR research finding with its original analysis and the copy-reference action](docs/screenshots/har-study-details.png)
+![ExpObserver showing the original analysis of a selected node, with its evidence and copy-reference action](docs/screenshots/platform-details.en.png)
 
-Select a node and choose **复制引用** (Copy reference). Paste it into any agent chat and add your question. The reference carries the experiment and node identity, so the agent can read the latest context.
+Select a node and choose **Copy reference**. Paste it into any agent chat and add your question. The reference carries the experiment and node identity, so the agent can read the latest context.
 
 </details>
 

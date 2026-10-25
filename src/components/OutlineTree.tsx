@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { Box, ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useState } from "react";
 import { isVisualContainer, type ResearchNode } from "../model";
@@ -16,6 +17,7 @@ export function OutlineTree({
   onSelect: (id: string) => void;
   depth?: number;
 }) {
+  useLocale();
   const [opened, setOpened] = useState<string[]>([]);
   return (
     <>
@@ -33,7 +35,9 @@ export function OutlineTree({
               >
                 <button
                   className="tree-expand"
-                  aria-label={!opened.includes(n.id) ? "展开路径" : "折叠路径"}
+                  aria-label={
+                    !opened.includes(n.id) ? t("展开路径") : t("折叠路径")
+                  }
                   onClick={() =>
                     setOpened((p) =>
                       p.includes(n.id)

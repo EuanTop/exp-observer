@@ -1,3 +1,4 @@
+import { useLocale } from "../i18n";
 import {
   BaseEdge,
   useStore,
@@ -40,6 +41,7 @@ const equalBounds = (a: CardBounds[], b: CardBounds[]) =>
   });
 
 export function ResearchEdge(props: EdgeProps) {
+  useLocale();
   const cards = useStore(bounds, equalBounds);
   const source = cards.find((n) => n.id === props.source),
     target = cards.find((n) => n.id === props.target);

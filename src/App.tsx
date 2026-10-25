@@ -29,6 +29,7 @@ import {
   History,
   Layers,
   LayoutGrid,
+  Languages,
   Maximize2,
   Moon,
   MoreHorizontal,
@@ -47,6 +48,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t, useLocale } from "./i18n";
 import { api, ApiError, type AgentSetup, type RuntimeSnapshot } from "./api";
 import { nodeReference } from "./node-reference";
 import { BoundaryInspector } from "./components/BoundaryInspector";
@@ -98,6 +100,7 @@ const motionDuration = (duration: number) => {
 };
 
 export default function App() {
+  const { locale, setLocale } = useLocale();
   const [projects, setProjects] = useState<ProjectSummary[]>([]),
     [project, setProject] = useState<Project | null>(null),
     [loading, setLoading] = useState(true),
@@ -171,7 +174,7 @@ export default function App() {
     );
     try {
       await navigator.clipboard.writeText(text);
-      setToast("节点引用已复制，粘贴到 Agent 对话即可");
+      setToast(t("节点引用已复制，粘贴到 Agent 对话即可"));
     } catch {
       setReferenceFallback(text);
     }
@@ -270,7 +273,7 @@ export default function App() {
       });
   }, []);
   useEffect(() => {
-    const t = setInterval(async () => {
+    const pollTimer = setInterval(async () => {
       if (busyRef.current || dragging.current || document.hidden) return;
       try {
         const { projects: ps } = await api.list();
@@ -305,10 +308,10 @@ export default function App() {
         }
         setError("");
       } catch {
-        setError("连接中断，正在重连");
+        setError(t("连接中断，正在重连"));
       }
     }, 1800);
-    return () => clearInterval(t);
+    return () => clearInterval(pollTimer);
   }, [load]);
   const mutate = useCallback(
     async (operations: Operation[]) => {
@@ -328,7 +331,7 @@ export default function App() {
           const updated = await api.project(p.id);
           pRef.current = updated;
           setProject(updated);
-          notify("记录已被更新，请重试这次修改");
+          notify(t("记录已被更新，请重试这次修改"));
         } else notify((e as Error).message);
         return false;
       } finally {
@@ -439,7 +442,8 @@ export default function App() {
         }
       })
       .catch((e) => {
-        if (!cancelled) notify(`布局失败：${(e as Error).message}`);
+        if (!cancelled)
+          notify(t("布局失败：{value0}", { value0: (e as Error).message }));
       });
     return () => {
       cancelled = true;
@@ -455,6 +459,7 @@ export default function App() {
     notify,
     measuredSizes,
     expandedIds,
+    locale,
   ]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -633,7 +638,7 @@ export default function App() {
         );
       }
     } catch (e) {
-      notify(`布局失败：${(e as Error).message}`);
+      notify(t("布局失败：{value0}", { value0: (e as Error).message }));
     }
   };
   const exportProject = () => {
@@ -655,7 +660,7 @@ export default function App() {
       const p = await api.import(JSON.parse(await file.text()));
       setProjects((await api.list()).projects);
       await load(p.id);
-      notify("研究已导入");
+      notify(t("研究已导入"));
     } catch (e) {
       notify((e as Error).message);
     }
@@ -681,17 +686,17 @@ export default function App() {
     if (ops.length && (await mutate(ops))) {
       setSelected([]);
       setEdgeId(null);
-      notify("已移除，可从历史版本恢复");
+      notify(t("已移除，可从历史版本恢复"));
     }
   };
   const graphCount = project?.nodes.length || 0;
   const running =
     project?.runs.filter((r) => r.status === "running").length || 0;
   const mainTabs: { id: View; label: string; icon: typeof Network }[] = [
-    { id: "graph", label: "研究图", icon: Network },
-    { id: "runs", label: "运行", icon: FlaskConical },
-    { id: "compare", label: "对比", icon: LayoutGrid },
-    { id: "evidence", label: "证据", icon: Files },
+    { id: "graph", label: t("研究图"), icon: Network },
+    { id: "runs", label: t("运行"), icon: FlaskConical },
+    { id: "compare", label: t("对比"), icon: LayoutGrid },
+    { id: "evidence", label: t("证据"), icon: Files },
   ];
 
   return (
@@ -715,7 +720,7 @@ export default function App() {
               onClick={() => setProjectMenu(!projectMenu)}
             >
               <FolderOpen size={15} />
-              <span>{project?.name || "选择研究项目"}</span>
+              <span>{project?.name || t("选择研究项目")}</span>
               <ChevronDown size={13} />
             </button>
             {projectMenu && (
@@ -725,7 +730,7 @@ export default function App() {
                   onClick={() => setProjectMenu(false)}
                 />
                 <div className="dropdown project-dropdown">
-                  <div className="dropdown-caption">研究项目</div>
+                  <div className="dropdown-caption">{t("研究项目")}</div>
                   {projects.map((p) => (
                     <button
                       key={p.id}
@@ -747,7 +752,7 @@ export default function App() {
                     }}
                   >
                     <Plus size={15} />
-                    新建研究
+                    {t("新建研究")}
                   </button>
                   <button
                     onClick={() => {
@@ -756,13 +761,13 @@ export default function App() {
                     }}
                   >
                     <Upload size={15} />
-                    导入 JSON
+                    {t("导入 JSON")}
                   </button>
                 </div>
               </>
             )}
           </div>
-          <nav className="top-nav" aria-label="研究视图">
+          <nav className="top-nav" aria-label={t("研究视图")}>
             {mainTabs.map((t) => (
               <button
                 key={t.id}
@@ -782,19 +787,19 @@ export default function App() {
           <div className="topbar-right">
             <span className={`connection ${error ? "disconnected" : ""}`}>
               <span />
-              {error ? "重新连接" : busy ? "保存中" : "已保存至本地"}
+              {error ? t("重新连接") : busy ? t("保存中") : t("已保存至本地")}
             </span>
             <button
               className="search-trigger"
-              aria-label="搜索"
-              title="搜索"
+              aria-label={t("搜索")}
+              title={t("搜索")}
               onClick={() => {
                 setPalette(true);
                 setQuery("");
               }}
             >
               <Search size={14} />
-              <span>搜索</span>
+              <span>{t("搜索")}</span>
               <kbd>⌘ K</kbd>
             </button>
             <div
@@ -811,7 +816,7 @@ export default function App() {
             >
               <button
                 className="icon-button compact-tools-toggle"
-                aria-label="更多工具"
+                aria-label={t("更多工具")}
                 aria-expanded={headerToolsOpen}
                 aria-controls="header-tools"
                 onClick={() => setHeaderToolsOpen(!headerToolsOpen)}
@@ -825,8 +830,21 @@ export default function App() {
                 />
               )}
               <div className="topbar-tools-body" id="header-tools">
+                <label className="language-control" title={t("界面语言")}>
+                  <Languages size={15} aria-hidden="true" />
+                  <select
+                    aria-label={t("界面语言")}
+                    value={locale}
+                    onChange={(event) =>
+                      setLocale(event.target.value as "en" | "zh-CN")
+                    }
+                  >
+                    <option value="en">English</option>
+                    <option value="zh-CN">简体中文</option>
+                  </select>
+                </label>
                 <IconButton
-                  label="连接 Agent"
+                  label={t("连接 Agent")}
                   onClick={() => {
                     setHeaderToolsOpen(false);
                     setPalette(true);
@@ -834,31 +852,31 @@ export default function App() {
                   }}
                 >
                   <Terminal size={17} />
-                  <span className="header-tool-label">连接 Agent</span>
+                  <span className="header-tool-label">{t("连接 Agent")}</span>
                 </IconButton>
                 <IconButton
-                  label={theme === "dark" ? "浅色外观" : "深色外观"}
+                  label={theme === "dark" ? t("浅色外观") : t("深色外观")}
                   onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
                 >
                   {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
                   <span className="header-tool-label">
-                    {theme === "dark" ? "浅色外观" : "深色外观"}
+                    {theme === "dark" ? t("浅色外观") : t("深色外观")}
                   </span>
                 </IconButton>
-                <label className="motion-control" title="动画偏好">
+                <label className="motion-control" title={t("动画偏好")}>
                   <Activity size={14} aria-hidden="true" />
                   <select
-                    aria-label="动画偏好"
+                    aria-label={t("动画偏好")}
                     value={motion}
                     onChange={(e) => setMotion(e.target.value as Motion)}
                   >
-                    <option value="system">跟随系统</option>
-                    <option value="on">开启动画</option>
-                    <option value="off">关闭动画</option>
+                    <option value="system">{t("跟随系统")}</option>
+                    <option value="on">{t("开启动画")}</option>
+                    <option value="off">{t("关闭动画")}</option>
                   </select>
                 </label>
                 <IconButton
-                  label="导出研究 JSON"
+                  label={t("导出研究 JSON")}
                   onClick={() => {
                     setHeaderToolsOpen(false);
                     exportProject();
@@ -866,10 +884,12 @@ export default function App() {
                   disabled={!project}
                 >
                   <Download size={17} />
-                  <span className="header-tool-label">导出研究 JSON</span>
+                  <span className="header-tool-label">
+                    {t("导出研究 JSON")}
+                  </span>
                 </IconButton>
                 <IconButton
-                  label="版本历史"
+                  label={t("版本历史")}
                   onClick={() => {
                     setHeaderToolsOpen(false);
                     void openHistory();
@@ -877,7 +897,7 @@ export default function App() {
                   disabled={!project}
                 >
                   <History size={17} />
-                  <span className="header-tool-label">版本历史</span>
+                  <span className="header-tool-label">{t("版本历史")}</span>
                 </IconButton>
               </div>
             </div>
@@ -888,9 +908,13 @@ export default function App() {
             <aside className="outline">
               <div className="outline-heading">
                 <span>
-                  研究目录 <small>{graphCount}</small>
+                  {t("研究目录")}
+                  <small>{graphCount}</small>
                 </span>
-                <IconButton label="收起导航" onClick={() => setOutline(false)}>
+                <IconButton
+                  label={t("收起导航")}
+                  onClick={() => setOutline(false)}
+                >
                   <PanelLeftClose size={14} />
                 </IconButton>
               </div>
@@ -910,7 +934,7 @@ export default function App() {
                 }}
               >
                 <Network size={15} />
-                <span>研究全景</span>
+                <span>{t("研究全景")}</span>
                 <span className="count">{graphCount}</span>
               </button>
               <div className="outline-tree">
@@ -926,10 +950,14 @@ export default function App() {
               <div className="outline-footer">
                 <span className="tiny-dot accent" />
                 <span>
-                  {project?.runs.filter(isExecutionRun).length || 0} 次运行
+                  {t("{count} 次运行", {
+                    count: project?.runs.filter(isExecutionRun).length || 0,
+                  })}
                 </span>
                 <span className="outline-footer-right">
-                  {project?.artifacts.length || 0} 份证据
+                  {t("{count} 份证据", {
+                    count: project?.artifacts.length || 0,
+                  })}
                 </span>
               </div>
             </aside>
@@ -937,7 +965,7 @@ export default function App() {
           <main className="main-area">
             <div className="work-toolbar">
               <IconButton
-                label={outline ? "收起研究目录" : "展开研究目录"}
+                label={outline ? t("收起研究目录") : t("展开研究目录")}
                 onClick={() => setOutline(!outline)}
               >
                 <PanelLeftOpen size={16} />
@@ -948,16 +976,18 @@ export default function App() {
                   : mainTabs.find((t) => t.id === view)?.label}
               </h1>
               {view === "graph" && (
-                <span className="toolbar-count">{nodes.length} 个节点</span>
+                <span className="toolbar-count">
+                  {t("{count} 个节点", { count: nodes.length })}
+                </span>
               )}
               {project?.id === "retrieval-demo" && (
-                <span className="origin-tag">模拟研究</span>
+                <span className="origin-tag">{t("模拟研究")}</span>
               )}
               <div className="view-tab-right">
                 {running > 0 && (
                   <span className="live-indicator">
                     <span />
-                    {running} 个运行中
+                    {t("{count} 个运行中", { count: running })}
                   </span>
                 )}
                 {view === "graph" && (
@@ -965,12 +995,14 @@ export default function App() {
                     {selectedNode && (
                       <button
                         className="button"
-                        aria-label="复制引用"
-                        title="复制引用"
+                        aria-label={t("复制引用")}
+                        title={t("复制引用")}
                         onClick={() => void copyReference()}
                       >
                         <Copy size={14} />
-                        <span className="toolbar-action-label">复制引用</span>
+                        <span className="toolbar-action-label">
+                          {t("复制引用")}
+                        </span>
                         {selected.length > 1 ? ` · ${selected.length}` : ""}
                       </button>
                     )}
@@ -988,7 +1020,9 @@ export default function App() {
                           setInspector(true);
                         }}
                       >
-                        边界关系 {boundaryRelations(project!, scope).length}
+                        {t("边界关系 {count}", {
+                          count: boundaryRelations(project!, scope).length,
+                        })}
                       </button>
                     )}
                     {expandedIds.size > 0 && (
@@ -996,18 +1030,18 @@ export default function App() {
                         className="button"
                         onClick={() => setExpandedIds(new Set())}
                       >
-                        收起容器
+                        {t("收起容器")}
                       </button>
                     )}
                     <IconButton
-                      label="自动布局"
+                      label={t("自动布局")}
                       onClick={() => void layout()}
                       disabled={!project}
                     >
                       <LayoutGrid size={15} />
                     </IconButton>
                     <IconButton
-                      label="切换详情面板"
+                      label={t("切换详情面板")}
                       active={inspector}
                       onClick={() => setInspector(!inspector)}
                     >
@@ -1017,8 +1051,8 @@ export default function App() {
                 )}
                 <button
                   className="button primary compact-add"
-                  aria-label={project ? "添加节点" : "新建研究"}
-                  title={project ? "添加节点" : "新建研究"}
+                  aria-label={project ? t("添加节点") : t("新建研究")}
+                  title={project ? t("添加节点") : t("新建研究")}
                   onClick={() =>
                     setDialog(
                       project
@@ -1029,7 +1063,7 @@ export default function App() {
                 >
                   <Plus size={14} />
                   <span className="toolbar-action-label">
-                    {project ? "添加节点" : "新建研究"}
+                    {project ? t("添加节点") : t("新建研究")}
                   </span>
                 </button>
               </div>
@@ -1037,34 +1071,34 @@ export default function App() {
             {error && !project ? (
               <div className="empty-state">
                 <Network size={34} />
-                <h2>连接本地工作空间</h2>
+                <h2>{t("连接本地工作空间")}</h2>
                 <p>{error}</p>
                 <button className="button" onClick={() => location.reload()}>
                   <RefreshCw size={14} />
-                  重新连接
+                  {t("重新连接")}
                 </button>
               </div>
             ) : loading && !project ? (
               <div className="empty-state">
                 <span className="spinner" />
-                <p>正在打开研究…</p>
+                <p>{t("正在打开研究…")}</p>
               </div>
             ) : !project ? (
               <div className="empty-state">
                 <Network size={38} />
-                <h2>从一个问题开始</h2>
+                <h2>{t("从一个问题开始")}</h2>
                 <button
                   className="button primary"
                   onClick={() => setDialog({ type: "project" })}
                 >
                   <Plus size={15} />
-                  新建研究
+                  {t("新建研究")}
                 </button>
                 <button
                   className="text-button"
                   onClick={() => fileInput.current?.click()}
                 >
-                  导入已有研究
+                  {t("导入已有研究")}
                 </button>
               </div>
             ) : (
@@ -1138,7 +1172,7 @@ export default function App() {
                         deleteKeyCode={null}
                         colorMode={theme === "light" ? "light" : "dark"}
                         proOptions={{ hideAttribution: true }}
-                        aria-label="研究图画布"
+                        aria-label={t("研究图画布")}
                       >
                         <Background
                           variant={BackgroundVariant.Dots}
@@ -1182,7 +1216,7 @@ export default function App() {
                                 );
                               }}
                             >
-                              研究脉络
+                              {t("研究脉络")}
                             </button>
                             {ancestry(project.nodes, scope).map((n) => (
                               <span key={n.id}>
@@ -1196,27 +1230,27 @@ export default function App() {
                         ) : (
                           <span className="canvas-label">
                             <span className="tiny-dot accent" />
-                            主脉络
+                            {t("主脉络")}
                           </span>
                         )}
                       </div>
                       {!nodes.length && (
                         <div className="canvas-empty">
                           <Plus size={24} />
-                          <span>添加第一个研究节点</span>
+                          <span>{t("添加第一个研究节点")}</span>
                           <button
                             className="button"
                             onClick={() =>
                               setDialog({ type: "node", parentId: scope })
                             }
                           >
-                            添加节点
+                            {t("添加节点")}
                           </button>
                         </div>
                       )}
                       <div className="canvas-controls">
                         <IconButton
-                          label="放大"
+                          label={t("放大")}
                           onClick={() =>
                             flow.zoomIn({ duration: motionDuration(180) })
                           }
@@ -1224,7 +1258,7 @@ export default function App() {
                           <ZoomIn size={16} />
                         </IconButton>
                         <IconButton
-                          label="缩小"
+                          label={t("缩小")}
                           onClick={() =>
                             flow.zoomOut({ duration: motionDuration(180) })
                           }
@@ -1233,7 +1267,7 @@ export default function App() {
                         </IconButton>
                         <span className="control-divider" />
                         <IconButton
-                          label="适应画布 · F"
+                          label={t("适应画布 · F")}
                           onClick={() =>
                             flow.fitView({
                               padding: 0.2,
@@ -1249,7 +1283,7 @@ export default function App() {
                           onClick={() => setActivity(!activity)}
                         >
                           <Activity size={14} />
-                          动态
+                          {t("动态")}
                           {project.activity?.length > 0 && (
                             <span>{project.activity.length}</span>
                           )}
@@ -1257,10 +1291,14 @@ export default function App() {
                       </div>
                       {selected.length > 1 && (
                         <div className="selection-toolbar">
-                          <span>已选择 {selected.length} 个节点</span>
+                          <span>
+                            {t("已选择 {count} 个节点", {
+                              count: selected.length,
+                            })}
+                          </span>
                           <button onClick={() => setDialog({ type: "group" })}>
                             <Layers size={14} />
-                            放入容器
+                            {t("放入容器")}
                           </button>
                         </div>
                       )}
@@ -1358,10 +1396,10 @@ export default function App() {
                 <div className="drawer-heading">
                   <span>
                     <Activity size={14} />
-                    研究动态
+                    {t("研究动态")}
                   </span>
                   <IconButton
-                    label="关闭动态"
+                    label={t("关闭动态")}
                     onClick={() => setActivity(false)}
                   >
                     <X size={14} />
@@ -1381,20 +1419,20 @@ export default function App() {
                               ?.map(
                                 (o) =>
                                   ({
-                                    "node.add": "新增节点",
-                                    "node.update": "更新节点",
-                                    "run.add": "开始运行",
-                                    "run.update": "更新运行",
-                                    "run.event": "运行事件",
-                                    "assessment.add": "登记评估",
-                                    "edge.add": "连接节点",
-                                    "decision.add": "记录结论",
-                                    "project.update": "更新项目",
+                                    "node.add": t("新增节点"),
+                                    "node.update": t("更新节点"),
+                                    "run.add": t("开始运行"),
+                                    "run.update": t("更新运行"),
+                                    "run.event": t("运行事件"),
+                                    "assessment.add": t("登记评估"),
+                                    "edge.add": t("连接节点"),
+                                    "decision.add": t("记录结论"),
+                                    "project.update": t("更新项目"),
                                   })[o.op] || o.op,
                               )
                               .join(" · ") ||
                             a.type ||
-                            "研究已更新"}
+                            t("研究已更新")}
                         </span>
                       </div>
                     ))}
@@ -1406,10 +1444,12 @@ export default function App() {
                 <span className="tiny-dot accent" />
                 ExpObserver
               </span>
-              <span>{project ? `r${project.revision}` : "本地工作空间"}</span>
+              <span>
+                {project ? `r${project.revision}` : t("本地工作空间")}
+              </span>
               <div />
               <span className="statusbar-hint">
-                拖动平移 · Shift 框选 · F 适应画布
+                {t("拖动平移 · Shift 框选 · F 适应画布")}
               </span>
               <button
                 onClick={() => {
@@ -1418,7 +1458,7 @@ export default function App() {
                 }}
               >
                 <Terminal size={12} />
-                Agent 接入
+                {t("Agent 接入")}
                 <ArrowUpRight size={11} />
               </button>
             </footer>
@@ -1461,17 +1501,17 @@ export default function App() {
             }}
           >
             <div className="modal-heading">
-              <h2 id="reference-title">复制节点引用</h2>
+              <h2 id="reference-title">{t("复制节点引用")}</h2>
               <IconButton
-                label="关闭引用"
+                label={t("关闭引用")}
                 onClick={() => setReferenceFallback("")}
               >
                 <X size={16} />
               </IconButton>
             </div>
-            <p>自动复制未成功，请复制下方内容到 Agent 对话。</p>
+            <p>{t("自动复制未成功，请复制下方内容到 Agent 对话。")}</p>
             <textarea
-              aria-label="节点引用内容"
+              aria-label={t("节点引用内容")}
               readOnly
               autoFocus
               value={referenceFallback}
@@ -1485,7 +1525,7 @@ export default function App() {
                   ?.select();
               }}
             >
-              全选引用
+              {t("全选引用")}
             </button>
           </div>
         </div>
@@ -1534,7 +1574,7 @@ export default function App() {
               <Search size={18} />
               <input
                 autoFocus
-                placeholder="搜索节点、研究，或输入操作…"
+                placeholder={t("搜索节点、研究，或输入操作…")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -1553,7 +1593,8 @@ export default function App() {
                       }}
                     >
                       <Plus size={16} />
-                      添加研究节点<kbd>N</kbd>
+                      {t("添加研究节点")}
+                      <kbd>N</kbd>
                     </button>
                     <button
                       onClick={() => {
@@ -1562,13 +1603,13 @@ export default function App() {
                       }}
                     >
                       <FolderPlus size={16} />
-                      新建研究
+                      {t("新建研究")}
                     </button>
                     <button onClick={() => setQuery(">skill")}>
                       <Terminal size={16} />
-                      连接 Agent 与 Skill
+                      {t("连接 Agent 与 Skill")}
                     </button>
-                    <div className="dropdown-caption">研究节点</div>
+                    <div className="dropdown-caption">{t("研究节点")}</div>
                   </>
                 )}
                 {project?.nodes
@@ -1625,8 +1666,8 @@ export default function App() {
         >
           <div className="modal history-modal">
             <div className="modal-heading">
-              <h2>版本历史</h2>
-              <IconButton label="关闭" onClick={() => setHistory(null)}>
+              <h2>{t("版本历史")}</h2>
+              <IconButton label={t("关闭")} onClick={() => setHistory(null)}>
                 <X size={17} />
               </IconButton>
             </div>
@@ -1635,7 +1676,9 @@ export default function App() {
                 <div key={i}>
                   <History size={16} />
                   <div>
-                    <strong>版本 {h.revision}</strong>
+                    <strong>
+                      {t("版本 {revision}", { revision: h.revision })}
+                    </strong>
                     <span>
                       {date(h.at || h.updatedAt || h.createdAt)}
                       {h.message ? ` · ${h.message}` : ""}
@@ -1650,13 +1693,15 @@ export default function App() {
                         pRef.current = p;
                         setProject(p);
                         setHistory(null);
-                        notify("已恢复为新版本");
+                        notify(t("已恢复为新版本"));
                       } catch (e) {
                         notify((e as Error).message);
                       }
                     }}
                   >
-                    {h.revision === project.revision ? "当前版本" : "恢复"}
+                    {h.revision === project.revision
+                      ? t("当前版本")
+                      : t("恢复")}
                   </button>
                 </div>
               ))}

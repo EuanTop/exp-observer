@@ -2,9 +2,11 @@
 
 [← Overview](../README.md) · [简体中文](usage.zh-CN.md)
 
+The interface opens in English by default. Use **Interface language** in the header to switch to **简体中文**. In a compact window, the selector is inside **More tools**. Your choice persists across reloads. Research titles, notes and evidence remain in their recorded language.
+
 ## Work in the graph
 
-Select one or more nodes and choose **复制引用** (Copy reference) in the toolbar, or use the copy icon in node details. Paste the reference into an agent chat and add your question. It carries stable experiment/node IDs, the container path, a short snapshot and a scoped context command when setup information is available. The agent reads the latest record; the reference does not bind the experiment to that conversation.
+Select one or more nodes and choose **Copy reference** in the toolbar, or use the copy icon in node details. Paste the reference into an agent chat and add your question. It carries stable experiment/node IDs, the container path, a short snapshot and a scoped context command when setup information is available. The agent reads the latest record; the reference does not bind the experiment to that conversation.
 
 - **Compose research.** Any node kind can have child nodes. Ordinary parents remain cards; explicit containers frame nested work (`isContainer: true`, default for `group`). Collapse, expand, focus, group, move and connect them. Containment and research relationships are separate.
 - **Keep execution and interpretation together.** Runs retain configuration, events, metrics and outputs. Assessments and decisions link back to evidence; revised interpretations preserve earlier records.
@@ -20,9 +22,9 @@ An open question stays static. Flowing outlines indicate a locally observed comm
 
 `N` adds a node, `⌘/Ctrl K` opens search, `⌘/Ctrl G` groups selected nodes, and `F` fits the graph. Drag a node by its header. Shift-drag selects nodes; a trackpad or middle/right mouse button pans the canvas. Double-click a container to focus it.
 
-![Current comparison view preserving nested JSON metrics from two synthetic example runs](../docs/screenshots/comparison.png)
+![ExpObserver's English comparison view showing retained configurations and execution metrics](screenshots/platform-compare.en.png)
 
-*Compare configuration, nested metrics and assessments side by side. This screenshot uses synthetic demonstration data. For a measured example, see the [exact-search study](../examples/real-study/report.md).*
+*Inspect recorded configuration and execution metrics side by side. Research result comparisons can also include nested metrics and assessments. [Open this example workspace](../examples/har-study/README.md).*
 
 ## Give your agent the Skill
 

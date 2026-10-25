@@ -1,4 +1,5 @@
 import type { Artifact, Operation, Project, ProjectSummary } from "./model";
+import { t } from "./i18n";
 export type AgentSetup = {
   skillPath: string;
   clientPath: string;
@@ -49,7 +50,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       m = r.statusText;
     }
-    throw new ApiError(m || "请求失败", r.status);
+    throw new ApiError(m || t("请求失败"), r.status);
   }
   return r.json();
 }

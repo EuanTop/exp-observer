@@ -1,3 +1,4 @@
+import { t, useLocale, intlLocale } from "../i18n";
 import {
   CheckCircle2,
   Copy,
@@ -36,6 +37,7 @@ export function ArtifactDialog({
   project: Project;
   onClose: () => void;
 }) {
+  useLocale();
   const [content, setContent] = useState(""),
     [error, setError] = useState(""),
     [raw, setRaw] = useState(false),
@@ -72,7 +74,7 @@ export function ArtifactDialog({
           const source = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(String(reader.result));
-            reader.onerror = () => reject(new Error("图片读取失败"));
+            reader.onerror = () => reject(new Error(t("图片读取失败")));
             reader.readAsDataURL(new Blob([bytes], { type: a.mime }));
           });
           if (!controller.signal.aborted) setImageSource(source);
@@ -115,17 +117,17 @@ export function ArtifactDialog({
       <div className="evidence-modal">
         <div className="modal-heading">
           <div>
-            <span className="eyebrow">SOURCE EVIDENCE</span>
+            <span className="eyebrow">{t("来源证据")}</span>
             <h2>{a.title}</h2>
           </div>
-          <IconButton label="关闭证据" onClick={onClose}>
+          <IconButton label={t("关闭证据")} onClick={onClose}>
             <X size={18} />
           </IconButton>
         </div>
         <div className="evidence-meta">
           <span className={verified ? "verified" : ""}>
             <CheckCircle2 size={13} />
-            {verified ? "指纹一致" : error ? "无法校验" : "校验中"}
+            {verified ? t("指纹一致") : error ? t("无法校验") : t("校验中")}
           </span>
           <span>{a.bytes} bytes</span>
           <span>{a.mime}</span>
@@ -144,18 +146,18 @@ export function ArtifactDialog({
                 className={!raw ? "selected" : ""}
                 onClick={() => setRaw(false)}
               >
-                阅读视图
+                {t("阅读视图")}
               </button>
               <button
                 className={raw ? "selected" : ""}
                 onClick={() => setRaw(true)}
               >
-                原文
+                {t("原文")}
               </button>
             </>
           ) : (
             <span className="evidence-preview-label">
-              {imageLike ? "图片预览" : "文件信息"}
+              {imageLike ? t("图片预览") : t("文件信息")}
             </span>
           )}
           <a
@@ -168,24 +170,24 @@ export function ArtifactDialog({
             }}
           >
             <Download size={13} />
-            下载
+            {t("下载")}
           </a>
         </div>
         <div className={`evidence-content ${imageLike ? "image-preview" : ""}`}>
           {error ? (
             <div className="inline-error">{error}</div>
           ) : !verified ? (
-            <div className="small-empty">正在读取…</div>
+            <div className="small-empty">{t("正在读取…")}</div>
           ) : imageLike ? (
             <img
               className="evidence-image"
               src={imageSource}
               alt={a.title}
-              onError={() => setError("无法显示这张图片，可下载原文件查看")}
+              onError={() => setError(t("无法显示这张图片，可下载原文件查看"))}
             />
           ) : !textLike ? (
             <div className="small-empty">
-              {a.mime} · {a.bytes.toLocaleString()} bytes
+              {a.mime} · {a.bytes.toLocaleString(intlLocale())} bytes
             </div>
           ) : csv ? (
             <table>
@@ -217,19 +219,21 @@ export function ArtifactDialog({
               disabled={offset === 0}
               onClick={() => setOffset(Math.max(0, offset - pageSize))}
             >
-              上一段
+              {t("上一段")}
             </button>
             <span>
-              {offset.toLocaleString()}–
-              {Math.min(offset + pageSize, a.bytes).toLocaleString()} /{" "}
-              {a.bytes.toLocaleString()} bytes
+              {offset.toLocaleString(intlLocale())}–
+              {Math.min(offset + pageSize, a.bytes).toLocaleString(
+                intlLocale(),
+              )}{" "}
+              / {a.bytes.toLocaleString(intlLocale())} bytes
             </span>
             <button
               className="button subtle"
               disabled={offset + pageSize >= a.bytes}
               onClick={() => setOffset(offset + pageSize)}
             >
-              下一段
+              {t("下一段")}
             </button>
           </div>
         )}
@@ -245,6 +249,7 @@ export function SkillPanel({
   project: Project | null;
   notify: (m: string) => void;
 }) {
+  useLocale();
   const [setup, setSetup] = useState<AgentSetup | null>(null);
   const [setupError, setSetupError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -257,7 +262,7 @@ export function SkillPanel({
         if (current) setSetup(value);
       })
       .catch(() => {
-        if (current) setSetupError("无法读取 Agent 接入信息");
+        if (current) setSetupError(t("无法读取 Agent 接入信息"));
       });
     return () => {
       current = false;
@@ -270,18 +275,18 @@ export function SkillPanel({
       <div className="skill-panel-icon">
         <Terminal size={25} />
       </div>
-      <h2>让 Agent 接着探索</h2>
-      <p>复制指令到 Agent 对话，再补充你的研究任务。</p>
+      <h2>{t("让 Agent 接着探索")}</h2>
+      <p>{t("复制指令到 Agent 对话，再补充你的研究任务。")}</p>
       <WorkspaceEnrollment />
       <div
         className="skill-prompt"
         style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
       >
-        {prompt || setupError || "正在读取接入信息…"}
+        {prompt || setupError || t("正在读取接入信息…")}
       </div>
       {setupError && (
         <button className="button wide" onClick={() => setAttempt(attempt + 1)}>
-          重试
+          {t("重试")}
         </button>
       )}
       <button
@@ -290,20 +295,21 @@ export function SkillPanel({
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(prompt);
-            notify("接续指令已复制");
+            notify(t("接续指令已复制"));
           } catch {
-            notify("复制失败，请选中指令复制");
+            notify(t("复制失败，请选中指令复制"));
           }
         }}
       >
         <Copy size={14} />
-        复制接续指令
+        {t("复制接续指令")}
       </button>
       <details>
         <summary>
-          客户端命令{setup?.shell === "powershell" ? "（PowerShell）" : ""}
+          {t("客户端命令")}
+          {setup?.shell === "powershell" ? t("（PowerShell）") : ""}
         </summary>
-        <pre>{command || "正在读取…"}</pre>
+        <pre>{command || t("正在读取…")}</pre>
       </details>
     </div>
   );
@@ -330,6 +336,7 @@ export function CreateDialog({
   notify: (m: string) => void;
   flowCenter: () => { x: number; y: number };
 }) {
+  useLocale();
   const [title, setTitle] = useState(""),
     [summary, setSummary] = useState(""),
     [kind, setKind] = useState(
@@ -341,12 +348,12 @@ export function CreateDialog({
     [relation, setRelation] = useState("leads_to"),
     [saving, setSaving] = useState(false);
   const heading = {
-    project: "新建研究",
-    node: "添加节点",
-    branch: "探索新分支",
-    group: "创建容器",
-    artifact: "登记证据",
-    connect: "连接研究节点",
+    project: t("新建研究"),
+    node: t("添加节点"),
+    branch: t("探索新分支"),
+    group: t("创建容器"),
+    artifact: t("登记证据"),
+    connect: t("连接研究节点"),
   }[dialog.type];
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -364,7 +371,7 @@ export function CreateDialog({
           title: title || path.split(/[\\/]/).at(-1),
           nodeId: parentId || undefined,
         });
-        notify("证据已登记");
+        notify(t("证据已登记"));
         onClose();
         return;
       }
@@ -483,7 +490,7 @@ export function CreateDialog({
               target: id,
               relation: "branches",
               basis: "hypothesis",
-              label: summary ? "新方向" : "分支",
+              label: summary ? t("新方向") : t("分支"),
             },
           });
       }
@@ -507,7 +514,7 @@ export function CreateDialog({
       <form className="modal create-modal" onSubmit={submit}>
         <div className="modal-heading">
           <h2>{heading}</h2>
-          <IconButton label="关闭" onClick={onClose}>
+          <IconButton label={t("关闭")} onClick={onClose}>
             <X size={17} />
           </IconButton>
         </div>
@@ -515,13 +522,13 @@ export function CreateDialog({
           {dialog.type === "connect" ? (
             <>
               <label>
-                目标节点
+                {t("目标节点")}
                 <select
                   required
                   value={target}
                   onChange={(e) => setTarget(e.target.value)}
                 >
-                  <option value="">选择节点</option>
+                  <option value="">{t("选择节点")}</option>
                   {project?.nodes
                     .filter((n) => n.id !== dialog.source)
                     .map((n) => (
@@ -532,20 +539,20 @@ export function CreateDialog({
                 </select>
               </label>
               <label>
-                关系
+                {t("关系")}
                 <select
                   value={relation}
                   onChange={(e) => setRelation(e.target.value)}
                 >
                   {Object.entries(relations).map(([k, v]) => (
                     <option key={k} value={k}>
-                      {v}
+                      {t(v)}
                     </option>
                   ))}
                 </select>
               </label>
               <label>
-                说明
+                {t("说明")}
                 <input
                   value={summary}
                   onChange={(e) => setSummary(e.target.value)}
@@ -556,17 +563,17 @@ export function CreateDialog({
             <>
               <label>
                 {dialog.type === "project"
-                  ? "研究名称"
+                  ? t("研究名称")
                   : dialog.type === "group"
-                    ? "容器名称"
-                    : "名称"}
+                    ? t("容器名称")
+                    : t("名称")}
                 <input
                   autoFocus
                   required={dialog.type !== "artifact"}
                   placeholder={
                     dialog.type === "project"
-                      ? "你想探索什么？"
-                      : "给这个方向起个名字"
+                      ? t("你想探索什么？")
+                      : t("给这个方向起个名字")
                   }
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -575,7 +582,7 @@ export function CreateDialog({
               </label>
               {dialog.type === "artifact" ? (
                 <label>
-                  本地文件路径
+                  {t("本地文件路径")}
                   <input
                     required
                     placeholder="/path/to/results.json"
@@ -586,9 +593,11 @@ export function CreateDialog({
               ) : (
                 dialog.type !== "project" && (
                   <label>
-                    {dialog.type === "branch" ? "为什么尝试这个方向" : "摘要"}
+                    {dialog.type === "branch"
+                      ? t("为什么尝试这个方向")
+                      : t("摘要")}
                     <textarea
-                      placeholder="记录目标、假设或发现…"
+                      placeholder={t("记录目标、假设或发现…")}
                       value={summary}
                       onChange={(e) => setSummary(e.target.value)}
                     />
@@ -597,7 +606,7 @@ export function CreateDialog({
               )}
               {["node", "branch"].includes(dialog.type) && (
                 <label>
-                  节点类型
+                  {t("节点类型")}
                   <input
                     list="node-kinds"
                     value={kind}
@@ -611,7 +620,7 @@ export function CreateDialog({
                       )
                       .map(([k, v]) => (
                         <option key={k} value={k}>
-                          {v}
+                          {t(v)}
                         </option>
                       ))}
                   </datalist>
@@ -619,12 +628,12 @@ export function CreateDialog({
               )}
               {["node", "branch", "artifact"].includes(dialog.type) && (
                 <label>
-                  所属节点 / 容器
+                  {t("所属节点 / 容器")}
                   <select
                     value={parentId}
                     onChange={(e) => setParentId(e.target.value)}
                   >
-                    <option value="">项目根目录</option>
+                    <option value="">{t("项目根目录")}</option>
                     {project?.nodes.map((n) => (
                       <option key={n.id} value={n.id}>
                         {n.title}
@@ -638,10 +647,14 @@ export function CreateDialog({
         </div>
         <div className="form-actions">
           <button type="button" className="button subtle" onClick={onClose}>
-            取消
+            {t("取消")}
           </button>
           <button type="submit" className="button primary" disabled={saving}>
-            {saving ? "保存中…" : dialog.type === "artifact" ? "登记" : "创建"}
+            {saving
+              ? t("保存中…")
+              : dialog.type === "artifact"
+                ? t("登记")
+                : t("创建")}
           </button>
         </div>
       </form>

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useState } from "react";
 import { api, type UsageCollection as Collection } from "../api";
 
@@ -45,49 +46,51 @@ export function UsageCollection({ projectId }: { projectId: string }) {
   return (
     <details className="usage-collection">
       <summary>
-        Token 采集 ·{" "}
+        {t("Token 采集")} ·{" "}
         {failed
-          ? "状态暂不可用"
+          ? t("状态暂不可用")
           : snapshot?.adapters[0]
-            ? labels[snapshot.adapters[0].state] || "待检查"
+            ? t(labels[snapshot.adapters[0].state] || "待检查")
             : snapshot?.available === false
-              ? "服务未启用采集"
-              : "等待采集检查"}
+              ? t("服务未启用采集")
+              : t("等待采集检查")}
       </summary>
       {snapshot?.adapters.map((adapter) => (
         <div key={adapter.source}>
           <div className="observation-meta">
             {adapter.source === "codex-session"
-              ? "Codex 宿主日志"
+              ? t("Codex 宿主日志")
               : adapter.source}
           </div>
           <dl className="host-usage-values">
             <div>
-              <dt>关联记录</dt>
+              <dt>{t("关联记录")}</dt>
               <dd>{adapter.eligibleCaptures ?? "—"}</dd>
             </div>
             <div>
-              <dt>已读日志</dt>
+              <dt>{t("已读日志")}</dt>
               <dd>{adapter.readableLogs ?? "—"}</dd>
             </div>
             <div>
-              <dt>用量事件</dt>
+              <dt>{t("用量事件")}</dt>
               <dd>{adapter.nativeUsageRecords ?? "—"}</dd>
             </div>
             <div>
-              <dt>匹配回执</dt>
+              <dt>{t("匹配回执")}</dt>
               <dd>{adapter.matchedReceipts ?? "—"}</dd>
             </div>
             <div>
-              <dt>已采集</dt>
+              <dt>{t("已采集")}</dt>
               <dd>{adapter.collectedRecords ?? "—"}</dd>
             </div>
             <div>
-              <dt>节点未分配</dt>
+              <dt>{t("节点未分配")}</dt>
               <dd>{adapter.unassignedRecords ?? "—"}</dd>
             </div>
           </dl>
-          {adapter.message && <p className="usage-scope">{adapter.message}</p>}
+          {adapter.message && (
+            <p className="usage-scope">{t(adapter.message)}</p>
+          )}
         </div>
       ))}
     </details>

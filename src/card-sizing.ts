@@ -1,4 +1,5 @@
 import type { NodePresentation } from "./node-presentation";
+import { t } from "./i18n";
 
 // Initial geometry before ResizeObserver reports the actual rendered height.
 // CSS wraps the same content naturally; these estimates never fix card height.
@@ -27,11 +28,13 @@ export function estimateCardHeight(p: NodePresentation, width = 368): number {
   return Math.ceil(
     103 +
       lines(p.headline, 16, 3) * 24 +
-      (p.pauseReason ? 8 + lines(`暂停：${p.pauseReason}`, 12, 2) * 19.2 : 0) +
+      (p.pauseReason
+        ? 8 + lines(`${t("暂停：")}${p.pauseReason}`, 12, 2) * 19.2
+        : 0) +
       (p.resumeWhen || p.nextAction
         ? 6 +
           lines(
-            `${p.resumeWhen ? "恢复" : "下一步"}：${p.resumeWhen || p.nextAction}`,
+            `${t(p.resumeWhen ? "恢复：" : "下一步：")}${p.resumeWhen || p.nextAction}`,
             12,
             2,
           ) *
@@ -49,7 +52,7 @@ export function estimateCardHeight(p: NodePresentation, width = 368): number {
             19.2
         : 0) +
       (p.conclusion
-        ? 4 + lines(`${p.source || "结论"}：${p.conclusion}`, 12, 2) * 19.2
+        ? 4 + lines(`${p.source || t("结论")}: ${p.conclusion}`, 12, 2) * 19.2
         : 0),
   );
 }

@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLocale } from "./i18n";
+
+beforeEach(() => setLocale("zh-CN"));
 import { nodeReference } from "./node-reference";
 import type { AgentSetup } from "./api";
 import type { Project, ResearchNode } from "./model";

@@ -1,7 +1,9 @@
+import { t, useLocale } from "../i18n";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type ResearchWorkspace } from "../api";
 
 export function WorkspaceEnrollment() {
+  useLocale();
   const [workspaces, setWorkspaces] = useState<ResearchWorkspace[]>([]);
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
@@ -18,7 +20,10 @@ export function WorkspaceEnrollment() {
         if (current) setWorkspaces(result.workspaces);
       })
       .catch((reason: Error) => {
-        if (current) setError(`无法读取研究目录：${reason.message}`);
+        if (current)
+          setError(
+            t("无法读取研究目录：{message}", { message: reason.message }),
+          );
       })
       .finally(() => {
         if (current) setLoading(false);
@@ -36,7 +41,9 @@ export function WorkspaceEnrollment() {
       setWorkspaces((await api.addWorkspace(path.trim())).workspaces);
       setPath("");
     } catch (reason) {
-      setError(`无法添加目录：${(reason as Error).message}`);
+      setError(
+        t("无法添加目录：{message}", { message: (reason as Error).message }),
+      );
     } finally {
       setSaving(false);
     }
@@ -47,7 +54,9 @@ export function WorkspaceEnrollment() {
     try {
       setWorkspaces((await api.removeWorkspace(id)).workspaces);
     } catch (reason) {
-      setError(`无法移除目录：${(reason as Error).message}`);
+      setError(
+        t("无法移除目录：{message}", { message: (reason as Error).message }),
+      );
     } finally {
       setSaving(false);
     }
@@ -58,12 +67,14 @@ export function WorkspaceEnrollment() {
       aria-labelledby="workspace-heading"
       aria-busy={loading || saving}
     >
-      <h3 id="workspace-heading">研究目录</h3>
-      <p>添加后，应用会自动读取该目录下的本地记录，包括后续新增的子实验。</p>
+      <h3 id="workspace-heading">{t("研究文件夹")}</h3>
+      <p>
+        {t("添加后，应用会自动读取该目录下的本地记录，包括后续新增的子实验。")}
+      </p>
       <form onSubmit={(event) => void add(event)} className="workspace-form">
         <input
-          aria-label="研究目录路径"
-          placeholder="输入本地研究目录的完整路径"
+          aria-label={t("研究目录路径")}
+          placeholder={t("输入本地研究目录的完整路径")}
           value={path}
           onChange={(event) => setPath(event.target.value)}
           disabled={saving || loading}
@@ -73,7 +84,7 @@ export function WorkspaceEnrollment() {
           type="submit"
           disabled={saving || loading || !path.trim()}
         >
-          {saving ? "处理中…" : "添加"}
+          {saving ? t("处理中…") : t("添加")}
         </button>
       </form>
       {error && (
@@ -84,13 +95,13 @@ export function WorkspaceEnrollment() {
             onClick={() => setAttempt(attempt + 1)}
             disabled={saving}
           >
-            重试读取
+            {t("重试读取")}
           </button>
         </div>
       )}
       {loading ? (
         <div className="workspace-empty" role="status">
-          正在读取研究目录…
+          {t("正在读取研究目录…")}
         </div>
       ) : (
         <ul className="workspace-list">
@@ -101,20 +112,20 @@ export function WorkspaceEnrollment() {
                 type="button"
                 disabled={saving}
                 onClick={() => void remove(workspace.id)}
-                title="移除接入，保留目录和已有记录"
-                aria-label={`移除研究目录 ${workspace.path}`}
+                title={t("移除接入，保留目录和已有记录")}
+                aria-label={t("移除研究目录 {path}", { path: workspace.path })}
               >
-                移除
+                {t("移除")}
               </button>
             </li>
           ))}
           {!workspaces.length && !error && (
-            <li className="workspace-empty">尚未添加研究目录</li>
+            <li className="workspace-empty">{t("尚未添加研究目录")}</li>
           )}
         </ul>
       )}
       {!!workspaces.length && (
-        <small>移除仅停止接入，保留目录和已有记录。</small>
+        <small>{t("移除仅停止接入，保留目录和已有记录。")}</small>
       )}
     </section>
   );

@@ -19,6 +19,8 @@ FILES = (
     'docs/contract.md', 'docs/observation-test.md', 'docs/screenshots/research.png', 'docs/screenshots/comparison.png',
     'docs/usage.md', 'docs/usage.zh-CN.md', 'docs/screenshots/research-workspace.png', 'docs/screenshots/node-details.png',
     'docs/screenshots/har-study-details.png',
+    'docs/screenshots/platform-workspace.en.png', 'docs/screenshots/platform-details.en.png',
+    'docs/screenshots/platform-compare.en.png',
     'public/assets/app-icon.svg', 'public/assets/app-icon.png', 'public/assets/favicon.ico', 'public/assets/apple-touch-icon.png',
     'examples/real-study/report.md', 'examples/real-study/continuation-review.md', 'examples/real-study/study.py',
     'examples/har-study/README.md', 'examples/har-study/load_example.py', 'examples/har-study/verify_predictions.py',

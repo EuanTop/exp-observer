@@ -1,7 +1,16 @@
 import type { AgentSetup } from "./api";
+import { t } from "./i18n";
 
 export function agentPrompt(setup: AgentSetup, projectId?: string): string {
-  return `请读取 Skill：${setup.skillPath}\n服务：${setup.url}${projectId ? `\n实验 ID：${projectId}\n按我的研究任务推进，参考可用的实验 context。` : "\n按我的研究任务推进。"}`;
+  return projectId
+    ? t(
+        "请读取 Skill：{skill}\n服务：{url}\n实验 ID：{project}\n按我的研究任务推进，参考可用的实验 context。",
+        { skill: setup.skillPath, url: setup.url, project: projectId },
+      )
+    : t("请读取 Skill：{skill}\n服务：{url}\n按我的研究任务推进。", {
+        skill: setup.skillPath,
+        url: setup.url,
+      });
 }
 
 export function agentCommand(

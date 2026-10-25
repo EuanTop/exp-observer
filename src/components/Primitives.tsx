@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { statuses } from "../model";
+import { t, useLocale, intlLocale } from "../i18n";
 export const kindIcon: Record<string, typeof Target> = {
   goal: Target,
   question: Lightbulb,
@@ -28,14 +29,14 @@ export const kindIcon: Record<string, typeof Target> = {
 };
 export const time = (s?: string | null) =>
   s
-    ? new Date(s).toLocaleTimeString("zh-CN", {
+    ? new Date(s).toLocaleTimeString(intlLocale(), {
         hour: "2-digit",
         minute: "2-digit",
       })
     : "—";
 export const date = (s?: string | null) =>
   s
-    ? new Date(s).toLocaleString("zh-CN", {
+    ? new Date(s).toLocaleString(intlLocale(), {
         month: "2-digit",
         day: "2-digit",
         hour: "2-digit",
@@ -77,6 +78,7 @@ export function StatusMark({
   className?: string;
   decorative?: boolean;
 }) {
+  useLocale();
   const state = status;
   const ring = (
     <circle
@@ -96,7 +98,7 @@ export function StatusMark({
       height="14"
       className={`status-symbol status-${status} ${className}`}
       role={decorative ? undefined : "img"}
-      aria-label={decorative ? undefined : statuses[status] || status}
+      aria-label={decorative ? undefined : t(statuses[status] || status)}
       aria-hidden={decorative || undefined}
     >
       {state === "completed" ? (
@@ -171,10 +173,11 @@ export function StatusMark({
   );
 }
 export function Badge({ status }: { status: string }) {
+  useLocale();
   return (
     <span className={`status-badge status-${status}`}>
       <StatusMark status={status} decorative />
-      {statuses[status] || status}
+      {t(statuses[status] || status)}
     </span>
   );
 }

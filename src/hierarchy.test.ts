@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
+import { setLocale } from "./i18n";
+
+beforeEach(() => setLocale("zh-CN"));
 import {
   toCanvas,
   boundaryRelations,

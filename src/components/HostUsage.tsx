@@ -1,11 +1,12 @@
+import { t, intlLocale } from "../i18n";
 import { UsageCollection } from "./UsageCollection";
 import type { HostUsageRecord, Project } from "../model";
 import { getProjectHostUsage, formatUsageTime } from "../usage";
 
 const tokens = (value: number | null) =>
-  value === null ? "—" : value.toLocaleString("en-US");
+  value === null ? "—" : value.toLocaleString(intlLocale());
 const modelName = (model: string) =>
-  !model || model === "unknown" ? "未知模型" : model;
+  !model || model === "unknown" ? t("未知模型") : model;
 
 export function ProjectHostUsage({ project }: { project: Project }) {
   const usage = getProjectHostUsage(project);
@@ -13,8 +14,8 @@ export function ProjectHostUsage({ project }: { project: Project }) {
   return (
     <section className="project-host-usage">
       <div className="inspector-section-title">
-        <span>实测用量</span>
-        <span>{usage.recordCount} 条用量记录</span>
+        <span>{t("实测用量")}</span>
+        <span>{t("{count} 条用量记录", { count: usage.recordCount })}</span>
       </div>
       {usage.models.map((model) => (
         <div
@@ -25,24 +26,27 @@ export function ProjectHostUsage({ project }: { project: Project }) {
             <strong>{modelName(model.model)}</strong>
           </div>
           <div className="observation-meta">
-            {model.scope === "execution" ? "被测任务用量" : "研究 Agent 用量"} ·{" "}
-            {model.provider || "未知提供商"} · {model.recordCount} 条记录
+            {model.scope === "execution"
+              ? t("被测任务用量")
+              : t("研究 Agent 用量")}{" "}
+            · {model.provider || t("未知提供商")} ·{" "}
+            {t("{count} 条记录", { count: model.recordCount })}
           </div>
           <dl className="host-usage-values">
             <div>
-              <dt>输入 Token</dt>
+              <dt>{t("输入 Token")}</dt>
               <dd>{tokens(model.inputTokens)}</dd>
             </div>
             <div>
-              <dt>输出 Token</dt>
+              <dt>{t("输出 Token")}</dt>
               <dd>{tokens(model.outputTokens)}</dd>
             </div>
             <div>
-              <dt>缓存读取</dt>
+              <dt>{t("缓存读取")}</dt>
               <dd>{tokens(model.cacheReadTokens)}</dd>
             </div>
             <div>
-              <dt>缓存写入</dt>
+              <dt>{t("缓存写入")}</dt>
               <dd>{tokens(model.cacheWriteTokens)}</dd>
             </div>
           </dl>
@@ -50,12 +54,14 @@ export function ProjectHostUsage({ project }: { project: Project }) {
       ))}
       <UsageCollection projectId={project.id} />
       <p className="usage-scope">
-        保留宿主原始计数，缓存单列，不额外叠加到输入 Token。
+        {t("保留宿主原始计数，缓存单列，不额外叠加到输入 Token。")}
       </p>
 
       {usage.unassignedCount > 0 && (
         <p className="usage-scope">
-          {usage.unassignedCount} 条记录尚未归属节点，保留在对应口径中。
+          {t("{count} 条记录尚未归属节点，保留在对应口径中。", {
+            count: usage.unassignedCount,
+          })}
         </p>
       )}
     </section>
@@ -75,14 +81,16 @@ export function NodeHostUsage({ records }: { records: HostUsageRecord[] }) {
           <section key={scope}>
             <div className="inspector-section-title">
               <span>
-                {scope === "execution" ? "被测任务用量" : "研究 Agent 用量"}
+                {scope === "execution"
+                  ? t("被测任务用量")
+                  : t("研究 Agent 用量")}
               </span>
-              <span>{scoped.length} 条记录</span>
+              <span>{t("{count} 条记录", { count: scoped.length })}</span>
             </div>
             <p className="usage-scope">
               {scoped.some((r) => r.attribution === "recorded-work-window")
-                ? "宿主实测 · 按研究记录区间归属"
-                : "宿主实测 · 缓存单列"}
+                ? t("宿主实测 · 按研究记录区间归属")
+                : t("宿主实测 · 缓存单列")}
             </p>
             {scoped.map((record) => (
               <div className="observation-card" key={record.id}>
@@ -90,37 +98,52 @@ export function NodeHostUsage({ records }: { records: HostUsageRecord[] }) {
                   <strong>{modelName(record.model)}</strong>
                 </div>
                 <div className="observation-tokens">
-                  <span>输入 {tokens(record.inputTokens)}</span>
-                  <span>输出 {tokens(record.outputTokens)}</span>
+                  <span>
+                    {t("输入 {count}", { count: tokens(record.inputTokens) })}
+                  </span>
+                  <span>
+                    {t("输出 {count}", { count: tokens(record.outputTokens) })}
+                  </span>
                 </div>
                 <div className="observation-meta">
-                  <span>缓存读取 {tokens(record.cacheReadTokens)}</span>
-                  <span>缓存写入 {tokens(record.cacheWriteTokens)}</span>
+                  <span>
+                    {t("缓存读取 {count}", {
+                      count: tokens(record.cacheReadTokens),
+                    })}
+                  </span>
+                  <span>
+                    {t("缓存写入 {count}", {
+                      count: tokens(record.cacheWriteTokens),
+                    })}
+                  </span>
                 </div>
                 <div className="observation-meta">
                   {record.source === "codex-session" ? (
                     <span>
-                      记录时间 <time>{formatUsageTime(record.finishedAt)}</time>
+                      {t("记录时间")}{" "}
+                      <time>{formatUsageTime(record.finishedAt)}</time>
                     </span>
                   ) : (
                     <>
                       <span>
-                        开始 <time>{formatUsageTime(record.startedAt)}</time>
+                        {t("开始")}{" "}
+                        <time>{formatUsageTime(record.startedAt)}</time>
                       </span>
                       <span>
-                        结束 <time>{formatUsageTime(record.finishedAt)}</time>
+                        {t("结束")}{" "}
+                        <time>{formatUsageTime(record.finishedAt)}</time>
                       </span>
                     </>
                   )}
-                  <span>{record.provider || "未知提供商"}</span>
+                  <span>{record.provider || t("未知提供商")}</span>
                 </div>
                 <details>
-                  <summary>来源记录</summary>
+                  <summary>{t("来源记录")}</summary>
                   <p className="usage-scope">
                     {record.source === "codex-session"
-                      ? "Codex 宿主日志"
+                      ? t("Codex 宿主日志")
                       : record.source.startsWith("happy-sqlite:")
-                        ? "Happy 宿主"
+                        ? t("Happy 宿主")
                         : record.source}{" "}
                     · {record.sourceRef}
                   </p>

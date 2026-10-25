@@ -1,3 +1,4 @@
+import { t, intlLocale } from "./i18n";
 import {
   isExecutionRun,
   type HostUsageRecord,
@@ -101,13 +102,13 @@ function timestamp(value: unknown): number {
 export function formatUsageTime(value: string | null | undefined): string {
   const time = timestamp(value);
   return Number.isFinite(time)
-    ? new Date(time).toLocaleString("zh-CN", {
+    ? new Date(time).toLocaleString(intlLocale(), {
         month: "2-digit",
         day: "2-digit",
         hour: "2-digit",
         minute: "2-digit",
       })
-    : "未提供";
+    : t("未提供");
 }
 
 function intervalUnion(observations: Observation[]): number | null {

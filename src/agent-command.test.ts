@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLocale } from "./i18n";
+
+beforeEach(() => setLocale("zh-CN"));
 import { agentCommand, agentPrompt } from "./agent-command";
 import type { AgentSetup } from "./api";
 

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -53,9 +54,9 @@ export function ProjectInspector({
       <div className="inspector-heading">
         <span>
           <Target size={14} />
-          研究概览
+          {t("研究概览")}
         </span>
-        <IconButton label="关闭详情" onClick={onClose}>
+        <IconButton label={t("关闭详情")} onClick={onClose}>
           <X size={15} />
         </IconButton>
       </div>
@@ -65,20 +66,20 @@ export function ProjectInspector({
         <div className="project-stats">
           <div>
             <strong>{project.nodes.length}</strong>
-            <span>研究节点</span>
+            <span>{t("研究节点")}</span>
           </div>
           <div>
             <strong>{project.runs.filter(isExecutionRun).length}</strong>
-            <span>实验运行</span>
+            <span>{t("实验运行")}</span>
           </div>
           <div>
             <strong>{project.artifacts.length}</strong>
-            <span>原始证据</span>
+            <span>{t("原始证据")}</span>
           </div>
         </div>
         <ProjectHostUsage project={project} />
         <div className="inspector-section-title">
-          <span>开放问题与方向</span>
+          <span>{t("开放问题与方向")}</span>
           <span>{active.length}</span>
         </div>
         {active.map((n) => (
@@ -100,7 +101,7 @@ export function ProjectInspector({
         {decisions.length > 0 && (
           <>
             <div className="inspector-section-title">
-              <span>最近结论</span>
+              <span>{t("最近结论")}</span>
             </div>
             {decisions.slice(-2).map((d) => (
               <div className="finding-summary" key={d.id}>
@@ -119,12 +120,13 @@ export function ProjectInspector({
         )}
         <button className="button wide subtle" onClick={onAdd}>
           <Plus size={14} />
-          继续探索
+          {t("继续探索")}
         </button>
       </div>
       <div className="inspector-bottom">
         <span className="tiny-dot accent" />
-        记录持续保存在本地<span>r{project.revision}</span>
+        {t("记录持续保存在本地")}
+        <span>r{project.revision}</span>
       </div>
     </>
   );
@@ -209,16 +211,16 @@ export function NodeInspector({
       <div className="inspector-heading">
         <span>
           <Icon size={14} />
-          {kinds[node.kind] || node.kind}
+          {kinds[node.kind] ? t(kinds[node.kind]) : node.kind}
         </span>
         <div>
-          <IconButton label="复制节点引用" onClick={onCopyReference}>
+          <IconButton label={t("复制节点引用")} onClick={onCopyReference}>
             <Copy size={14} />
           </IconButton>
-          <IconButton label="新增子节点" onClick={onChild}>
+          <IconButton label={t("新增子节点")} onClick={onChild}>
             <Plus size={14} />
           </IconButton>
-          <IconButton label="关闭详情" onClick={onClose}>
+          <IconButton label={t("关闭详情")} onClick={onClose}>
             <X size={15} />
           </IconButton>
         </div>
@@ -235,7 +237,7 @@ export function NodeInspector({
             <h2>{node.title}</h2>
           )}
           <select
-            aria-label="节点状态"
+            aria-label={t("节点状态")}
             disabled={busy || editing}
             value={node.status}
             className={`status-select status-${node.status}`}
@@ -257,22 +259,23 @@ export function NodeInspector({
               "failed",
             ].map((s) => (
               <option key={s} value={s}>
-                {statuses[s]}
+                {t(statuses[s])}
               </option>
             ))}
           </select>
           {isResearchContainer(project.nodes, node) && (
             <button className="button" onClick={onEnter}>
-              进入容器 <ChevronRight size={13} />
+              {t("进入容器")}
+              <ChevronRight size={13} />
             </button>
           )}
         </div>
         <div className="detail-tabs">
           {[
-            ["overview", "概览"],
-            ["runs", `记录 ${runs.length}`],
-            ["evidence", `证据 ${relatedArtifacts.length}`],
-            ["usage", "用量"],
+            ["overview", t("概览")],
+            ["runs", t("记录 {count}", { count: runs.length })],
+            ["evidence", t("证据 {count}", { count: relatedArtifacts.length })],
+            ["usage", t("用量")],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -295,7 +298,7 @@ export function NodeInspector({
             {editing ? (
               <div className="edit-fields">
                 <label>
-                  显示方式
+                  {t("显示方式")}
                   <select
                     value={
                       children.length > 0 ||
@@ -311,15 +314,15 @@ export function NodeInspector({
                     }
                   >
                     <option value="node" disabled={children.length > 0}>
-                      普通节点
+                      {t("普通节点")}
                     </option>
-                    <option value="container">容器分组</option>
+                    <option value="container">{t("容器分组")}</option>
                   </select>
                 </label>
                 {node.status === "paused" && (
                   <>
                     <label>
-                      挂起原因
+                      {t("挂起原因")}
                       <textarea
                         value={draft.pauseReason || ""}
                         onChange={(e) =>
@@ -328,7 +331,7 @@ export function NodeInspector({
                       />
                     </label>
                     <label>
-                      恢复条件
+                      {t("恢复条件")}
                       <textarea
                         value={draft.resumeWhen || ""}
                         onChange={(e) =>
@@ -339,9 +342,9 @@ export function NodeInspector({
                   </>
                 )}
                 <label>
-                  结论
+                  {t("结论")}
                   <textarea
-                    placeholder="用一句话说明这一步发现了什么"
+                    placeholder={t("用一句话说明这一步发现了什么")}
                     value={draft.conclusion || ""}
                     onChange={(e) =>
                       setDraft({ ...draft, conclusion: e.target.value })
@@ -349,7 +352,7 @@ export function NodeInspector({
                   />
                 </label>
                 <label>
-                  摘要
+                  {t("摘要")}
                   <textarea
                     value={draft.summary}
                     onChange={(e) =>
@@ -358,7 +361,7 @@ export function NodeInspector({
                   />
                 </label>
                 <label>
-                  详细记录
+                  {t("详细记录")}
                   <textarea
                     rows={5}
                     value={draft.notes || ""}
@@ -368,7 +371,7 @@ export function NodeInspector({
                   />
                 </label>
                 <label>
-                  下一步
+                  {t("下一步")}
                   <textarea
                     value={draft.nextAction || ""}
                     onChange={(e) =>
@@ -377,14 +380,14 @@ export function NodeInspector({
                   />
                 </label>
                 <label>
-                  所属容器
+                  {t("所属容器")}
                   <select
                     value={draft.parentId || ""}
                     onChange={(e) =>
                       setDraft({ ...draft, parentId: e.target.value || null })
                     }
                   >
-                    <option value="">项目根目录</option>
+                    <option value="">{t("项目根目录")}</option>
                     {project.nodes
                       .filter(
                         (n) =>
@@ -403,14 +406,14 @@ export function NodeInspector({
                     className="button subtle"
                     onClick={() => setEditing(false)}
                   >
-                    取消
+                    {t("取消")}
                   </button>
                   <button
                     className="button primary"
                     disabled={busy}
                     onClick={() => void save()}
                   >
-                    保存
+                    {t("保存")}
                   </button>
                 </div>
               </div>
@@ -427,20 +430,20 @@ export function NodeInspector({
                   </div>
                 )}
                 <p className="inspector-summary">
-                  {node.summary || "暂无摘要"}
+                  {node.summary || t("暂无摘要")}
                 </p>
                 {node.status === "paused" &&
                   (node.pauseReason || node.resumeWhen) && (
                     <div className="node-context-note pause-note">
                       {node.pauseReason && (
                         <>
-                          <strong>挂起原因</strong>
+                          <strong>{t("挂起原因")}</strong>
                           <p>{node.pauseReason}</p>
                         </>
                       )}
                       {node.resumeWhen && (
                         <>
-                          <strong>恢复条件</strong>
+                          <strong>{t("恢复条件")}</strong>
                           <p>{node.resumeWhen}</p>
                         </>
                       )}
@@ -456,7 +459,7 @@ export function NodeInspector({
                 {node.notes && (
                   <div className="detail-note">
                     <div className="inspector-section-title">
-                      <span>研究记录</span>
+                      <span>{t("研究记录")}</span>
                     </div>
                     <p>{node.notes}</p>
                   </div>
@@ -465,7 +468,7 @@ export function NodeInspector({
                   <div className="next-action">
                     <span>
                       <ArrowUpRight size={14} />
-                      下一步
+                      {t("下一步")}
                     </span>
                     <p>{node.nextAction}</p>
                   </div>
@@ -475,14 +478,14 @@ export function NodeInspector({
                   onClick={() => setEditing(true)}
                 >
                   <FileText size={13} />
-                  编辑记录
+                  {t("编辑记录")}
                 </button>
               </>
             )}
             {children.length > 0 && (
               <>
                 <div className="inspector-section-title">
-                  <span>子节点</span>
+                  <span>{t("子节点")}</span>
                   <span>{children.length}</span>
                 </div>
                 {children.map((n) => (
@@ -499,7 +502,7 @@ export function NodeInspector({
               </>
             )}
             <div className="inspector-section-title">
-              <span>研究关系</span>
+              <span>{t("研究关系")}</span>
               <button onClick={onConnect}>
                 <Plus size={13} />
               </button>
@@ -519,7 +522,10 @@ export function NodeInspector({
                     <GitBranch size={13} />
                     <span>{other?.title}</span>
                     <small>
-                      {e.label || relations[e.relation] || e.relation}
+                      {e.label ||
+                        (relations[e.relation]
+                          ? t(relations[e.relation])
+                          : e.relation)}
                     </small>
                   </button>
                 );
@@ -543,7 +549,7 @@ export function NodeInspector({
                   <div>
                     <FlaskConical size={14} />
                     <strong>{r.title}</strong>
-                    {!isExecutionRun(r) && <small>结果记录</small>}
+                    {!isExecutionRun(r) && <small>{t("结果记录")}</small>}
                     <Badge status={r.status} />
                   </div>
                   <MetricDetails metrics={r.metrics || {}} />
@@ -551,7 +557,9 @@ export function NodeInspector({
                     .filter((a) => a.runId === r.id)
                     .map((a) => (
                       <details className="raw-metrics" key={a.id}>
-                        <summary>评估 · {a.rubric}</summary>
+                        <summary>
+                          {t("评估")} · {a.rubric}
+                        </summary>
                         {a.conclusion && <p>{a.conclusion}</p>}
                         <MetricDetails metrics={a.metrics} />
                       </details>
@@ -565,7 +573,7 @@ export function NodeInspector({
                 </div>
               ))
             ) : (
-              <div className="small-empty">暂无运行记录</div>
+              <div className="small-empty">{t("暂无运行记录")}</div>
             )}
           </>
         ) : (
@@ -588,16 +596,16 @@ export function NodeInspector({
                 </button>
               ))
             ) : (
-              <div className="small-empty">暂无关联证据</div>
+              <div className="small-empty">{t("暂无关联证据")}</div>
             )}
           </>
         )}
         <div className="metadata">
-          <span>节点标识</span>
+          <span>{t("节点标识")}</span>
           <code>{node.id}</code>
           {node.createdAt && (
             <>
-              <span>创建时间</span>
+              <span>{t("创建时间")}</span>
               <span>{date(node.createdAt)}</span>
             </>
           )}
@@ -606,9 +614,9 @@ export function NodeInspector({
       <div className="inspector-actions">
         <button className="button primary" onClick={onBranch}>
           <GitBranch size={14} />
-          从此处分支
+          {t("从此处分支")}
         </button>
-        <IconButton label="移除节点，可从历史恢复" onClick={onDelete}>
+        <IconButton label={t("移除节点，可从历史恢复")} onClick={onDelete}>
           <Trash2 size={15} />
         </IconButton>
       </div>
@@ -632,56 +640,56 @@ export function EdgeInspector({
       <div className="inspector-heading">
         <span>
           <Link2 size={14} />
-          研究关系
+          {t("研究关系")}
         </span>
       </div>
       <div className="inspector-scroll edit-fields">
         {edge.provenance?.mode === "retrospective" && (
           <div className="node-context-note">
-            <strong>事后补充的关系</strong>
+            <strong>{t("事后补充的关系")}</strong>
             <p>{edge.provenance.note}</p>
           </div>
         )}
         <label>
-          关系
+          {t("关系")}
           <select
             value={draft.relation}
             onChange={(e) => setDraft({ ...draft, relation: e.target.value })}
           >
             {Object.entries(relations).map(([k, v]) => (
               <option key={k} value={k}>
-                {v}
+                {t(v)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          说明
+          {t("说明")}
           <input
             value={draft.label || ""}
             onChange={(e) => setDraft({ ...draft, label: e.target.value })}
           />
         </label>
         <label>
-          依据
+          {t("依据")}
           <select
             value={draft.basis || "unknown"}
             onChange={(e) => setDraft({ ...draft, basis: e.target.value })}
           >
-            <option value="observed">有记录支持</option>
-            <option value="hypothesis">待验证</option>
-            <option value="unknown">未知</option>
+            <option value="observed">{t("有记录支持")}</option>
+            <option value="hypothesis">{t("待验证")}</option>
+            <option value="unknown">{t("未知")}</option>
           </select>
         </label>
         <button
           className="button primary"
           onClick={() => void mutate([{ op: "edge.update", data: draft }])}
         >
-          保存关系
+          {t("保存关系")}
         </button>
         <button className="button danger" onClick={onDelete}>
           <Trash2 size={14} />
-          移除关系
+          {t("移除关系")}
         </button>
       </div>
     </>

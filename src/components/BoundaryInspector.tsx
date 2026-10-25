@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { ArrowRight, Link2, X } from "lucide-react";
 import { ancestry, relations, type Project, type ResearchEdge } from "../model";
 import { IconButton } from "./Primitives";
@@ -23,9 +24,9 @@ export function BoundaryInspector({
     <>
       <div className="inspector-header">
         <span>
-          <Link2 size={14} /> 边界关系 · {edges.length}
+          <Link2 size={14} /> {t("边界关系 · {count}", { count: edges.length })}
         </span>
-        <IconButton label="关闭关系详情" onClick={onClose}>
+        <IconButton label={t("关闭关系详情")} onClick={onClose}>
           <X size={15} />
         </IconButton>
       </div>
@@ -40,7 +41,10 @@ export function BoundaryInspector({
             </button>
             <div className="boundary-relation">
               <ArrowRight size={13} />
-              {edge.label || relations[edge.relation] || edge.relation}
+              {edge.label ||
+                (relations[edge.relation]
+                  ? t(relations[edge.relation])
+                  : edge.relation)}
             </div>
             <button
               className="boundary-endpoint"
@@ -49,7 +53,7 @@ export function BoundaryInspector({
               {path(edge.target)}
             </button>
             <button className="text-button" onClick={() => onEdit(edge.id)}>
-              查看原始关系
+              {t("查看原始关系")}
             </button>
           </article>
         ))}

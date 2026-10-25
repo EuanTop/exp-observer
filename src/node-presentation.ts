@@ -1,4 +1,5 @@
 import type { Project, ResearchNode } from "./model";
+import { t } from "./i18n";
 
 const text = (value: unknown): string =>
   typeof value === "string" ? value.trim() : "";
@@ -71,13 +72,13 @@ export function nodePresentation(
     (!hasDistinctConclusion ? notesPreview : "") ||
     (!hasDistinctConclusion ? text(node.nextAction) : "");
   const source = text(node.conclusion)
-    ? "结论"
+    ? t("结论")
     : text(decision?.conclusion)
-      ? "决策"
+      ? t("决策")
       : text(assessment?.conclusion)
-        ? `评估 · ${assessment!.rubric}`
+        ? t("评估 · {rubric}", { rubric: assessment!.rubric })
         : latestFinding
-          ? "最近发现"
+          ? t("最近发现")
           : "";
   const distinctConclusion =
     conclusion !== summary && conclusion !== text(node.title) ? conclusion : "";
@@ -86,7 +87,7 @@ export function nodePresentation(
   const nextAction =
     node.status === "paused" && !resumeWhen ? text(node.nextAction) : "";
   return {
-    headline: text(node.title) || "未命名节点",
+    headline: text(node.title) || t("未命名节点"),
     context: "",
     summary:
       summary && [pauseReason, resumeWhen, nextAction].includes(summary)

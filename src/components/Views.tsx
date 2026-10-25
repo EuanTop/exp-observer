@@ -1,3 +1,4 @@
+import { intlLocale, t, useLocale } from "../i18n";
 import {
   Activity,
   ArrowUpRight,
@@ -35,6 +36,7 @@ export function RunsView({
   onArtifact: (a: Artifact) => void;
   onNode: (id: string) => void;
 }) {
+  useLocale();
   const [filter, setFilter] = useState("all"),
     [expanded, setExpanded] = useState<string | null>(null);
   const runs = [...project.runs]
@@ -44,33 +46,37 @@ export function RunsView({
     <div className="data-view">
       <div className="data-heading">
         <div>
-          <h2>运行与结果</h2>
+          <h2>{t("运行与结果")}</h2>
           <span>
-            {project.runs.filter(isExecutionRun).length} 次运行
+            {t("{count} 次运行", {
+              count: project.runs.filter(isExecutionRun).length,
+            })}
             {project.runs.some((r) => !isExecutionRun(r))
-              ? ` · ${project.runs.filter((r) => !isExecutionRun(r)).length} 条结果记录`
+              ? t(" · {count} 条结果记录", {
+                  count: project.runs.filter((r) => !isExecutionRun(r)).length,
+                })
               : ""}
           </span>
         </div>
         <select
-          aria-label="运行状态筛选"
+          aria-label={t("运行状态筛选")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         >
-          <option value="all">全部状态</option>
+          <option value="all">{t("全部状态")}</option>
           {["running", "completed", "failed", "invalid", "paused"].map((s) => (
             <option key={s} value={s}>
-              {statuses[s]}
+              {t(statuses[s])}
             </option>
           ))}
         </select>
       </div>
       <div className="run-table">
         <div className="run-table-head">
-          <span>实验运行</span>
-          <span>状态</span>
-          <span>关键结果</span>
-          <span>时间</span>
+          <span>{t("实验运行")}</span>
+          <span>{t("状态")}</span>
+          <span>{t("关键结果")}</span>
+          <span>{t("时间")}</span>
           <span />
         </div>
         {runs.map((r) => (
@@ -86,7 +92,7 @@ export function RunsView({
                 <span>
                   <strong>{r.title}</strong>
                   <small>
-                    {!isExecutionRun(r) && "结果记录 · "}
+                    {!isExecutionRun(r) && t("结果记录 · ")}
                     {project.nodes.find((n) => n.id === r.nodeId)?.title}
                   </small>
                 </span>
@@ -105,8 +111,8 @@ export function RunsView({
               <time
                 title={
                   isExecutionRun(r)
-                    ? "执行开始时间"
-                    : "结果登记时间；执行时间未知"
+                    ? t("执行开始时间")
+                    : t("结果登记时间；执行时间未知")
                 }
               >
                 {date(isExecutionRun(r) ? r.startedAt : r.capturedAt)}
@@ -124,15 +130,15 @@ export function RunsView({
                     className="text-button"
                     onClick={() => onNode(r.nodeId)}
                   >
-                    查看研究节点
+                    {t("查看研究节点")}
                     <ArrowUpRight size={12} />
                   </button>
                 </div>
-                <div className="section-label">原始指标</div>
+                <div className="section-label">{t("原始指标")}</div>
                 <MetricDetails metrics={r.metrics || {}} />
                 <div className="run-detail-grid">
                   <div>
-                    <div className="section-label">过程事件</div>
+                    <div className="section-label">{t("过程事件")}</div>
                     {r.events?.length ? (
                       r.events.map((e) => (
                         <div className="event-line" key={e.id}>
@@ -147,13 +153,13 @@ export function RunsView({
                         </div>
                       ))
                     ) : (
-                      <div className="small-empty">暂无过程事件</div>
+                      <div className="small-empty">{t("暂无过程事件")}</div>
                     )}
                   </div>
                   <div>
-                    <div className="section-label">实际配置</div>
+                    <div className="section-label">{t("实际配置")}</div>
                     <pre>{JSON.stringify(r.configuration, null, 2)}</pre>
-                    <div className="section-label">产物</div>
+                    <div className="section-label">{t("产物")}</div>
                     {project.artifacts
                       .filter(
                         (a) =>
@@ -180,8 +186,8 @@ export function RunsView({
       {!runs.length && (
         <div className="empty-state compact">
           <FlaskConical size={30} />
-          <h3>暂无运行</h3>
-          <p>Agent 登记的实验运行会出现在这里</p>
+          <h3>{t("暂无运行")}</h3>
+          <p>{t("Agent 登记的实验运行会出现在这里")}</p>
         </div>
       )}
     </div>
@@ -189,6 +195,7 @@ export function RunsView({
 }
 
 export function CompareView({ project }: { project: Project }) {
+  useLocale();
   const completed = project.runs.filter((r) => r.status === "completed");
   const [picked, setPicked] = useState<string[]>(
     completed.slice(-2).map((r) => r.id),
@@ -225,15 +232,15 @@ export function CompareView({ project }: { project: Project }) {
     <div className="data-view compare-view">
       <div className="data-heading">
         <div>
-          <h2>对比评估</h2>
-          <span>{picked.length} 条记录已选择</span>
+          <h2>{t("对比评估")}</h2>
+          <span>{t("{count} 条记录已选择", { count: picked.length })}</span>
         </div>
         <select
-          aria-label="评价口径"
+          aria-label={t("评价口径")}
           value={rubric}
           onChange={(e) => setRubric(e.target.value)}
         >
-          <option value="">运行原始指标</option>
+          <option value="">{t("运行原始指标")}</option>
           {rubrics.map((r) => (
             <option key={r} value={r}>
               {r}
@@ -266,29 +273,33 @@ export function CompareView({ project }: { project: Project }) {
       {runs.length < 2 ? (
         <div className="empty-state compact">
           <LayoutGrid size={32} />
-          <h3>选择至少两条记录</h3>
+          <h3>{t("选择至少两条记录")}</h3>
         </div>
       ) : (
         <>
           <div className="comparison-heading">
             <span>
               <Settings2 size={14} />
-              配置与条件
+              {t("配置与条件")}
             </span>
             <span className="neutral-badge">
-              {configKeys.filter((k) => !same(k)).length} 项差异
+              {t("{count} 项差异", {
+                count: configKeys.filter((k) => !same(k)).length,
+              })}
             </span>
           </div>
           <div className="comparison-scroll">
             <table className="comparison-table">
               <thead>
                 <tr>
-                  <th>条件 / 指标</th>
+                  <th>{t("条件 / 指标")}</th>
                   {runs.map((r) => (
                     <th key={r.id}>
                       <span className="compare-column-dot" />
                       {r.title}
-                      <small>{statuses[r.status] || r.status}</small>
+                      <small>
+                        {statuses[r.status] ? t(statuses[r.status]) : r.status}
+                      </small>
                     </th>
                   ))}
                 </tr>
@@ -301,7 +312,7 @@ export function CompareView({ project }: { project: Project }) {
                       <span
                         className={`field-state ${same(k) ? "same" : "diff"}`}
                       >
-                        {same(k) ? "一致" : "差异 / 缺失"}
+                        {same(k) ? t("一致") : t("差异 / 缺失")}
                       </span>
                     </td>
                     {runs.map((r) => (
@@ -323,15 +334,15 @@ export function CompareView({ project }: { project: Project }) {
           <div className="comparison-heading">
             <span>
               <Activity size={14} />
-              实验结果
+              {t("实验结果")}
             </span>
-            <span className="neutral-badge">{rubric || "原始指标"}</span>
+            <span className="neutral-badge">{rubric || t("原始指标")}</span>
           </div>
           <div className="comparison-scroll">
             <table className="comparison-table metrics-table">
               <thead>
                 <tr>
-                  <th>指标</th>
+                  <th>{t("指标")}</th>
                   {runs.map((r) => (
                     <th key={r.id}>{r.title}</th>
                   ))}
@@ -371,7 +382,9 @@ export function CompareView({ project }: { project: Project }) {
                 })}
                 {!keys.length && (
                   <tr>
-                    <td colSpan={runs.length + 1}>所选口径下尚无指标记录</td>
+                    <td colSpan={runs.length + 1}>
+                      {t("所选口径下尚无指标记录")}
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -385,16 +398,16 @@ export function CompareView({ project }: { project: Project }) {
                   <div className="inspector-section-title">
                     <span>{r.title}</span>
                   </div>
-                  <p>{a?.conclusion || "尚未登记此口径的评估"}</p>
+                  <p>{a?.conclusion || t("尚未登记此口径的评估")}</p>
                   {a?.limitations && (
                     <div className="conclusion-scope">
-                      <span>适用范围</span>
+                      <span>{t("适用范围")}</span>
                       {a.limitations}
                     </div>
                   )}
                   {a && <code>{a.id}</code>}
                   <details className="raw-metrics">
-                    <summary>原始指标</summary>
+                    <summary>{t("原始指标")}</summary>
                     <MetricDetails metrics={metricsFor(r)} />
                   </details>
                 </div>
@@ -405,7 +418,7 @@ export function CompareView({ project }: { project: Project }) {
             <details className="assessment-history">
               <summary>
                 <History size={14} />
-                评估修订历史
+                {t("评估修订历史")}
               </summary>
               {project.assessments
                 .filter((a) => picked.includes(a.runId))
@@ -413,7 +426,9 @@ export function CompareView({ project }: { project: Project }) {
                   <div key={a.id}>
                     <code>{a.id}</code>
                     <span>{a.conclusion}</span>
-                    {a.supersedes && <small>修订自 {a.supersedes}</small>}
+                    {a.supersedes && (
+                      <small>{t("修订自 {id}", { id: a.supersedes })}</small>
+                    )}
                   </div>
                 ))}
             </details>
@@ -433,6 +448,7 @@ export function EvidenceView({
   onOpen: (a: Artifact) => void;
   onAdd: () => void;
 }) {
+  useLocale();
   const [q, setQ] = useState("");
   const list = project.artifacts.filter((a) =>
     `${a.title} ${a.path}`.toLowerCase().includes(q.toLowerCase()),
@@ -441,18 +457,20 @@ export function EvidenceView({
     <div className="data-view">
       <div className="data-heading">
         <div>
-          <h2>资料与产物</h2>
-          <span>{project.artifacts.length} 份原始资料与产物</span>
+          <h2>{t("资料与产物")}</h2>
+          <span>
+            {t("{count} 份原始资料与产物", { count: project.artifacts.length })}
+          </span>
         </div>
         <button className="button subtle" onClick={onAdd}>
           <Plus size={14} />
-          登记文件
+          {t("登记文件")}
         </button>
       </div>
       <div className="table-search">
         <Search size={15} />
         <input
-          placeholder="搜索文件…"
+          placeholder={t("搜索文件…")}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -474,10 +492,10 @@ export function EvidenceView({
               <div>
                 <span>
                   {a.bytes < 1024
-                    ? `${a.bytes} B`
-                    : `${(a.bytes / 1024).toFixed(1)} KB`}
+                    ? `${a.bytes.toLocaleString(intlLocale())} B`
+                    : `${(a.bytes / 1024).toLocaleString(intlLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} KB`}
                 </span>
-                <span>{a.origin === "mock" ? "模拟资料" : "已登记"}</span>
+                <span>{a.origin === "mock" ? t("模拟资料") : t("已登记")}</span>
               </div>
             </div>
             <ArrowUpRight size={15} />
@@ -487,7 +505,7 @@ export function EvidenceView({
       {!list.length && (
         <div className="empty-state compact">
           <Files size={30} />
-          <h3>{q ? "没有匹配的文件" : "暂无证据"}</h3>
+          <h3>{q ? t("没有匹配的文件") : t("暂无证据")}</h3>
         </div>
       )}
     </div>

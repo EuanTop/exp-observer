@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { Clock3, Play, Square } from "lucide-react";
 import {
   getNodeUsage,
@@ -29,40 +30,45 @@ export function NodeUsagePanel({
     <div className="node-usage-panel">
       <div className="usage-summary">
         <div>
-          <span>记录计时</span>
+          <span>{t("记录计时")}</span>
           <strong>
             {formatDuration(usage.elapsedMs)}
             {usage.elapsedPartial && usage.elapsedMs !== null ? "+" : ""}
           </strong>
         </div>
         <div>
-          <span>输入 Token</span>
+          <span>{t("输入 Token")}</span>
           <strong>{formatTokens(usage.inputTokens)}</strong>
         </div>
         <div>
-          <span>输出 Token</span>
+          <span>{t("输出 Token")}</span>
           <strong>{formatTokens(usage.outputTokens)}</strong>
         </div>
       </div>
       <p className="usage-scope">
-        {usage.tokenScope === "execution" ? "被测任务用量" : "研究 Agent 用量"}
+        {usage.tokenScope === "execution"
+          ? t("被测任务用量")
+          : t("研究 Agent 用量")}
       </p>
       <div className="usage-scope">
         <span>
           {children
-            ? "含子节点，重叠计时已合并"
+            ? t("含子节点，重叠计时已合并")
             : usage.isRunning
-              ? "计时中"
-              : "已记录用量"}
+              ? t("计时中")
+              : t("已记录用量")}
         </span>
         {usage.runCount > 0 && (
           <span>
-            {usage.runCount} 次运行 · 执行 {formatDuration(usage.runMs)}
+            {t("{count} 次运行 · 执行 {duration}", {
+              count: usage.runCount,
+              duration: formatDuration(usage.runMs),
+            })}
           </span>
         )}
       </div>
       {usage.tokensPartial && usage.totalTokens !== null && (
-        <div className="usage-scope">部分 Token 未采集</div>
+        <div className="usage-scope">{t("部分 Token 未采集")}</div>
       )}
       <button
         className="button wide"
@@ -77,11 +83,11 @@ export function NodeUsagePanel({
         }
       >
         <Play size={12} />
-        开始计时
+        {t("开始计时")}
       </button>
       {!usage.observations.length && !usage.hostUsage.length && (
         <div className="small-empty">
-          该节点尚无可确认归属的步骤计时或 Token 数据
+          {t("该节点尚无可确认归属的步骤计时或 Token 数据")}
         </div>
       )}
       <UsageCollection projectId={project.id} />
@@ -92,7 +98,9 @@ export function NodeUsagePanel({
             <Clock3 size={12} />
             <strong>{o.title}</strong>
             <span>
-              {o.status === "running" ? "计时中" : formatDuration(o.durationMs)}
+              {o.status === "running"
+                ? t("计时中")
+                : formatDuration(o.durationMs)}
             </span>
           </div>
           {o.nodeId !== node.id && (
@@ -101,12 +109,16 @@ export function NodeUsagePanel({
             </div>
           )}
           <div className="observation-tokens">
-            <span>输入 {formatTokens(o.inputTokens)}</span>
-            <span>输出 {formatTokens(o.outputTokens)}</span>
+            <span>
+              {t("输入 {count}", { count: formatTokens(o.inputTokens) })}
+            </span>
+            <span>
+              {t("输出 {count}", { count: formatTokens(o.outputTokens) })}
+            </span>
           </div>
           <div className="observation-meta">
             <time>{formatUsageTime(o.startedAt)}</time>
-            <span>{o.usageSource || "Token 未采集"}</span>
+            <span>{o.usageSource || t("Token 未采集")}</span>
             {o.usageRef && <span>{o.usageRef}</span>}
           </div>
           {o.nodeId === node.id && o.status === "running" && (
@@ -118,7 +130,7 @@ export function NodeUsagePanel({
               }
             >
               <Square size={11} />
-              结束计时
+              {t("结束计时")}
             </button>
           )}
         </div>

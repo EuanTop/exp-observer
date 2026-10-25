@@ -1,4 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
+import { t, intlLocale } from "./i18n";
 import { getNodeUsage } from "./usage";
 import { facingSides } from "./edge-routing";
 import { estimateCardHeight } from "./card-sizing";
@@ -444,12 +445,15 @@ export function toCanvas(
       sourceHandle,
       targetHandle,
       label: mixed
-        ? `关联 · ${originals.length}`
+        ? t("关联 · {count}", { count: originals.length })
         : e.relation === "recorded_after"
           ? ""
           : e.relation === "has_direction"
-            ? relations[e.relation]
-            : (e.label || relations[e.relation] || e.relation) +
+            ? t(relations[e.relation])
+            : (e.label ||
+                (relations[e.relation]
+                  ? t(relations[e.relation])
+                  : e.relation)) +
               (originals.length > 1 ? ` · ${originals.length}` : ""),
       style: {
         stroke: basis === "hypothesis" ? "#94a3b8" : "#71717a",
@@ -514,42 +518,41 @@ export function effectiveAssessments(project: Project): Assessment[] {
   return project.assessments.filter((a) => !replaced.has(a.id));
 }
 export function metricLabel(key: string): string {
-  return (
-    (
-      {
-        latency_ms: "延迟 · ms",
-        p50_ms: "P50 · ms",
-        p95_ms: "P95 · ms",
-        recall_at_5: "Recall@5",
-        quality: "质量",
-        total_seconds: "总耗时 · s",
-        accuracy: "准确率",
-        mean_ms: "平均耗时 · ms",
-        build_ms: "构建 · ms",
-        consistent: "结果一致",
-        speedup: "加速比",
-        query_ms: "查询 · ms",
-        memory_bytes: "内存 · bytes",
-        wallTimeMs: "执行耗时 · ms",
-        exitCode: "退出码",
-        buildMedianMs: "构建中位数 · ms",
-        warmBatchMedianMs: "查询批次中位数 · ms",
-        warmMeanQueryMs: "平均查询耗时 · ms",
-        updateMs: "更新耗时 · ms",
-        initialConsistent: "初始输出一致",
-        updatedConsistent: "更新后输出一致",
-      } as Record<string, string>
-    )[key] || key
-  );
+  const label = (
+    {
+      latency_ms: "延迟 · ms",
+      p50_ms: "P50 · ms",
+      p95_ms: "P95 · ms",
+      recall_at_5: "Recall@5",
+      quality: "质量",
+      total_seconds: "总耗时 · s",
+      accuracy: "准确率",
+      mean_ms: "平均耗时 · ms",
+      build_ms: "构建 · ms",
+      consistent: "结果一致",
+      speedup: "加速比",
+      query_ms: "查询 · ms",
+      memory_bytes: "内存 · bytes",
+      wallTimeMs: "执行耗时 · ms",
+      exitCode: "退出码",
+      buildMedianMs: "构建中位数 · ms",
+      warmBatchMedianMs: "查询批次中位数 · ms",
+      warmMeanQueryMs: "平均查询耗时 · ms",
+      updateMs: "更新耗时 · ms",
+      initialConsistent: "初始输出一致",
+      updatedConsistent: "更新后输出一致",
+    } as Record<string, string>
+  )[key];
+  return typeof label === "string" ? t(label) : key;
 }
 export function formatMetric(v: unknown): string {
   if (v === undefined) return "—";
   if (v === null) return "null";
-  if (typeof v === "boolean") return v ? "是" : "否";
+  if (typeof v === "boolean") return t(v ? "是" : "否");
   if (typeof v === "number")
     return Number.isInteger(v)
       ? String(v)
-      : v.toLocaleString("en-US", { maximumSignificantDigits: 8 });
+      : v.toLocaleString(intlLocale(), { maximumSignificantDigits: 8 });
   if (typeof v === "object") return JSON.stringify(v);
   if (v === "") return '""';
   return String(v);
@@ -558,12 +561,13 @@ export function validateProject(p: Project): string[] {
   const errors: string[] = [];
   const ids = new Set(p.nodes.map((n) => n.id));
   for (const n of p.nodes) {
-    if (n.parentId && !ids.has(n.parentId)) errors.push(`缺少容器：${n.id}`);
+    if (n.parentId && !ids.has(n.parentId))
+      errors.push(t("缺少容器：{id}", { id: n.id }));
     let id: string | null = n.parentId;
     const seen = new Set([n.id]);
     while (id) {
       if (seen.has(id)) {
-        errors.push(`循环嵌套：${n.id}`);
+        errors.push(t("循环嵌套：{id}", { id: n.id }));
         break;
       }
       seen.add(id);
@@ -572,6 +576,6 @@ export function validateProject(p: Project): string[] {
   }
   for (const e of p.edges)
     if (!ids.has(e.source) || !ids.has(e.target))
-      errors.push(`关系端点不存在：${e.id}`);
+      errors.push(t("关系端点不存在：{id}", { id: e.id }));
   return errors;
 }
