@@ -38,12 +38,12 @@ def origin(url):
         return None
 
 
-def probe(url):
+def probe(url, *, allow_bind=True):
     # Windows can defer a refused TCP connection beyond the HTTP deadline.
     # A successful exclusive bind proves this local port has no listener, without
     # waiting for the network stack. Close it immediately; the launch lock still
     # coordinates actual startup. If binding is denied, use the health check.
-    if os.name == 'nt' and origin(url) is not None:
+    if allow_bind and os.name == 'nt' and origin(url) is not None:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reserved:
                 reserved.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
@@ -221,11 +221,17 @@ def ensure_platform(url, workspace, state, *, provision=False):
     port = origin(url)
     if port is None or os.environ.get('EXP_OBSERVER_AUTOSTART') == '0':
         return {'state': 'disabled'}
-    health = probe(url)
-    if health != 'missing':
-        return {'state': health}
     state = Path(state)
     status_path = state / ('launch-' + str(port) + '.json')
+    previous = read_json(status_path)
+    launching = previous.get('state') in ('starting', 'provisioning') and time.time() - previous.get('at', 0) < 30
+    # Binding is useful to detect a stopped Windows service, but it must never
+    # compete with a platform child that is about to bind this same port.
+    health = probe(url, allow_bind=not launching)
+    if health != 'missing':
+        return {'state': health}
+    if launching:
+        return previous
     try:
         with launch_lock(state / ('launch-' + str(port) + '.lock'), wait=2 if provision else 0):
             if probe(url) != 'missing':
@@ -263,7 +269,7 @@ def ensure_platform(url, workspace, state, *, provision=False):
             write_json(status_path, value)
             deadline = time.monotonic() + 2
             while time.monotonic() < deadline and process.poll() is None:
-                if probe(url) == 'ready':
+                if probe(url, allow_bind=False) == 'ready':
                     value['state'] = 'ready'; break
                 time.sleep(.05)
             write_json(status_path, value)

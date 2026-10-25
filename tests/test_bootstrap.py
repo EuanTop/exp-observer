@@ -72,6 +72,10 @@ class BootstrapTests(unittest.TestCase):
                 os.kill(record['pid'], signal.SIGTERM)
             except ProcessLookupError:
                 pass
+            except OSError as exc:
+                # Windows reports an already-exited child as ERROR_INVALID_PARAMETER.
+                if getattr(exc, 'winerror', None) != 87:
+                    raise
             for _ in range(60):
                 if bootstrap.probe(self.url) != 'ready': break
                 time.sleep(.05)
@@ -129,7 +133,9 @@ class BootstrapTests(unittest.TestCase):
                 continue
             if len(projects)==4: break
             time.sleep(.05)
-        self.assertEqual(len(projects), 4)
+        diagnostics = '\n'.join(path.read_text(encoding='utf-8', errors='replace')[-8000:]
+                                for path in self.state.glob('*') if path.suffix in ('.log', '.json'))
+        self.assertEqual(len(projects), 4, diagnostics)
         self.assertEqual(len(list((self.state/'runtime').iterdir())), 1)
 
     def test_known_installation_reuses_its_data_directory_without_a_bundle(self):
@@ -176,6 +182,31 @@ class BootstrapTests(unittest.TestCase):
         with patch.object(bootstrap,'probe',return_value='unavailable'), patch.object(bootstrap,'detached',side_effect=AssertionError('must not spawn')):
             self.assertEqual(bootstrap.ensure_platform(self.url,self.workspace,self.state)['state'],'unavailable')
         self.assertFalse(self.state.exists())
+
+    def test_starting_platform_is_probed_without_reserving_its_port(self):
+        self.state.mkdir()
+        bootstrap.write_json(self.state/('launch-'+str(self.port)+'.json'),
+                             {'state':'starting', 'at':time.time(), 'pid':999999})
+        for health, expected in [('unavailable', 'unavailable'), ('missing', 'starting')]:
+            with self.subTest(health=health), \
+                 patch.object(bootstrap, 'probe', return_value=health) as probe, \
+                 patch.object(bootstrap, 'detached', side_effect=AssertionError('must not spawn')):
+                self.assertEqual(bootstrap.ensure_platform(self.url, self.workspace, self.state)['state'], expected)
+            probe.assert_called_once_with(self.url, allow_bind=False)
+
+    def test_child_readiness_checks_do_not_bind_the_port_the_child_needs(self):
+        # Model the child becoming ready on the second readiness check. Both
+        # checks must be HTTP-only; the initial stopped-service probes may bind.
+        state = self.root/'readiness-state'
+        process = type('Child', (), {'pid':999999, 'poll':lambda self: None})()
+        with patch.object(bootstrap, 'probe', side_effect=['missing', 'missing', 'unavailable', 'ready']) as probe, \
+             patch.object(bootstrap, 'application_candidates', return_value=[(ROOT, None)]), \
+             patch.object(bootstrap, 'detached', return_value=process), \
+             patch.object(bootstrap.time, 'sleep'):
+            result = bootstrap.ensure_platform(self.url, self.workspace, state)
+        self.assertEqual(result['state'], 'ready')
+        self.assertEqual([call.kwargs for call in probe.call_args_list],
+                         [{'allow_bind':True}, {}, {'allow_bind':False}, {'allow_bind':False}])
 
     def test_source_only_skill_provisions_in_background_without_waiting_for_a_download(self):
         state = self.root/'source-only-state'
