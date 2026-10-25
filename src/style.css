@@ -201,6 +201,7 @@ p {
   z-index: 20;
 }
 .wordmark {
+  flex-shrink: 0;
   font-size: 17px;
   font-weight: 650;
   letter-spacing: -0.7px;
@@ -246,6 +247,11 @@ p {
   gap: 10px;
   max-width: 230px;
   height: 34px;
+  min-width: 0;
+  width: 100%;
+}
+.project-switch > svg {
+  flex-shrink: 0;
 }
 .project-switch span {
   white-space: nowrap;
@@ -257,12 +263,24 @@ p {
 }
 .project-switcher {
   position: relative;
+  min-width: 0;
 }
 .topbar-right {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+}
+.topbar-tools-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.compact-tools-toggle,
+.header-tool-label,
+.header-tools-dismiss {
+  display: none;
 }
 .top-nav {
   align-self: stretch;
@@ -312,6 +330,8 @@ p {
   background: var(--panel);
 }
 .work-toolbar h1 {
+  min-width: 0;
+  flex: 1;
   font-size: 13px;
   font-weight: 550;
   white-space: nowrap;
@@ -325,6 +345,7 @@ p {
 }
 .work-toolbar .view-tab-right {
   gap: 6px;
+  flex-shrink: 0;
 }
 .compact-add {
   height: 28px;
@@ -381,6 +402,7 @@ p {
   background: var(--accent-soft);
 }
 .work-area {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -2825,33 +2847,110 @@ p {
     display: none;
   }
 }
-@media (max-width: 760px) {
+@media (max-width: 1050px) {
   .topbar {
-    height: 92px;
-    flex-wrap: wrap;
-    align-content: flex-start;
-    padding: 0 13px;
+    height: auto;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: 48px 40px;
+    gap: 0 10px;
+    padding: 0 12px;
   }
-  .topbar > .wordmark,
-  .topbar > .project-switcher,
+  .topbar > .wordmark {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .topbar > .project-switcher {
+    grid-column: 2;
+    grid-row: 1;
+  }
   .topbar > .topbar-right {
-    height: 48px;
-    display: flex;
-    align-items: center;
+    grid-column: 3;
+    grid-row: 1;
+    margin: 0;
+    gap: 2px;
   }
   .top-nav {
-    order: 3;
-    width: 100%;
-    height: 44px;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: auto;
+    min-width: 0;
+    height: 40px;
     justify-content: space-around;
   }
   .top-nav button {
     flex: 1;
   }
+
+  .wordmark {
+    font-size: 16px;
+  }
+  .project-switch {
+    font-size: 10px;
+    max-width: 100%;
+    gap: 5px;
+  }
+  .project-switch > svg:first-child {
+    display: none;
+  }
+  .topbar-tools {
+    position: relative;
+  }
+  .compact-tools-toggle {
+    display: inline-flex;
+  }
+  .topbar-tools-body {
+    display: none;
+  }
+  .topbar-tools[data-open="true"] .topbar-tools-body {
+    display: grid;
+    position: absolute;
+    top: 36px;
+    right: 0;
+    width: min(220px, calc(100vw - 24px));
+    padding: 8px;
+    gap: 2px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    z-index: 55;
+  }
+  .header-tools-dismiss {
+    display: block;
+  }
+  .header-tool-label {
+    display: inline;
+    font-size: 12px;
+  }
+  .topbar-tools-body > .icon-button {
+    width: 100%;
+    height: 36px;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 0 10px;
+  }
+  .topbar-tools-body .motion-control {
+    padding: 4px 10px;
+    gap: 10px;
+  }
+  .topbar-tools-body .motion-control select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .project-dropdown {
+    min-width: min(300px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    right: -60px;
+    left: auto;
+  }
+}
+@media (max-width: 760px) {
   .outline {
     position: absolute;
     left: 0;
-    top: 92px;
+    top: 0;
     bottom: 0;
     width: 240px;
     box-shadow: 10px 0 25px #0001;
@@ -2860,21 +2959,20 @@ p {
   .toolbar-count {
     display: none;
   }
-  .wordmark {
-    font-size: 16px;
+  .work-toolbar {
+    padding: 0 10px;
+    gap: 8px;
   }
-  .project-switch {
-    font-size: 10px;
-    max-width: 160px;
+  .work-toolbar .view-tab-right {
+    gap: 4px;
   }
-  .project-switch > svg:first-child {
+  .work-toolbar .toolbar-action-label {
     display: none;
   }
-  .topbar-right > .icon-button {
-    display: none;
-  }
-  .topbar-right > .icon-button:first-of-type {
-    display: inline-flex;
+  .work-toolbar .compact-add {
+    padding: 0;
+    width: 29px;
+    margin-left: 0;
   }
   .search-trigger kbd {
     display: none;
@@ -2887,9 +2985,6 @@ p {
     height: 31px;
     padding: 0 10px;
     font-size: 10px;
-  }
-  .view-tab-right > .icon-button:first-of-type {
-    display: none;
   }
   .inspector {
     position: absolute;

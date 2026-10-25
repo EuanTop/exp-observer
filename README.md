@@ -29,6 +29,16 @@
 
 Your agent chooses the research approach. ExpObserver preserves how it develops, including negative results and unfinished questions. Records, revision history, and evidence stay on your computer.
 
+## A real study, in 28 minutes
+
+**Can a smartphone activity classifier stay reliable for a new person — with a smaller model?** An independent agent explored UCI HAR, trained small models locally, investigated a persistent failure, and left one causal question paused with a clear next step.
+
+![Measured results of four frozen models on unseen test participants](examples/har-study/evidence/test-results.png)
+
+The English case includes the research graph, measured usage, and six original evidence files. **272 inputs retained 96.06% test accuracy; a 128-input linear model reduced weights and biases to 3,096 bytes.**
+
+[Explore the English case and load it into ExpObserver →](examples/har-study/README.md)
+
 ## Quick start
 
 ### Ask your agent
@@ -54,7 +64,7 @@ The Skill can wake the installed platform when it is closed. Records queue local
 <details>
 <summary><strong>A closer look: explore a research step and reference it in your next conversation</strong></summary>
 
-![A selected research node with its details and the copy-reference action](docs/screenshots/node-details.png)
+![An English HAR research finding with its original analysis and the copy-reference action](docs/screenshots/har-study-details.png)
 
 Select a node and choose **复制引用** (Copy reference). Paste it into any agent chat and add your question. The reference carries the experiment and node identity, so the agent can read the latest context.
 
@@ -62,6 +72,6 @@ Select a node and choose **复制引用** (Copy reference). Paste it into any ag
 
 ## Explore further
 
-[User guide](docs/usage.md) · [Skill](skills/exp-observer/SKILL.md) · [API & data contract](docs/contract.md) · [Measured example](examples/real-study/report.md) · [Contributing](CONTRIBUTING.md)
+[User guide](docs/usage.md) · [Skill](skills/exp-observer/SKILL.md) · [API & data contract](docs/contract.md) · [HAR case](examples/har-study/README.md) · [Exact-search case](examples/real-study/report.md) · [Contributing](CONTRIBUTING.md)
 
 Built with React, TypeScript, Tailwind CSS, React Flow, ELK, and Python. [MIT licensed](LICENSE).

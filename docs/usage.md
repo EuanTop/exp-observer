@@ -132,6 +132,8 @@ Stop every server using the data directory, then back up the **whole `.exp-obser
 
 ## Examples and development
 
+The [English smartphone activity-recognition case](../examples/har-study/README.md) follows a real 28-minute investigation into cross-user reliability and compact models. Load its translated graph and six retained evidence files with `python3 examples/har-study/load_example.py` from the repository or extracted release folder. Its prediction verifier recomputes the published test scores without training or ML dependencies.
+
 The [exact-search study](../examples/real-study/report.md) compares three retrieval approaches and revisits its decision after including index construction costs. An [independent continuation review](../examples/real-study/continuation-review.md) checks the reasoning and proposes the next branch. The [study script](../examples/real-study/study.py) generates inputs and measurements locally; the public source includes the code and reports, not a prepopulated research workspace or archived raw measurements.
 
 The frontend uses React, TypeScript, React Flow and Tailwind CSS. The backend and portable client use Python. See [CONTRIBUTING.md](../CONTRIBUTING.md) for development, tests and pull requests.

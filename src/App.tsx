@@ -31,6 +31,7 @@ import {
   LayoutGrid,
   Maximize2,
   Moon,
+  MoreHorizontal,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
@@ -129,6 +130,7 @@ export default function App() {
   const [runtime, setRuntime] = useState<RuntimeSnapshot | null>(null);
   const [agentSetup, setAgentSetup] = useState<AgentSetup>();
   const [referenceFallback, setReferenceFallback] = useState("");
+  const [headerToolsOpen, setHeaderToolsOpen] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasData>>([]),
     [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const selectionRef = useRef(selected);
@@ -784,6 +786,8 @@ export default function App() {
             </span>
             <button
               className="search-trigger"
+              aria-label="搜索"
+              title="搜索"
               onClick={() => {
                 setPalette(true);
                 setQuery("");
@@ -793,47 +797,90 @@ export default function App() {
               <span>搜索</span>
               <kbd>⌘ K</kbd>
             </button>
-            <IconButton
-              label="连接 Agent"
-              onClick={() => {
-                setPalette(true);
-                setQuery(">skill");
+            <div
+              className="topbar-tools"
+              data-open={headerToolsOpen}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setHeaderToolsOpen(false);
+                  event.currentTarget
+                    .querySelector<HTMLButtonElement>(".compact-tools-toggle")
+                    ?.focus();
+                }
               }}
             >
-              <Terminal size={17} />
-            </IconButton>
-            <IconButton
-              label={theme === "dark" ? "浅色外观" : "深色外观"}
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            >
-              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-            </IconButton>
-            <label className="motion-control" title="动画偏好">
-              <Activity size={14} aria-hidden="true" />
-              <select
-                aria-label="动画偏好"
-                value={motion}
-                onChange={(e) => setMotion(e.target.value as Motion)}
+              <button
+                className="icon-button compact-tools-toggle"
+                aria-label="更多工具"
+                aria-expanded={headerToolsOpen}
+                aria-controls="header-tools"
+                onClick={() => setHeaderToolsOpen(!headerToolsOpen)}
               >
-                <option value="system">跟随系统</option>
-                <option value="on">开启动画</option>
-                <option value="off">关闭动画</option>
-              </select>
-            </label>
-            <IconButton
-              label="导出研究 JSON"
-              onClick={exportProject}
-              disabled={!project}
-            >
-              <Download size={17} />
-            </IconButton>
-            <IconButton
-              label="版本历史"
-              onClick={() => void openHistory()}
-              disabled={!project}
-            >
-              <History size={17} />
-            </IconButton>
+                <MoreHorizontal size={18} />
+              </button>
+              {headerToolsOpen && (
+                <div
+                  className="dismiss header-tools-dismiss"
+                  onClick={() => setHeaderToolsOpen(false)}
+                />
+              )}
+              <div className="topbar-tools-body" id="header-tools">
+                <IconButton
+                  label="连接 Agent"
+                  onClick={() => {
+                    setHeaderToolsOpen(false);
+                    setPalette(true);
+                    setQuery(">skill");
+                  }}
+                >
+                  <Terminal size={17} />
+                  <span className="header-tool-label">连接 Agent</span>
+                </IconButton>
+                <IconButton
+                  label={theme === "dark" ? "浅色外观" : "深色外观"}
+                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                >
+                  {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+                  <span className="header-tool-label">
+                    {theme === "dark" ? "浅色外观" : "深色外观"}
+                  </span>
+                </IconButton>
+                <label className="motion-control" title="动画偏好">
+                  <Activity size={14} aria-hidden="true" />
+                  <select
+                    aria-label="动画偏好"
+                    value={motion}
+                    onChange={(e) => setMotion(e.target.value as Motion)}
+                  >
+                    <option value="system">跟随系统</option>
+                    <option value="on">开启动画</option>
+                    <option value="off">关闭动画</option>
+                  </select>
+                </label>
+                <IconButton
+                  label="导出研究 JSON"
+                  onClick={() => {
+                    setHeaderToolsOpen(false);
+                    exportProject();
+                  }}
+                  disabled={!project}
+                >
+                  <Download size={17} />
+                  <span className="header-tool-label">导出研究 JSON</span>
+                </IconButton>
+                <IconButton
+                  label="版本历史"
+                  onClick={() => {
+                    setHeaderToolsOpen(false);
+                    void openHistory();
+                  }}
+                  disabled={!project}
+                >
+                  <History size={17} />
+                  <span className="header-tool-label">版本历史</span>
+                </IconButton>
+              </div>
+            </div>
           </div>
         </header>
         <div className="work-area">
@@ -918,10 +965,12 @@ export default function App() {
                     {selectedNode && (
                       <button
                         className="button"
+                        aria-label="复制引用"
+                        title="复制引用"
                         onClick={() => void copyReference()}
                       >
                         <Copy size={14} />
-                        复制引用
+                        <span className="toolbar-action-label">复制引用</span>
                         {selected.length > 1 ? ` · ${selected.length}` : ""}
                       </button>
                     )}
@@ -968,6 +1017,8 @@ export default function App() {
                 )}
                 <button
                   className="button primary compact-add"
+                  aria-label={project ? "添加节点" : "新建研究"}
+                  title={project ? "添加节点" : "新建研究"}
                   onClick={() =>
                     setDialog(
                       project
@@ -977,7 +1028,9 @@ export default function App() {
                   }
                 >
                   <Plus size={14} />
-                  {project ? "添加节点" : "新建研究"}
+                  <span className="toolbar-action-label">
+                    {project ? "添加节点" : "新建研究"}
+                  </span>
                 </button>
               </div>
             </div>

@@ -1,0 +1,5 @@
+model,features,scalar_coefficients,numeric_payload_bytes,file_bytes,batch256_median_us_per_window,single_median_us_per_window,support_vectors,implementation
+full_rbf,561,691667,5533336,5539745,235.9518203125,300.903640625,1222.0,sklearn SVC native feature scale
+time272_rbf,272,318565,2548520,2554641,119.79769140625,174.097,1150.0,sklearn SVC native feature scale
+full_linear,561,3372,13488,16732,0.04638671875,1.97265625,,numpy float32 folded linear
+rfe128_linear,128,774,3096,5006,0.03401953125,1.89128125,,numpy float32 folded linear
