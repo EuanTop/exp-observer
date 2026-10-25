@@ -16,7 +16,7 @@
   <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-![ExpObserver showing the main story of a real research study, with collapsed containers and paused follow-up questions](docs/screenshots/workspace.png)
+![ExpObserver showing the main story of a real research study, with collapsed containers and paused follow-up questions](docs/screenshots/research-workspace.png)
 
 <p align="center"><sub>A real exploratory study: follow the main story, then enter a container to inspect the work behind it.</sub></p>
 
@@ -54,7 +54,7 @@ The Skill can wake the installed platform when it is closed. Records queue local
 <details>
 <summary><strong>A closer look: explore a research step and reference it in your next conversation</strong></summary>
 
-![A selected research node with its details and the copy-reference action](docs/screenshots/node-reference.png)
+![A selected research node with its details and the copy-reference action](docs/screenshots/node-details.png)
 
 Select a node and choose **复制引用** (Copy reference). Paste it into any agent chat and add your question. The reference carries the experiment and node identity, so the agent can read the latest context.
 

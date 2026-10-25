@@ -17,7 +17,7 @@ FILES = (
     'README.md', 'README.zh-CN.md', 'INSTALL.md', 'CONTRIBUTING.md', 'LICENSE',
     'THIRD_PARTY_NOTICES.md', 'licenses/elkjs-LICENSE.md',
     'docs/contract.md', 'docs/observation-test.md', 'docs/screenshots/research.png', 'docs/screenshots/comparison.png',
-    'docs/usage.md', 'docs/usage.zh-CN.md', 'docs/screenshots/workspace.png', 'docs/screenshots/node-reference.png',
+    'docs/usage.md', 'docs/usage.zh-CN.md', 'docs/screenshots/research-workspace.png', 'docs/screenshots/node-details.png',
     'public/assets/app-icon.svg', 'public/assets/app-icon.png', 'public/assets/favicon.ico', 'public/assets/apple-touch-icon.png',
     'examples/real-study/report.md', 'examples/real-study/continuation-review.md', 'examples/real-study/study.py',
     'start.py', 'start.bat', 'start.command',

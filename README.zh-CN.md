@@ -16,7 +16,7 @@
   <a href="README.md">English</a>
 </p>
 
-![ExpObserver 真实研究案例：收起容器后查看主脉络和暂停的后续问题](docs/screenshots/workspace.png)
+![ExpObserver 真实研究案例：收起容器后查看主脉络和暂停的后续问题](docs/screenshots/research-workspace.png)
 
 <p align="center"><sub>真实探索案例：先看研究主脉络，再进入容器查看具体实验与证据。</sub></p>
 
@@ -54,7 +54,7 @@ Agent 自主选择研究方法，ExpObserver 留下过程中的发现、负结�
 <details>
 <summary><strong>进一步查看：展开研究步骤，在下一段对话中引用它</strong></summary>
 
-![选中研究节点后查看详情，通过复制引用在 Agent 对话中继续讨论](docs/screenshots/node-reference.png)
+![选中研究节点后查看详情，通过复制引用在 Agent 对话中继续讨论](docs/screenshots/node-details.png)
 
 选中节点，点击**复制引用**，粘贴到任意 Agent 对话，再补充你的问题。引用保留实验和节点身份，Agent 可以按需读取最新上下文。
 
