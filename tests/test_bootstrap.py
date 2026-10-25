@@ -30,13 +30,17 @@ SPEC.loader.exec_module(bootstrap)
 
 
 class WindowsListenerTests(unittest.TestCase):
-    def table(self, rows, count=None):
+    def table(self, rows, count=None, ipv6=()):
         import ctypes
-        data = struct.pack('<I', len(rows) if count is None else count) + b''.join(struct.pack('<6I', *row) for row in rows)
         def get_table(buffer, length, ordered, family, table_class, reserved):
-            self.assertEqual((family, table_class, reserved), (socket.AF_INET, 3, 0))
+            self.assertEqual((table_class, reserved), (3, 0))
+            if family == socket.AF_INET:
+                data = struct.pack('<I', len(rows) if count is None else count) + b''.join(struct.pack('<6I', *row) for row in rows)
+            else:
+                self.assertEqual(family, socket.AF_INET6)
+                data = struct.pack('<I', len(ipv6)) + b''.join(struct.pack('<16sII16sIIII', *row) for row in ipv6)
             ctypes.cast(length, ctypes.POINTER(ctypes.c_uint32)).contents.value = len(data)
-            if buffer is None:
+            if buffer is None or len(buffer) < len(data):
                 return 122
             ctypes.memmove(buffer, data, len(data))
             return 0
@@ -60,6 +64,13 @@ class WindowsListenerTests(unittest.TestCase):
         import ctypes
         with patch.object(ctypes, 'WinDLL', return_value=self.table([], count=1), create=True):
             self.assertIsNone(bootstrap.windows_listener(4317))
+
+    def test_ipv6_loopback_and_wildcard_listeners_are_not_mistaken_for_an_empty_port(self):
+        import ctypes
+        for address in (bytes(16), bytes(15)+b'\x01', bytes(10)+b'\xff\xff\x7f\x00\x00\x01'):
+            rows = [(address, 0, socket.htons(4317), bytes(16), 0, 0, 2, 123)]
+            with self.subTest(address=address), patch.object(ctypes, 'WinDLL', return_value=self.table([], ipv6=rows), create=True):
+                self.assertIs(bootstrap.windows_listener(4317), True)
         with patch.object(ctypes, 'WinDLL', side_effect=OSError('unavailable'), create=True):
             self.assertIsNone(bootstrap.windows_listener(4317))
 
@@ -73,6 +84,13 @@ class WindowsListenerTests(unittest.TestCase):
             self.assertIs(bootstrap.windows_listener(port), True)
         with patch.object(bootstrap.socket, 'socket', side_effect=AssertionError('must not reserve a port')):
             self.assertEqual(bootstrap.probe(f'http://127.0.0.1:{port}'), 'missing')
+
+    @unittest.skipUnless(os.name == 'nt' and socket.has_ipv6, 'Windows IPv6 native test')
+    def test_native_probe_detects_an_ipv6_wildcard_listener(self):
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as listener:
+            listener.bind(('::', 0))
+            listener.listen()
+            self.assertIs(bootstrap.windows_listener(listener.getsockname()[1]), True)
 
 
 @unittest.skipUnless((ROOT/'dist/index.html').is_file() or os.environ.get('EXP_OBSERVER_RELEASE_ZIP'), 'Build the portable runtime first')

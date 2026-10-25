@@ -40,7 +40,7 @@ def origin(url):
 
 
 def windows_listener(port):
-    """Read the IPv4 listener table without reserving or connecting a port.
+    """Read the IPv4/IPv6 listener tables without reserving or connecting a port.
 
     GetExtendedTcpTable / MIB_TCPROW_OWNER_PID (six DWORD fields):
     https://learn.microsoft.com/windows/win32/api/iphlpapi/nf-iphlpapi-getextendedtcptable
@@ -52,28 +52,41 @@ def windows_listener(port):
         get_table.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32),
                               ctypes.c_int, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
         get_table.restype = ctypes.c_uint32
-        length = ctypes.c_uint32(0)
-        buffer = None
-        for _ in range(3):
-            result = get_table(buffer, ctypes.byref(length), 0, socket.AF_INET, 3, 0)
-            if result == 122 and 4 <= length.value <= 8 * 1024 * 1024:
-                buffer = ctypes.create_string_buffer(length.value)
-                continue
-            if result or buffer is None or length.value < 4:
+        for family, pattern in ((socket.AF_INET, '<6I'), (socket.AF_INET6, '<16sII16sIIII')):
+            length = ctypes.c_uint32(0)
+            buffer = None
+            for _ in range(3):
+                result = get_table(buffer, ctypes.byref(length), 0, family, 3, 0)
+                if result == 122 and 4 <= length.value <= 8 * 1024 * 1024:
+                    buffer = ctypes.create_string_buffer(length.value)
+                    continue
+                if result or buffer is None or length.value < 4:
+                    return None
+                data = buffer.raw[:length.value]
+                count = struct.unpack_from('<I', data)[0]
+                stride = struct.calcsize(pattern)
+                if count > (len(data) - 4) // stride:
+                    return None
+                for row in struct.iter_unpack(pattern, data[4:4+stride*count]):
+                    if family == socket.AF_INET:
+                        state, address, local = row[:3]
+                        loopback = address in (0, 0x0100007f)
+                    else:
+                        address, _, local, _, _, _, state, _ = row
+                        loopback = address in (bytes(16), bytes(15)+b'\x01', bytes(10)+b'\xff\xff\x7f\x00\x00\x01')
+                    if state == 2 and loopback and socket.ntohs(local & 0xffff) == port:
+                        return True
+                break
+            else:
                 return None
-            data = buffer.raw[:length.value]
-            count = struct.unpack_from('<I', data)[0]
-            if count > (len(data) - 4) // 24:
-                return None
-            return any(state == 2 and address in (0, 0x0100007f) and socket.ntohs(local & 0xffff) == port
-                       for state, address, local, _, _, _ in struct.iter_unpack('<6I', data[4:4+24*count]))
+        return False
     except (OSError, AttributeError, ValueError, struct.error):
         return None
 
 
 def probe(url):
     # A refused Windows connection can exceed a short HTTP deadline. Query the
-    # OS listener table instead of binding the port our child will need.
+    # OS listener tables instead of binding the port our child will need.
     if os.name == 'nt' and origin(url) is not None and windows_listener(origin(url)) is False:
         return 'missing'
     # Bypass proxy settings for a local service; do not follow redirects to a
