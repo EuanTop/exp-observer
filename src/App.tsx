@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Copy,
   Download,
   Files,
   FlaskConical,
@@ -45,7 +46,8 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type RuntimeSnapshot } from "./api";
+import { api, ApiError, type AgentSetup, type RuntimeSnapshot } from "./api";
+import { nodeReference } from "./node-reference";
 import { BoundaryInspector } from "./components/BoundaryInspector";
 import {
   ancestry,
@@ -125,6 +127,8 @@ export default function App() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [boundaryIds, setBoundaryIds] = useState<string[]>([]);
   const [runtime, setRuntime] = useState<RuntimeSnapshot | null>(null);
+  const [agentSetup, setAgentSetup] = useState<AgentSetup>();
+  const [referenceFallback, setReferenceFallback] = useState("");
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasData>>([]),
     [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const selectionRef = useRef(selected);
@@ -145,6 +149,31 @@ export default function App() {
   );
   const selectedNode = project?.nodes.find((n) => n.id === selected[0]);
   const selectedEdge = project?.edges.find((e) => e.id === edgeId);
+  useEffect(() => {
+    void api
+      .agentSetup()
+      .then(setAgentSetup)
+      .catch(() => {});
+  }, []);
+  const copyReference = async (ids: string[] = selected) => {
+    if (!project) return;
+    const nodes = ids
+      .map((id) => project.nodes.find((node) => node.id === id))
+      .filter((node): node is NonNullable<typeof node> => !!node);
+    if (!nodes.length) return;
+    const text = nodeReference(
+      project,
+      nodes,
+      window.location.origin,
+      agentSetup,
+    );
+    try {
+      await navigator.clipboard.writeText(text);
+      setToast("节点引用已复制，粘贴到 Agent 对话即可");
+    } catch {
+      setReferenceFallback(text);
+    }
+  };
   useEffect(() => {
     pRef.current = project;
   }, [project]);
@@ -667,7 +696,16 @@ export default function App() {
     <div className="app-shell">
       <div className="workspace">
         <header className="topbar">
-          <div className="wordmark">ExpObserver</div>
+          <div className="wordmark">
+            <img
+              className="app-icon"
+              src="/assets/app-icon.svg"
+              alt=""
+              width="28"
+              height="28"
+            />
+            ExpObserver
+          </div>
           <span className="topbar-divider" />
           <div className="project-switcher">
             <button
@@ -877,6 +915,16 @@ export default function App() {
                 )}
                 {view === "graph" && (
                   <>
+                    {selectedNode && (
+                      <button
+                        className="button"
+                        onClick={() => void copyReference()}
+                      >
+                        <Copy size={14} />
+                        复制引用
+                        {selected.length > 1 ? ` · ${selected.length}` : ""}
+                      </button>
+                    )}
                     {scope && boundaryRelations(project!, scope).length > 0 && (
                       <button
                         className="button"
@@ -1187,6 +1235,9 @@ export default function App() {
                             busy={busy}
                             tab={inspectorTab}
                             onTabChange={setInspectorTab}
+                            onCopyReference={() =>
+                              void copyReference([selectedNode.id])
+                            }
                             mutate={mutate}
                             onClose={() => setInspector(false)}
                             onBranch={() =>
@@ -1335,6 +1386,55 @@ export default function App() {
           <button onClick={() => setToast("")}>
             <X size={13} />
           </button>
+        </div>
+      )}
+      {referenceFallback && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setReferenceFallback("");
+          }}
+        >
+          <div
+            className="modal reference-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reference-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setReferenceFallback("");
+              }
+            }}
+          >
+            <div className="modal-heading">
+              <h2 id="reference-title">复制节点引用</h2>
+              <IconButton
+                label="关闭引用"
+                onClick={() => setReferenceFallback("")}
+              >
+                <X size={16} />
+              </IconButton>
+            </div>
+            <p>自动复制未成功，请复制下方内容到 Agent 对话。</p>
+            <textarea
+              aria-label="节点引用内容"
+              readOnly
+              autoFocus
+              value={referenceFallback}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+            <button
+              className="button wide"
+              onClick={(event) => {
+                event.currentTarget.parentElement
+                  ?.querySelector("textarea")
+                  ?.select();
+              }}
+            >
+              全选引用
+            </button>
+          </div>
         </div>
       )}
       {dialog && (

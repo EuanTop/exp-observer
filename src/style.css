@@ -208,6 +208,24 @@ p {
   align-items: center;
   gap: 10px;
 }
+.app-icon {
+  flex: none;
+  border-radius: 7px;
+}
+.reference-modal {
+  width: min(620px, calc(100vw - 32px));
+  padding: 22px;
+}
+.reference-modal > p {
+  color: var(--muted);
+  font-size: 13px;
+}
+.reference-modal textarea {
+  width: 100%;
+  height: min(360px, 50vh);
+  margin-bottom: 12px;
+  line-height: 1.65;
+}
 .version {
   font-size: 8px;
   letter-spacing: 1.2px;

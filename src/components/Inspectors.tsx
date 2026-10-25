@@ -4,6 +4,7 @@ import {
   Box,
   CheckCircle2,
   ChevronRight,
+  Copy,
   FileText,
   FlaskConical,
   GitBranch,
@@ -144,6 +145,7 @@ export function NodeInspector({
   onArtifact,
   onSelect,
   onConnect,
+  onCopyReference,
 }: {
   node: ResearchNode;
   project: Project;
@@ -159,6 +161,7 @@ export function NodeInspector({
   onArtifact: (a: Artifact) => void;
   onSelect: (id: string) => void;
   onConnect: () => void;
+  onCopyReference: () => void;
 }) {
   const [editing, setEditing] = useState(false),
     [draft, setDraft] = useState({ ...node });
@@ -209,6 +212,9 @@ export function NodeInspector({
           {kinds[node.kind] || node.kind}
         </span>
         <div>
+          <IconButton label="复制节点引用" onClick={onCopyReference}>
+            <Copy size={14} />
+          </IconButton>
           <IconButton label="新增子节点" onClick={onChild}>
             <Plus size={14} />
           </IconButton>
