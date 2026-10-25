@@ -3,6 +3,7 @@ import type { ElkNode, ElkExtendedEdge } from "elkjs/lib/elk-api";
 import type { CanvasData } from "./model";
 import type { Point, Rect } from "./edge-routing";
 import { straightenRoute } from "./edge-simplification";
+import { parallelPorts } from "./parallel-layout";
 
 export type Canvas = { nodes: Node<CanvasData>[]; edges: Edge[] };
 export type LayoutGeometry = Rect & { id: string };
@@ -120,6 +121,7 @@ async function compute(
   const boxes = new Map<string, Rect>();
   const routes = new Map<string, Omit<LayoutRoute, "geometry">>();
   const hidden = new Set<string>();
+  const reservedPortEdges = new Set<string>();
   const scopes = new Map<string | undefined, Node<CanvasData>[]>();
   for (const node of canvas.nodes) {
     const parent = byId.has(node.parentId ?? "") ? node.parentId : undefined;
@@ -167,6 +169,16 @@ async function compute(
       projected,
     );
     hiddenHere.forEach((id) => hidden.add(id));
+    const parallel = parallelPorts(
+      members.map((n) => n.id),
+      links,
+    );
+    for (const edge of links)
+      if (
+        parallel.ports.has(`${edge.id}:out`) ||
+        parallel.ports.has(`${edge.id}:in`)
+      )
+        reservedPortEdges.add(edge.id);
     const ports = new Map<string, NonNullable<ElkNode["ports"]>>(
       members.map((n) => [n.id, []]),
     );
@@ -190,11 +202,36 @@ async function compute(
         id: edge.id,
         sources: [sourcePort],
         targets: [targetPort],
+        ...(parallel.axes.has(edge.id)
+          ? { layoutOptions: { "elk.layered.priority.straightness": "100" } }
+          : {}),
         ...(text
           ? { labels: [{ text, width: labelWidth(text), height: 20 }] }
           : {}),
       };
     });
+    const fixedPorts = new Set<string>();
+    for (const node of members) {
+      const nodePorts = ports.get(node.id)!;
+      if (!nodePorts.some((port) => parallel.ports.has(port.id))) continue;
+      fixedPorts.add(node.id);
+      const dimensions = boxes.get(node.id) ?? size(node);
+      for (const side of ["NORTH", "SOUTH"]) {
+        const onSide = nodePorts.filter(
+          (port) => port.layoutOptions?.["elk.port.side"] === side,
+        );
+        onSide.forEach((port, index) => {
+          const fraction =
+            parallel.ports.get(port.id) ?? (index + 1) / (onSide.length + 1);
+          port.x = dimensions.width * fraction;
+          port.y = side === "SOUTH" ? dimensions.height : 0;
+        });
+      }
+      // ELK's fixed port order proceeds clockwise around each card.
+      nodePorts.sort((a, b) =>
+        a.y === b.y ? (a.y === 0 ? a.x! - b.x! : b.x! - a.x!) : a.y! - b.y!,
+      );
+    }
     const graph: ElkNode = await engine.layout({
       id: scope ?? "research",
       layoutOptions: {
@@ -213,7 +250,9 @@ async function compute(
         "elk.spacing.labelLabel": "14",
         "elk.layered.mergeEdges": "false",
         "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-        "elk.layered.nodePlacement.favorStraightEdges": "true",
+        "elk.layered.nodePlacement.favorStraightEdges": parallel.axes.size
+          ? "false"
+          : "true",
         "elk.randomSeed": "1",
       },
       children: members.map((node) => ({
@@ -226,7 +265,12 @@ async function compute(
             }
           : {}),
         ports: ports.get(node.id),
-        layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
+        layoutOptions: {
+          "elk.portConstraints": fixedPorts.has(node.id)
+            ? "FIXED_POS"
+            : "FIXED_SIDE",
+          "elk.alignment": "TOP",
+        },
       })),
       edges: connections,
     });
@@ -370,7 +414,10 @@ async function compute(
       const route = routes.get(edge.id),
         source = rects.get(edge.source),
         target = rects.get(edge.target);
-      if (!route || !source || !target) continue;
+      // A local straightening pass must not move a reserved port and undo the
+      // global center corridor in favor of a straight side branch.
+      if (!route || !source || !target || reservedPortEdges.has(edge.id))
+        continue;
       const others = [...routes]
         .filter(([id]) => id !== edge.id)
         .map(([, route]) => route);
