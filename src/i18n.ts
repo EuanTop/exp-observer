@@ -4,6 +4,9 @@ import { appEn } from "./locales/app.en";
 import { dialogsEn } from "./locales/dialogs.en";
 import { graphEn } from "./locales/graph.en";
 import { inspectorsEn } from "./locales/inspectors.en";
+import { notesEn } from "./locales/notes.en";
+import { deliveryEn } from "./locales/delivery.en";
+import { progressionEn } from "./locales/progression.en";
 
 export type Locale = "en" | "zh-CN";
 export const LANGUAGE_KEY = "exp-observer-language";
@@ -11,6 +14,9 @@ export const englishMessages: Readonly<Record<string, string>> = {
   ...dialogsEn,
   ...graphEn,
   ...inspectorsEn,
+  ...notesEn,
+  ...deliveryEn,
+  ...progressionEn,
   ...appEn,
   ...commonEn,
 };

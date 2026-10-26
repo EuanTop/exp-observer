@@ -24,7 +24,7 @@
 
 | Follow the reasoning | Inspect the evidence |
 | :--- | :--- |
-| **Nested research spaces.** Keep the main story readable; open containers for subquestions, alternatives, and deeper experiments. | **Original results.** Inspect retained files, command output, configuration, and comparisons beside the graph. |
+| **Nested research spaces.** Keep the main story readable; open containers for subquestions, alternatives, and deeper experiments. | **Original results.** Read native Markdown analysis, retained files, command output, and comparisons beside the graph. |
 | **Work across conversations.** A portable Skill lets multiple agent chats contribute to the same experiment. Copy a node reference to discuss a specific step. | **Visible progress and cost.** See completed, paused, excluded, and failed work, with captured timing and available Token usage. |
 
 Your agent chooses the research approach. ExpObserver preserves how it develops, including negative results and unfinished questions. Records, revision history, and evidence stay on your computer.
@@ -51,7 +51,7 @@ Then give your agent a research task:
 
 > Use the ExpObserver Skill for experiment `my-study`. Investigate my question, retain the evidence, and keep the experiment up to date as you work.
 
-The Skill can wake the installed platform when it is closed. Records queue locally if the service is unavailable.
+The Skill can wake the installed platform when it is closed. Records queue locally if the service is unavailable; delivery failures stay visible and retry without rerunning experiments.
 
 The interface defaults to **English**. Choose **简体中文** in the language selector; your choice is remembered. In compact windows, open **More tools** to find it.
 

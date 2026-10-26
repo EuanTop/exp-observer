@@ -7,6 +7,8 @@ description: Observe research in a local ExpObserver experiment with brief updat
 
 Follow the user's research objective, budget and deliverables. Choose methods from evidence; recording adds no research phases.
 
+Keep the analysis itself in Observer: use native `summary`, `conclusion` and Markdown `notes`, rather than a parallel local report. Create a separate analysis document only when the user asks for it; scripts, data and figures remain local evidence.
+
 Use `scripts/exp_observer.py` relative to this Skill with Python 3.10+. Examples use `python3`; on Windows use `py -3` or the installed interpreter. The default address is `http://127.0.0.1:4317`; `EXP_OBSERVER_URL` or global `--url URL` selects another server.
 
 The client automatically reuses or starts the local platform. A complete portable Skill from the release carries its runtime for offline first use; source-only copies can provision the official release in the background. No installation detour is needed during research. If startup is blocked, keep working with the local queue. `--no-autostart` (before the command) or `EXP_OBSERVER_AUTOSTART=0` keeps deliberate offline operation; local `status` never starts a service.
@@ -57,9 +59,7 @@ Containment expresses research ownership; `--after`, `--evidence` and `--summari
 
 ## Keep analysis in the experiment
 
-When using Observer, the default home for conclusions and analysis is the platform's native `summary`, `conclusion` and `notes` fields. Do not also create `REPORT.md`, a summary-style README or a separate conclusion report unless the user explicitly asks for that document. Scripts, original data and images remain local evidence.
-
-Use `event --notes TEXT` for full reasoning, comparisons and limitations. `--notes-file PATH` loads existing UTF-8 analysis verbatim; `--notes-file -` reads stdin. Notes belong to the supplied change, or to the question when no change is supplied. They supplement the visible finding rather than hiding distinct discoveries in a shared script node. Omitted notes preserve existing notes.
+Use `event --notes TEXT` for full reasoning, comparisons and limitations. Notes render Markdown headings, lists, tables and code blocks natively. `--notes-file PATH` loads existing UTF-8 analysis verbatim; `--notes-file -` reads stdin without creating a local report. Notes belong to the supplied change, or to the question when no change is supplied. They supplement the visible finding rather than hiding distinct discoveries in a shared script node. Omitted notes preserve existing notes.
 
 Attach existing JSON with `--metrics-file results.json --artifact results.json`. Nested values are preserved; other root types use `result`. Files stay unchanged.
 
@@ -81,7 +81,7 @@ The command's exit status describes the experiment; `pending` and `recordingWarn
 
 A workspace network denial is an expected local-queue mode. Do not request a sandbox exception, relax permissions or retry network access just to register observations. Continue the research and use the final local receipt to describe delivery.
 
-Recovery never reruns experiments or rereads changed source evidence. Do not reformat outputs, repeat experiments or diagnose the platform merely to complete a record. Manual `sync` is optional recovery.
+Recovery never reruns experiments or rereads changed source evidence. Unresolved retained IDs wait in the queue rather than becoming new question titles. Do not reformat outputs, repeat experiments or diagnose IDs/retries merely to complete a record. Delivery failures are retained for the platform's sync view; manual `sync` is optional recovery.
 
 Before your final brief result, call `status --project ID` once from the research working directory. It reads local receipts and dated context without HTTP or polling. `researchReview.openQuestions` prompts you to check locally known active/running questions you actually touched; it does not assess conclusions or prove global state. No local question/context means research review is unknown. Keep this review separate from `deliveryState`. Background recovery may have replaced an earlier pending receipt with `synced`; use this latest `deliveryState`, not an old `pending` response, when describing registration. Say registered for `synced`, or saved locally awaiting background reception for `pending`. This does not test HTTP reachability: a past client connection error is not evidence that the service is down, and historical warnings do not make an acknowledged record pending. Respect the reported local scope; unknown or partial status does not confirm registration. A synced receipt confirms registration rather than scientific success.
 

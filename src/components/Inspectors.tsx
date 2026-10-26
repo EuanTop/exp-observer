@@ -33,9 +33,15 @@ import {
 
 import { Badge, date, IconButton, kindIcon } from "./Primitives";
 import { NodeUsagePanel } from "./NodeUsagePanel";
+import { ResearchNotes } from "./ResearchMarkdown";
 import { MetricDetails } from "./MetricDetails";
 import { nodePresentation } from "../node-presentation";
 import { ProjectHostUsage } from "./HostUsage";
+import {
+  openResearchNodes,
+  researchProgression,
+} from "../research-progression";
+import "./research-progression.css";
 export function ProjectInspector({
   project,
   onAdd,
@@ -47,8 +53,14 @@ export function ProjectInspector({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
-  const active = project.nodes.filter((n) => n.status === "active");
+  const active = openResearchNodes(project);
   const decisions = project.decisions;
+  const progression = researchProgression(project);
+  const [allProgression, setAllProgression] = useState(false);
+  useEffect(() => setAllProgression(false), [project.id]);
+  const visibleProgression = allProgression
+    ? progression
+    : progression.slice(-5);
   return (
     <>
       <div className="inspector-heading">
@@ -77,9 +89,54 @@ export function ProjectInspector({
             <span>{t("原始证据")}</span>
           </div>
         </div>
-        <ProjectHostUsage project={project} />
         <div className="inspector-section-title">
-          <span>{t("开放问题与方向")}</span>
+          <span>{t("已记录的判断变化")}</span>
+          <span>
+            {t("跨容器查看")} · {progression.length}
+          </span>
+        </div>
+        {!progression.length && (
+          <div className="small-empty">{t("尚无判断记录")}</div>
+        )}
+        <ol className="research-progression-list">
+          {visibleProgression.map(({ node, path, createdAt }) => (
+            <li key={node.id}>
+              <button
+                className="research-progression-entry"
+                onClick={() => onSelect(node.id)}
+              >
+                <span className="research-progression-path">
+                  {path.join(" / ") || t("项目顶层")}
+                </span>
+                <strong>{node.title}</strong>
+                {node.conclusion?.trim() &&
+                  node.conclusion.trim() !== node.title.trim() && (
+                    <p>{node.conclusion}</p>
+                  )}
+                <span className="research-progression-meta">
+                  <span>{createdAt ? date(createdAt) : t("按记录顺序")}</span>
+                  <span>
+                    {kinds[node.kind] ? t(kinds[node.kind]) : node.kind}{" "}
+                    <ChevronRight size={11} />
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+        {progression.length > 5 && (
+          <button
+            className="button wide subtle"
+            aria-expanded={allProgression}
+            onClick={() => setAllProgression(!allProgression)}
+          >
+            {allProgression
+              ? t("仅看最近五条")
+              : t("查看全部 {count} 条", { count: progression.length })}
+          </button>
+        )}
+        <div className="inspector-section-title">
+          <span>{t("暂停与开放事项")}</span>
           <span>{active.length}</span>
         </div>
         {active.map((n) => (
@@ -93,7 +150,10 @@ export function ProjectInspector({
             </span>
             <span>
               <strong>{n.title}</strong>
-              <small>{n.nextAction || n.summary}</small>
+              <span className="research-open-status">
+                <Badge status={n.status} />
+              </span>
+              <small>{n.pauseReason || n.nextAction || n.summary}</small>
             </span>
             <ChevronRight size={14} />
           </button>
@@ -118,6 +178,7 @@ export function ProjectInspector({
             ))}
           </>
         )}
+        <ProjectHostUsage project={project} />
         <button className="button wide subtle" onClick={onAdd}>
           <Plus size={14} />
           {t("继续探索")}
@@ -457,12 +518,11 @@ export function NodeInspector({
                   </div>
                 )}
                 {node.notes && (
-                  <div className="detail-note">
-                    <div className="inspector-section-title">
-                      <span>{t("研究记录")}</span>
-                    </div>
-                    <p>{node.notes}</p>
-                  </div>
+                  <ResearchNotes
+                    key={node.id}
+                    text={node.notes}
+                    title={node.title}
+                  />
                 )}
                 {node.nextAction && (
                   <div className="next-action">

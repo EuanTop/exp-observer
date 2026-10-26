@@ -264,10 +264,16 @@ class Recovery:
         self.acknowledged = {}
         self.project_plans = {}
         self.runtime_candidates = (0, ())
+        self.delivery_lock = threading.Lock()
+        self.discovery_lock = threading.RLock()
         from .host_usage import HostUsageImporter
         self.host_usage = HostUsageImporter(store, url=self.url) if store is not None else None
 
     def _targets(self, results):
+        with self.discovery_lock:
+            return self._scan_targets(results)
+
+    def _scan_targets(self, results):
         targets, active, disabled = {}, [], []
         if self.store is not None:
             try:
@@ -363,6 +369,10 @@ class Recovery:
                         if task['state'] == 'synced':
                             self.acknowledged[str(path)] = signature
                         else:
+                            delivery = task.get('delivery') if isinstance(task.get('delivery'), dict) else {}
+                            after = self.cli.local_timestamp(delivery.get('nextAttemptAt'))
+                            if task['state'] == 'ready' and after is not None and after > time.time():
+                                continue
                             candidates.append(item)
                     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
                         results.append({'task': path.name, 'pending': True, 'recordingWarnings': [str(exc)]})
@@ -393,9 +403,20 @@ class Recovery:
                 raise ValueError('Queued record follows a symlink or leaves the workspace scope.')
             with self.cli.task_lock(path):
                 task = self.cli.read_queue_task(path)
-                if self.cli.loopback_origin(task['url']) != self.origin or task['projectId'] != previous['projectId']:
+                if (self.cli.loopback_origin(task['url']) != self.origin or task['projectId'] != previous['projectId']
+                        or any(task.get(key) != previous.get(key) for key in ('kind', 'taskId', 'requestId'))):
                     raise ValueError('Queued record identity changed while recovery was processing it.')
-                self._validate_capture(path, root, task)
+                try:
+                    self._validate_capture(path, root, task)
+                except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                    warnings = [str(exc)]
+                    if task['state'] == 'ready':
+                        # Only the scoped receipt is mutable. Unsafe evidence is
+                        # never opened, rewritten or imported by this recovery.
+                        self.cli.delivery_attempt(path, task)
+                        self.cli.delivery_failed(path, task, exc, warnings)
+                    return {'task': path.name, 'projectId': task['projectId'], 'pending': True,
+                            'recordingWarnings': warnings}
                 client = self.cli.Client(task['url'], timeout=1, transport_url=self.url, local_only=True, queue_root=root)
                 # The application already resolves authoritative parent plans. The
                 # standalone client's optional ancestor lookup must stay in this scope.
@@ -417,6 +438,10 @@ class Recovery:
         return min(ancestors, key=lambda item: (item[2].get('preparedAt', ''), str(item[0]))) if ancestors else None
 
     def drain_once(self):
+        with self.delivery_lock:
+            return self._drain_once()
+
+    def _drain_once(self):
         results = []
         if self.origin is None:
             return results
@@ -450,6 +475,96 @@ class Recovery:
             results.extend(self.host_usage.drain_once(targets))
         self.last_results = results
         return results
+
+    def _delivery_receipts(self, project_id):
+        warnings = []
+        with self.discovery_lock:
+            targets = self._targets(warnings)
+            complete = all(not scanner.queue and scanner.cursor is None
+                and scanner.priority_cursor is None and not scanner.priority_queue
+                for scanner in self.discovery.values())
+        receipts = []
+        for outbox, root in sorted(targets.items(), key=lambda item: str(item[0])):
+            try:
+                for path in outbox.glob('*.json'):
+                    if not scoped_path(path, root) or not path.is_file():
+                        continue
+                    try:
+                        task = self.cli.read_queue_task(path)
+                        if task['projectId'] == project_id and self.cli.loopback_origin(task['url']) == self.origin:
+                            receipts.append((path, root, task))
+                    except (OSError, ValueError, KeyError, TypeError):
+                        # An unreadable receipt cannot establish complete delivery.
+                        warnings.append(True)
+            except OSError:
+                warnings.append(True)
+        return receipts, bool(targets), complete and not warnings
+
+    def delivery_status(self, project_id):
+        """Read durable receipts; never acknowledge, repair or submit from a GET."""
+        result = {'projectId': project_id, 'available': False, 'checkedAt': self.cli.stamp(),
+                  'state': 'unknown', 'scope': 'connected-workspaces', 'discoveryComplete': False,
+                  'pendingCount': 0, 'blockedCount': 0, 'interruptedCount': 0, 'syncedCount': 0, 'items': []}
+        if self.origin is None or self.stopped.is_set():
+            return result
+        receipts, available, complete = self._delivery_receipts(project_id)
+        result.update(available=available, discoveryComplete=complete)
+        for path, root, task in receipts:
+            if task['state'] == 'synced':
+                result['syncedCount'] += 1
+                continue
+            delivery = task.get('delivery') if isinstance(task.get('delivery'), dict) else {}
+            error = delivery.get('lastError')
+            error = ({'code': str(error.get('code') or 'delivery_failed')[:128],
+                      'message': str(error.get('message') or '')[:4096]}
+                     if isinstance(error, dict) else None)
+            lock = path.with_suffix('.lock')
+            live = scoped_path(lock, root) and capture_lock_held(lock)
+            state = ('pending' if live else 'interrupted') if task['state'] != 'ready' else ('blocked' if error else 'pending')
+            intent = task.get('intent') if isinstance(task.get('intent'), dict) else {}
+            metadata = task.get('project') if isinstance(task.get('project'), dict) else {}
+            attempts = delivery.get('attempts', 0)
+            title = next((value for value in (intent.get('title'), intent.get('finding'), intent.get('correction'),
+                                              intent.get('direction'), intent.get('question'), metadata.get('name'), task.get('nodeId'))
+                          if isinstance(value, str) and value.strip()), 'Queued record')
+            result[state + 'Count'] += 1
+            result['items'].append({'taskId': task.get('taskId') if isinstance(task.get('taskId'), str) and task['taskId'] else path.stem,
+                'requestId': task.get('requestId') if isinstance(task.get('requestId'), str) else None,
+                'nodeId': task.get('nodeId') if isinstance(task.get('nodeId'), str) else None,
+                'title': title[:500],
+                'state': state, 'attempts': attempts if isinstance(attempts, int) and attempts >= 0 else 0,
+                'lastAttemptAt': delivery.get('lastAttemptAt') if isinstance(delivery.get('lastAttemptAt'), str) else None,
+                'lastError': error})
+        if result['blockedCount'] or result['interruptedCount']:
+            result['state'] = 'blocked'
+        elif result['pendingCount']:
+            result['state'] = 'pending'
+        elif receipts and complete:
+            result['state'] = 'synced'
+        return result
+
+    def retry_delivery(self, project_id, task_id=None):
+        """Resubmit frozen records only; executable intent is never run here."""
+        from .store import StoreError
+        if self.origin is None or self.stopped.is_set():
+            raise StoreError('Queue recovery is unavailable.', 'recovery_unavailable', 409)
+        if not self.delivery_lock.acquire(blocking=False):
+            raise StoreError('Queue recovery is already processing records. Try again shortly.', 'recovery_busy', 409)
+        try:
+            receipts, _, _ = self._delivery_receipts(project_id)
+            known = [item for item in receipts if task_id is None or (item[2].get('taskId') or item[0].stem) == task_id]
+            if task_id is not None and not known:
+                raise StoreError('Queued record was not found in connected workspaces.', 'not_found', 404)
+            results = []
+            for item in sorted(known, key=lambda item: (item[2].get('kind') != 'project', str(item[0]))):
+                path, root, task = item
+                lock = path.with_suffix('.lock')
+                if task['state'] != 'ready' or (scoped_path(lock, root) and capture_lock_held(lock)):
+                    continue
+                results.append(self._submit(item))
+            return {'retriedCount': len(results), 'deliveryStatus': self.delivery_status(project_id)}
+        finally:
+            self.delivery_lock.release()
 
     def runtime(self, project_id):
         checked_at, candidates = self.runtime_candidates

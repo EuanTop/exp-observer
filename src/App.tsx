@@ -83,6 +83,7 @@ import {
 import { OutlineTree } from "./components/OutlineTree";
 import { date, IconButton, time } from "./components/Primitives";
 import { ResearchCard } from "./components/ResearchCard";
+import { DeliveryStatus } from "./components/DeliveryStatus";
 import { ResearchEdge } from "./components/ResearchEdge";
 import { layoutCanvas } from "./graph-layout";
 import { CompareView, EvidenceView, RunsView } from "./components/Views";
@@ -463,6 +464,9 @@ export default function App() {
   ]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      // Native reading/delivery dialogs own keyboard input and Escape. Closing
+      // one must preserve the selected research node underneath it.
+      if (document.querySelector("dialog[open]")) return;
       const tag = (e.target as HTMLElement).tagName;
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
@@ -785,10 +789,7 @@ export default function App() {
             ))}
           </nav>
           <div className="topbar-right">
-            <span className={`connection ${error ? "disconnected" : ""}`}>
-              <span />
-              {error ? t("重新连接") : busy ? t("保存中") : t("已保存至本地")}
-            </span>
+            <DeliveryStatus projectId={project?.id} error={error} busy={busy} />
             <button
               className="search-trigger"
               aria-label={t("搜索")}

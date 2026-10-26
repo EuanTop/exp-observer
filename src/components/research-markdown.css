@@ -1,0 +1,230 @@
+.research-notes {
+  min-width: 0;
+  margin: 20px 0;
+}
+.research-notes-toolbar,
+.research-notes-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.research-notes-toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.research-notes-modes {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--raised);
+}
+.research-notes-modes button {
+  padding: 5px 7px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.research-notes-modes button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: 0 1px 3px #0001;
+}
+.research-markdown {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.research-markdown > :first-child {
+  margin-top: 0;
+}
+.research-markdown > :last-child {
+  margin-bottom: 0;
+}
+.research-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.4em 0 0.65em;
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--text);
+}
+.research-markdown h1 {
+  font-size: 1.5em;
+}
+.research-markdown h2 {
+  font-size: 1.3em;
+}
+.research-markdown :is(h3, h4, h5, h6) {
+  font-size: 1.1em;
+}
+.research-markdown :is(p, ul, ol, blockquote, pre) {
+  margin: 0.8em 0;
+}
+.research-markdown :is(ul, ol) {
+  padding-left: 1.6em;
+}
+.research-markdown ul {
+  list-style: disc;
+}
+.research-markdown ol {
+  list-style: decimal;
+}
+.research-markdown li + li {
+  margin-top: 0.25em;
+}
+.research-markdown li > p {
+  margin: 0.3em 0;
+}
+.research-markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.research-markdown blockquote {
+  padding: 0.2em 0 0.2em 1em;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.research-markdown code,
+.research-note-source {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+}
+.research-markdown :not(pre) > code {
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  background: var(--raised);
+  white-space: break-spaces;
+}
+.research-markdown pre,
+.research-note-source {
+  max-width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--raised);
+  overflow: auto;
+  white-space: pre;
+  line-height: 1.6;
+  tab-size: 4;
+}
+.research-markdown pre code {
+  font-size: 1em;
+  overflow-wrap: normal;
+}
+.research-note-source {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+.research-markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1em 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.research-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.research-markdown :is(th, td) {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  min-width: 100px;
+  text-align: left;
+  vertical-align: top;
+}
+.research-markdown th {
+  background: var(--raised);
+  font-weight: 600;
+}
+.research-markdown tr:last-child td {
+  border-bottom: 0;
+}
+.research-markdown hr {
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.research-markdown .contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+.research-markdown input[type="checkbox"] {
+  width: auto;
+  margin-right: 6px;
+  accent-color: var(--accent);
+}
+.research-notes-dialog {
+  width: min(860px, calc(100vw - 32px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.research-notes-dialog::backdrop {
+  background: #0007;
+}
+.research-notes-dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.research-notes-dialog-heading > div {
+  min-width: 0;
+}
+.research-notes-dialog-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.research-notes-dialog-heading h2 {
+  margin: 6px 0 0;
+  font-size: 18px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.research-notes-dialog-heading button {
+  flex-shrink: 0;
+}
+.research-notes-dialog-content {
+  padding: 20px 24px 28px;
+}
+.research-notes-dialog-content > .research-notes-modes {
+  margin-bottom: 20px;
+}
+.research-notes-dialog-content .research-markdown {
+  font-size: 14px;
+}
+@media (max-width: 480px) {
+  .research-notes-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+  .research-notes-dialog-heading {
+    padding: 16px;
+  }
+  .research-notes-dialog-content {
+    padding: 16px;
+  }
+  .research-notes-dialog-heading h2 {
+    font-size: 16px;
+  }
+}

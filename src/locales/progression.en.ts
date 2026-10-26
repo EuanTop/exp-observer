@@ -1,0 +1,28 @@
+export const progressionEn: Record<string, string> = {
+  已记录的判断变化: "Recorded progression",
+  跨容器查看: "Across containers",
+  按记录顺序: "Recorded order",
+  项目顶层: "Project root",
+  "查看全部 {count} 条": "View all {count}",
+  仅看最近五条: "Show latest five",
+  尚无判断记录: "No judgments recorded yet",
+  暂停与开放事项: "Paused and open work",
+  未采集: "Not collected",
+  用量覆盖: "Usage coverage",
+  主研究用量: "Research agent",
+  被测执行用量: "Evaluated execution",
+  未归属节点: "Unassigned to nodes",
+  步骤计时记录: "Step timers",
+  捕获命令: "Captured commands",
+  命令耗时合计: "Command time sum",
+  "{count} 条": "{count} records",
+  "{count} 次": "{count} commands",
+  "{count} 项计时中": "{count} timers running",
+  "{measured}/{total} 次命令有计时": "Timing for {measured}/{total} commands",
+  采集来源: "Collection sources",
+  暂无可归属用量: "No attributable usage collected",
+  主研究与被测执行分别计量:
+    "Research and evaluated execution measured separately",
+  步骤计时与命令耗时分别展示:
+    "Step timers and command durations shown separately",
+};

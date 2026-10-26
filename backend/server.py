@@ -185,6 +185,23 @@ class Handler(BaseHTTPRequestHandler):
                 recovery = self.server.recovery
                 return self._send(recovery.runtime(project_id) if recovery is not None else {
                     'projectId': project_id, 'checkedAt': now(), 'source': 'unavailable', 'active': []})
+            if tail == ['delivery-status'] and method == 'GET':
+                store.get_project(project_id)
+                recovery = self.server.recovery
+                return self._send(recovery.delivery_status(project_id) if recovery is not None else {
+                    'projectId': project_id, 'available': False, 'checkedAt': now(), 'state': 'unknown',
+                    'scope': 'connected-workspaces', 'discoveryComplete': False, 'pendingCount': 0,
+                    'blockedCount': 0, 'interruptedCount': 0, 'syncedCount': 0, 'items': []})
+            if tail == ['delivery', 'retry'] and method == 'POST':
+                store.get_project(project_id)
+                body = self._body() if self.headers.get('Content-Length', '0') != '0' else {}
+                if not isinstance(body, dict) or set(body) - {'taskId'} or ('taskId' in body and
+                        (not isinstance(body['taskId'], str) or not body['taskId'])):
+                    raise StoreError('Retry accepts only an optional taskId.', 'invalid_body')
+                recovery = self.server.recovery
+                if recovery is None:
+                    raise StoreError('Queue recovery is unavailable.', 'recovery_unavailable', 409)
+                return self._send(recovery.retry_delivery(project_id, body.get('taskId')))
             if tail == ['context'] and method == 'GET':
                 return self._send(store.context(project_id, query.get('node', [None])[0]))
             if tail == ['batch'] and method == 'POST':

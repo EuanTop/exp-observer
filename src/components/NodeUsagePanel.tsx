@@ -32,23 +32,35 @@ export function NodeUsagePanel({
         <div>
           <span>{t("记录计时")}</span>
           <strong>
-            {formatDuration(usage.elapsedMs)}
+            {usage.elapsedMs === null
+              ? t("未采集")
+              : formatDuration(usage.elapsedMs)}
             {usage.elapsedPartial && usage.elapsedMs !== null ? "+" : ""}
           </strong>
         </div>
         <div>
           <span>{t("输入 Token")}</span>
-          <strong>{formatTokens(usage.inputTokens)}</strong>
+          <strong>
+            {usage.inputTokens === null
+              ? t("未采集")
+              : formatTokens(usage.inputTokens)}
+          </strong>
         </div>
         <div>
           <span>{t("输出 Token")}</span>
-          <strong>{formatTokens(usage.outputTokens)}</strong>
+          <strong>
+            {usage.outputTokens === null
+              ? t("未采集")
+              : formatTokens(usage.outputTokens)}
+          </strong>
         </div>
       </div>
       <p className="usage-scope">
-        {usage.tokenScope === "execution"
-          ? t("被测任务用量")
-          : t("研究 Agent 用量")}
+        {usage.tokenScope === null
+          ? t("暂无可归属用量")
+          : usage.tokenScope === "execution"
+            ? t("被测任务用量")
+            : t("研究 Agent 用量")}
       </p>
       <div className="usage-scope">
         <span>
@@ -62,7 +74,10 @@ export function NodeUsagePanel({
           <span>
             {t("{count} 次运行 · 执行 {duration}", {
               count: usage.runCount,
-              duration: formatDuration(usage.runMs),
+              duration:
+                usage.runMs === null
+                  ? t("未采集")
+                  : formatDuration(usage.runMs),
             })}
           </span>
         )}

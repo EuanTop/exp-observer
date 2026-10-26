@@ -550,12 +550,15 @@ class Store:
             self._expected(previous, body)
             p = copy.deepcopy(previous)
             unplaced = set()
+            added_supports = set()
             geometry_changed = False
             for operation in operations:
                 object_value(operation, 'Operation')
                 data = copy.deepcopy(object_value(operation.get('data', {}), 'Operation data'))
                 node_count = len(p['nodes'])
                 self._apply(p, operation.get('op'), data)
+                if operation.get('op') == 'edge.add' and data.get('relation') == 'supports':
+                    added_supports.add(data['id'])
                 if operation.get('op') in ('node.add', 'node.ensure') and len(p['nodes']) > node_count and 'position' not in data:
                     unplaced.add(p['nodes'][-1]['id'])
                 op = operation.get('op')
@@ -563,6 +566,23 @@ class Store:
                     op in ('edge.add', 'edge.update', 'edge.delete', 'node.delete', 'node.merge') or
                     op in ('node.add', 'node.ensure') and len(p['nodes']) > node_count or
                     op == 'node.update' and any(key in data for key in ('parentId', 'kind', 'isContainer', 'collapsed', 'position', 'positionSource')))
+            # Old frozen captures used exact execution IDs as evidence sources.
+            # Resolve only new supports edges after the complete batch, so real
+            # nodes (including aliases and nodes created later) take priority.
+            # The incoming operations and request fingerprint remain unchanged.
+            node_ids = {node['id'] for node in p['nodes']}
+            runs = {run['id']: run for run in p['runs']}
+            aliases = p.get('nodeAliases', {})
+            for edge in p['edges']:
+                if edge['id'] not in added_supports or edge.get('relation') != 'supports':
+                    continue
+                source = edge.get('source')
+                if isinstance(source, str) and source not in node_ids and source not in aliases and source in runs:
+                    run = runs[source]
+                    edge['source'] = aliases.get(run.get('nodeId'), run.get('nodeId'))
+                    run_ids = edge.get('runIds', [])
+                    if isinstance(run_ids, list):
+                        edge['runIds'] = run_ids + ([run['id']] if run['id'] not in run_ids else [])
             self._validate(p)
             if geometry_changed:
                 self._place_nodes(p, unplaced)
@@ -586,10 +606,16 @@ class Store:
         stamp = now()
         aliases = p.get('nodeAliases', {})
         if op == 'node.ensure':
+            reference_only = d.pop('referenceOnly', False)
+            if type(reference_only) is not bool:
+                raise StoreError('Node referenceOnly must be a boolean.')
             key = valid_id(d.get('id'))
             d['id'] = aliases.get(key, key)
             if any(node['id'] == d['id'] for node in p['nodes']):
                 return
+            if reference_only:
+                raise StoreError('Retained node reference is not yet available: ' + key,
+                                 'unresolved_reference', 409)
             op = 'node.add'
         if op in ('node.update', 'node.delete', 'node.merge') and isinstance(d.get('id'), str):
             d['id'] = aliases.get(d['id'], d['id'])

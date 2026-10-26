@@ -3,7 +3,7 @@
 from __future__ import annotations
 import argparse
 from contextlib import contextmanager, ExitStack
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 import json
 import os
@@ -438,13 +438,18 @@ def sync_project(client, path, plan):
     warnings = list(plan['recordingWarnings'])
     project = None
     try:
+        delivery_attempt(path, plan)
         project = ensure_project(client, path, plan)
+        delivery_succeeded(path, plan)
     except (ClientError, OSError, ValueError) as exc:
+        delivery_failed(path, plan, exc, warnings)
         warnings.append(str(exc))
     source = project if project is not None else plan['project']
     result = {key: source[key] for key in ('id', 'name', 'description', 'revision') if key in source}
     result.update({'projectId': plan['projectId'], 'pending': project is None, 'preparedAt': plan['preparedAt'],
                    'availability': 'available' if project is not None else 'unavailable'})
+    if plan.get('delivery'):
+        result['delivery'] = plan['delivery']
     if warnings:
         result['recordingWarnings'] = warnings
     return result
@@ -537,6 +542,8 @@ def local_context(outbox, client, project_id, node_id=None):
                     if isinstance(data.get('notes'), str):
                         detail.update({'notes': data['notes'], 'hasNotes': bool(data['notes'])})
                     if operation['op'] in ('node.add', 'node.update', 'node.ensure') and isinstance(data.get('id'), str):
+                        if operation['op'] == 'node.ensure' and data.get('referenceOnly'):
+                            continue
                         fields = ('id', 'title', 'kind', 'status', 'parentId', 'isContainer', 'collapsed', 'summary', 'conclusion', 'notes', 'importance', 'importanceReason', 'nextAction', 'pauseReason', 'resumeWhen')
                         node_updates.append(((task.get('capturedAt') or task.get('startedAt') or '', path.name, index),
                                              operation['op'], {key: data[key] for key in fields if key in data}))
@@ -756,6 +763,8 @@ def local_node_view(client, outbox, project_id, exclude=None, include_cache=Fals
             continue
         if operation == 'node.ensure' and update['id'] in nodes:
             continue
+        if operation == 'node.ensure' and update.get('referenceOnly'):
+            continue
         nodes.setdefault(update['id'], {}).update(update)
         nodes[update['id']]['at'] = at
     return sorted(nodes.values(), key=lambda node: (local_timestamp(node.get('at')) or 0, node['id'])), caches, warnings
@@ -874,6 +883,38 @@ def merge_source_root(client, task):
                 raise
 
 
+def delivery_attempt(path, task):
+    previous = task.get('delivery') if isinstance(task.get('delivery'), dict) else {}
+    attempts = previous.get('attempts', 0)
+    task['delivery'] = {**previous, 'attempts': (attempts if isinstance(attempts, int) and attempts >= 0 else 0) + 1,
+                        'lastAttemptAt': stamp()}
+    save_task(path, task)
+
+
+def delivery_succeeded(path, task):
+    task['delivery'] = {**task.get('delivery', {}), 'lastError': None, 'nextAttemptAt': None, 'syncedAt': stamp()}
+    save_task(path, task)
+
+
+def delivery_failed(path, task, exc, warnings):
+    # Delivery metadata is mutable; capture identity, operations and evidence are not.
+    delivery = task.setdefault('delivery', {})
+    delivery['lastError'] = {'code': getattr(exc, 'code', None) or ('io_error' if isinstance(exc, OSError) else 'delivery_error'),
+                             'message': str(exc)}
+    delivery['lastFailureAt'] = stamp()
+    if delivery['lastError']['code'] in ('invalid_reference', 'unresolved_reference'):
+        # Missing dependencies need time to arrive. Explicit sync/retry stays
+        # immediate; background recovery respects this durable, bounded delay.
+        delay = min(60, 2 ** min(delivery.get('attempts', 1), 6))
+        delivery['nextAttemptAt'] = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
+    else:
+        delivery['nextAttemptAt'] = None
+    try:
+        save_task(path, task)
+    except OSError as save_error:
+        warnings.append('Delivery diagnostics could not be saved: ' + str(save_error))
+
+
 def sync_task(client, path, task):
     # A background worker may have acknowledged the frozen task since this
     # caller read it. The atomic on-disk receipt is authoritative, even offline.
@@ -888,6 +929,7 @@ def sync_task(client, path, task):
         return task_result(task, ['Capture was interrupted before its outcome was saved; sync never reruns commands.'])
     warnings = []
     try:
+        delivery_attempt(path, task)
         if client.queue_root is not None:
             local_plan = project_plan_path(path.parent, client.url, task['projectId'])
             for staged in [task['captureRoot'], local_plan, local_plan.with_suffix('.lock'),
@@ -927,9 +969,10 @@ def sync_task(client, path, task):
                 if any(retained.get(key) != expected[key] for key in ('id', 'sha256', 'bytes', 'nodeId', 'runId')):
                     raise ClientError('Retained evidence differs from this capture: ' + artifact['id'])
         task['state'] = 'synced'
-        save_task(path, task)
+        delivery_succeeded(path, task)
     except (ClientError, OSError, ValueError) as exc:
         task['state'] = 'ready'
+        delivery_failed(path, task, exc, warnings)
         warnings.append(str(exc))
     return task_result(task, warnings)
 
@@ -944,6 +987,8 @@ def task_result(task, warnings=()):
     for field in ('questionId', 'eventType'):
         if field in task:
             result[field] = task[field]
+    if task.get('delivery'):
+        result['delivery'] = task['delivery']
     if task['intent']['command'] == 'execute' and task.get('captureAvailable', True):
         directory = Path(task['captureRoot']) / task['taskId']
         result['stdoutPath'] = str(directory / 'stdout.txt')
@@ -1133,16 +1178,38 @@ def parent_operations(parent):
             if parent and not parent.get('isContainer') else [])
 
 
+def is_reference_id(value):
+    return bool(re.fullmatch(r'(?:node|question|run|artifact|capture|study|edge)-[A-Za-z0-9_.-]+', value)
+                or re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', value))
+
+
 def semantic_question(client, outbox, project_id, text, exclude=None):
     title = text.strip()
     if not title:
         raise ClientError('A research question must be nonempty.')
     nodes = semantic_nodes(client, outbox, project_id, exclude=exclude)
     existing = exact_reference(nodes, title)
+    reference_only = False
+    if existing is None and is_reference_id(title):
+        # A retained ID is an identity, never new question prose. The frozen
+        # reference can wait offline and resolve later without losing findings.
+        try:
+            remote = client.project(project_id)
+            key = remote.get('nodeAliases', {}).get(title, title)
+            existing = next((node for node in remote.get('nodes', []) if node['id'] == key), None)
+            if existing:
+                nodes = [*nodes, existing]
+        except ClientError:
+            pass
+        if existing is None:
+            existing = {'id': title, 'title': ''}
+            reference_only = True
     if existing is None:
         key = hashlib.sha256(json.dumps([client.url, project_id, title], ensure_ascii=False).encode('utf-8')).hexdigest()[:32]
         existing = {'id': 'question-' + key, 'title': title}
-    question = {'id': existing['id'], 'title': existing.get('title') or title}
+    question = {'id': existing['id'], 'title': existing.get('title') or ('' if is_reference_id(title) else title)}
+    if reference_only or not question['title']:
+        question['referenceOnly'] = True
     question.update({field: existing[field] for field in ('nextAction', 'pauseReason', 'resumeWhen', 'parentId', 'isContainer', 'collapsed')
                      if field in existing and (existing[field] is not None or field == 'parentId')})
     # Containment is structural: existing children establish ownership even
@@ -1379,7 +1446,7 @@ def status(client, args):
                 if task['url'] != client.url or task['projectId'] != args.project:
                     continue
                 if task.get('kind') == 'project':
-                    plans.append({'state': task['state'], 'preparedAt': task.get('preparedAt')})
+                    plans.append({'state': task['state'], 'preparedAt': task.get('preparedAt'), 'delivery': task.get('delivery', {})})
                 else:
                     records.append({**task_result(task), 'state': task['state']})
             except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
@@ -1394,6 +1461,7 @@ def status(client, args):
               'pending': True if pending else (None if warnings or not has_records else False),
               'recordCount': len(records), 'syncedCount': len(records) - len(pending_records),
               'pendingCount': len(pending_records),
+              'blockedCount': sum(bool(record.get('delivery', {}).get('lastError')) for record in pending_records),
               'incompleteCount': sum(record['state'] not in ('ready', 'synced') for record in records),
               'records': records[-20:], 'pendingRecords': pending_records[-20:], 'projectPlans': plans,
               'researchReview': research_review(client, outbox, args.project)}

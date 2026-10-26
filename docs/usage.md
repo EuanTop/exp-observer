@@ -76,6 +76,8 @@ Retain substantially different discoveries separately, even when one script prod
 
 Full analysis belongs in native `notes`: use `--notes TEXT` or `--notes-file -` to read UTF-8 text from stdin. Notes attach to the supplied change, or to the question when no change is supplied. The Skill defaults to retaining analysis in the experiment, with no separate Markdown report unless the user requests one. Nested metrics remain intact, including arrays, nulls and empty containers; non-object result JSON uses `result`. Original data, scripts and images remain local evidence. Text-only events create no run.
 
+Node notes support Markdown headings, tables, lists and code blocks in **Reading** mode. **Markdown source** preserves the original text, and **Expand reading** opens a wider reader. HTML stays disabled; image references open as links. The project overview's **Research progression** shows recorded findings across nested containers and jumps to their original nodes.
+
 Capture a real command and its result files with one call:
 
 ```sh
@@ -91,6 +93,8 @@ The wrapper supplies a record ID and captures the actual command's exit code, wa
 The client must run to queue a record: result files alone are not queued. If the host blocks client execution or writes inside its working directory, recording is unavailable. Research continues. Connect directories during application setup, separately from the research task. The application still supports older clients' recovery registries (`EXP_OBSERVER_STATE_DIR` overrides their location); new clients do not depend on that registry. Installing the Skill grants no sandbox permissions or system service.
 
 Before its final reply, the Skill reads `status --project my-study` once from the research directory. This uses local receipts without HTTP and reflects acknowledgments from background recovery. A past network error does not mean an acknowledged record is still pending. The returned scope and delivery state distinguish registered records, pending work and unknown status.
+
+The header's **Save & sync** details separate workspace saving from Agent record delivery. They show pending, blocked and interrupted records from connected workspaces, with retained failure reasons and safe retry actions. Retrying sends frozen records only; it never runs commands again. A retained node ID that cannot yet resolve stays queued rather than becoming a new question title. Legacy evidence links containing an exact run ID resolve to that run's owning node without changing the original queued request. Unknown or incomplete discovery is shown explicitly.
 
 Register existing files in bulk, inspect retained evidence, check the record or export the graph:
 

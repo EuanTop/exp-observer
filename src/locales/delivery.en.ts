@@ -1,0 +1,27 @@
+export const deliveryEn: Record<string, string> = {
+  记录待处理: "Records need attention",
+  记录待同步: "Records pending",
+  同步状态未知: "Delivery status unknown",
+  "Agent 记录已同步": "Agent records synced",
+  页面保存: "Workspace save",
+  页面连接异常: "Workspace connection error",
+  页面已保存: "Workspace saved",
+  "Agent 记录送达": "Agent record delivery",
+  刷新同步状态: "Refresh delivery status",
+  已连接的工作目录: "Connected workspaces",
+  无法检查记录送达状态: "Could not check record delivery",
+  尚未完成工作目录检查: "Workspace discovery is not complete",
+  待同步: "Pending",
+  同步失败: "Blocked",
+  记录未完成: "Interrupted",
+  已连接工作目录的记录均已送达:
+    "Records from connected workspaces have been delivered",
+  "已尝试 {count} 次": "{count} attempts",
+  重试中: "Retrying…",
+  重试送达: "Retry delivery",
+  重试待送达记录: "Retry ready records",
+  "仅重新发送已冻结的记录，不重新运行实验。":
+    "Resends frozen records. Experiments are not rerun.",
+  保存与同步: "Save and delivery",
+  关闭同步详情: "Close delivery details",
+};

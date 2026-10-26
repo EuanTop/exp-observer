@@ -29,6 +29,29 @@ export type UsageCollection = {
     message?: string;
   }[];
 };
+export type DeliveryItem = {
+  taskId: string;
+  requestId?: string;
+  nodeId?: string;
+  title: string;
+  state: "pending" | "blocked" | "interrupted";
+  attempts: number;
+  lastAttemptAt?: string | null;
+  lastError: { code: string; message: string } | null;
+};
+export type DeliverySnapshot = {
+  projectId: string;
+  available: boolean;
+  checkedAt: string;
+  state: "synced" | "pending" | "blocked" | "unknown";
+  scope: "connected-workspaces";
+  pendingCount: number;
+  blockedCount: number;
+  interruptedCount: number;
+  syncedCount: number;
+  discoveryComplete?: boolean;
+  items: DeliveryItem[];
+};
 type WorkspaceList = { workspaces: ResearchWorkspace[] };
 export class ApiError extends Error {
   constructor(
@@ -70,6 +93,20 @@ export const api = {
   list: () => request<{ projects: ProjectSummary[] }>("/api/projects"),
   project: (id: string) =>
     request<Project>(`/api/projects/${encodeURIComponent(id)}`),
+  deliveryStatus: (id: string, signal?: AbortSignal) =>
+    request<DeliverySnapshot>(
+      `/api/projects/${encodeURIComponent(id)}/delivery-status`,
+      { signal },
+    ),
+  retryDelivery: (id: string, taskId?: string, signal?: AbortSignal) =>
+    request<DeliverySnapshot>(
+      `/api/projects/${encodeURIComponent(id)}/delivery/retry`,
+      {
+        method: "POST",
+        body: JSON.stringify(taskId ? { taskId } : {}),
+        signal,
+      },
+    ),
   usageStatus: (id: string) =>
     request<UsageCollection>(
       `/api/projects/${encodeURIComponent(id)}/usage-status`,

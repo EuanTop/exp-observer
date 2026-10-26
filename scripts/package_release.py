@@ -15,7 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (
     'README.md', 'README.zh-CN.md', 'INSTALL.md', 'CONTRIBUTING.md', 'LICENSE',
-    'THIRD_PARTY_NOTICES.md', 'licenses/elkjs-LICENSE.md',
+    'THIRD_PARTY_NOTICES.md', 'licenses/elkjs-LICENSE.md', 'licenses/frontend-notices.txt',
     'docs/contract.md', 'docs/observation-test.md', 'docs/screenshots/research.png', 'docs/screenshots/comparison.png',
     'docs/usage.md', 'docs/usage.zh-CN.md', 'docs/screenshots/research-workspace.png', 'docs/screenshots/node-details.png',
     'docs/screenshots/har-study-details.png',
