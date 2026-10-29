@@ -18,7 +18,7 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener, urlopen
 from uuid import uuid4
 
-CLIENT_VERSION = '0.1.10'
+CLIENT_VERSION = '0.1.11'
 MAX_WRITE_BODY = 2 * 1024 * 1024
 MAX_BATCH_BODY = 8 * 1024 * 1024
 

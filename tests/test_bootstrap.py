@@ -1,5 +1,6 @@
 """A copied Skill can start the application without Node, pip or a live parent."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import importlib.util
 import io
 import hashlib
@@ -27,6 +28,97 @@ from backend.store import Store
 SPEC = importlib.util.spec_from_file_location('observer_bootstrap', ROOT/'skills/exp-observer/scripts/bootstrap.py')
 bootstrap = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bootstrap)
+
+
+class BootstrapReadyStateTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.state = Path(temporary.name)
+        self.url = 'http://127.0.0.1:4317'
+        self.status = self.state / 'launch-4317.json'
+        self.lock = self.state / 'launch-4317.lock'
+        self.original = {'state': 'starting', 'at': time.time(), 'pid': 123,
+                         'appRoot': str(self.state / 'existing app'),
+                         'dataDir': str(self.state / 'retained experiment data')}
+        bootstrap.write_json(self.status, self.original)
+        enabled = patch.dict(os.environ, {'EXP_OBSERVER_AUTOSTART': '1'})
+        enabled.start()
+        self.addCleanup(enabled.stop)
+
+    def test_health_ready_reconciles_slow_start_without_spawning_or_losing_metadata(self):
+        for phase in ('starting', 'provisioning'):
+            with self.subTest(phase=phase):
+                original = self.original | {'state': phase}
+                bootstrap.write_json(self.status, original)
+                with patch.object(bootstrap, 'probe', return_value='ready') as probe, \
+                     patch.object(bootstrap, 'detached', side_effect=AssertionError('must not spawn')), \
+                     patch.object(bootstrap.time, 'sleep', side_effect=AssertionError('must not wait')):
+                    result = bootstrap.ensure_platform(self.url, self.state / 'workspace', self.state)
+                self.assertEqual(result['state'], 'ready')
+                self.assertEqual(bootstrap.read_json(self.status), original | {'state': 'ready'})
+                probe.assert_called_once_with(self.url)
+
+    def test_readiness_after_launch_lock_acquisition_reconciles_without_relocking(self):
+        original = self.original | {'at': time.time() - 60}
+        bootstrap.write_json(self.status, original)
+        with patch.object(bootstrap, 'probe', side_effect=['missing', 'ready']) as probe, \
+             patch.object(bootstrap, 'launch_lock', wraps=bootstrap.launch_lock) as lock, \
+             patch.object(bootstrap, 'detached', side_effect=AssertionError('must not spawn')):
+            result = bootstrap.ensure_platform(self.url, self.state / 'workspace', self.state)
+        self.assertEqual(result['state'], 'ready')
+        self.assertEqual(bootstrap.read_json(self.status), original | {'state': 'ready'})
+        self.assertEqual(probe.call_count, 2)
+        self.assertEqual(lock.call_count, 1)
+
+    def test_ready_reconciliation_does_not_clobber_a_newer_launcher(self):
+        replacement = self.original | {'pid': 456, 'at': self.original['at'] + 1,
+                                       'appRoot': str(self.state / 'new app')}
+        @contextmanager
+        def racing_lock(path, wait=0):
+            self.assertEqual(path, self.lock)
+            self.assertEqual(wait, 0)
+            bootstrap.write_json(self.status, replacement)
+            yield
+        with patch.object(bootstrap, 'probe', return_value='ready'), \
+             patch.object(bootstrap, 'launch_lock', side_effect=racing_lock), \
+             patch.object(bootstrap, 'detached', side_effect=AssertionError('must not spawn')):
+            result = bootstrap.ensure_platform(self.url, self.state / 'workspace', self.state)
+        self.assertEqual(result['state'], 'ready')
+        self.assertEqual(bootstrap.read_json(self.status), replacement)
+
+    def test_busy_launch_lock_never_delays_ready_research(self):
+        with bootstrap.launch_lock(self.lock), \
+             patch.object(bootstrap, 'probe', return_value='ready'), \
+             patch.object(bootstrap.time, 'sleep', side_effect=AssertionError('must not wait')), \
+             patch.object(bootstrap, 'detached', side_effect=AssertionError('must not spawn')):
+            result = bootstrap.ensure_platform(self.url, self.state / 'workspace', self.state)
+        self.assertEqual(result['state'], 'ready')
+        self.assertEqual(bootstrap.read_json(self.status), self.original)
+
+    def test_unavailable_or_occupied_health_never_claims_ready(self):
+        for health in ('unavailable', 'occupied', 'missing'):
+            with self.subTest(health=health), \
+                 patch.object(bootstrap, 'probe', return_value=health), \
+                 patch.object(bootstrap, 'detached', side_effect=AssertionError('must not spawn')):
+                result = bootstrap.ensure_platform(self.url, self.state / 'workspace', self.state)
+                self.assertEqual(result['state'], 'starting' if health == 'missing' else health)
+                self.assertEqual(bootstrap.read_json(self.status), self.original)
+
+    def test_ready_health_does_not_create_or_replace_unrelated_status(self):
+        for retained in (None, {'state': 'unavailable', 'message': 'Old diagnostic'}):
+            with self.subTest(retained=retained):
+                if retained is None:
+                    self.status.unlink(missing_ok=True)
+                else:
+                    bootstrap.write_json(self.status, retained)
+                with patch.object(bootstrap, 'probe', return_value='ready'), \
+                     patch.object(bootstrap, 'detached', side_effect=AssertionError('must not spawn')):
+                    self.assertEqual(bootstrap.ensure_platform(self.url, self.state / 'workspace', self.state)['state'], 'ready')
+                if retained is None:
+                    self.assertFalse(self.status.exists())
+                else:
+                    self.assertEqual(bootstrap.read_json(self.status), retained)
 
 
 class WindowsListenerTests(unittest.TestCase):

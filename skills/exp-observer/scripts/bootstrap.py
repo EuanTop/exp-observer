@@ -255,6 +255,30 @@ def download_runtime(state):
         archive.unlink(missing_ok=True)
 
 
+def reconcile_ready(state, port, observed, *, locked=False):
+    """A successful health observation may finish a previous short startup wait.
+
+    Preserve the retained launch identity, and never overwrite a launcher which
+    changed the record since that observation. Readiness must not wait for a
+    competing launch or prevent research when status persistence is unavailable.
+    """
+    if not isinstance(observed, dict) or observed.get('state') not in ('starting', 'provisioning'):
+        return
+    path = state / ('launch-' + str(port) + '.json')
+    def update():
+        current = read_json(path)
+        if current == observed:
+            write_json(path, {**current, 'state': 'ready'})
+    try:
+        if locked:
+            update()
+        else:
+            with launch_lock(state / ('launch-' + str(port) + '.lock')):
+                update()
+    except (LaunchBusy, OSError, ValueError):
+        pass
+
+
 def ensure_platform(url, workspace, state, *, provision=False):
     port = origin(url)
     if port is None or os.environ.get('EXP_OBSERVER_AUTOSTART') == '0':
@@ -265,14 +289,19 @@ def ensure_platform(url, workspace, state, *, provision=False):
     launching = previous.get('state') in ('starting', 'provisioning') and time.time() - previous.get('at', 0) < 30
     health = probe(url)
     if health != 'missing':
+        if health == 'ready':
+            reconcile_ready(state, port, previous)
         return {'state': health}
     if launching:
         return previous
     try:
         with launch_lock(state / ('launch-' + str(port) + '.lock'), wait=2 if provision else 0):
-            if probe(url) != 'missing':
-                return {'state': probe(url)}
             previous = read_json(status_path)
+            health = probe(url)
+            if health != 'missing':
+                if health == 'ready':
+                    reconcile_ready(state, port, previous, locked=True)
+                return {'state': health}
             if not provision and previous.get('state') != 'ready' and time.time() - previous.get('at', 0) < 30:
                 return previous
             write_json(status_path, {'state': 'starting', 'at': time.time()})

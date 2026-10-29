@@ -171,7 +171,7 @@ python3 skills/exp-observer/scripts/exp_observer.py observe finish --project ID 
 `start` returns `observationId`, the project revision and observation fields. With a request ID, the CLI derives a stable observation ID from it; use the same request ID only to retry the same operation. Finish uses a distinct request ID and the returned observation ID. Finish also returns the resulting fields, including actual elapsed time and the known/unknown counters. Either input or output count can be supplied independently when only one is available. Both commands use the same `EXP_OBSERVER_URL` / global `--url` configuration as other CLI operations. No additional model call is used to start, finish or aggregate observations.
 
 HTTP, local loopback only:
-- GET `/api/health` -> `{ok:true,app:'ExpObserver',version:'0.1.10'}`
+- GET `/api/health` -> `{ok:true,app:'ExpObserver',version:'0.1.11'}`
 - GET `/api/workspaces` -> `{workspaces:[{id,path,addedAt}]}`. Application configuration, independent of research revisions.
 - POST `/api/workspaces` `{path}` -> same list; enroll an absolute existing research directory once, deduplicating its canonical identity.
 - POST `/api/workspaces/remove` `{id}` -> same list; stop discovery without deleting research files or records, including legacy registrations under the removed root unless independently enrolled.
