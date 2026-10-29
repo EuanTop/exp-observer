@@ -1,6 +1,6 @@
 """ExpObserver local experiment records."""
 from .store import Store, StoreError
 
-__version__ = '0.1.9'
+__version__ = '0.1.10'
 
 __all__ = ['Store', 'StoreError']

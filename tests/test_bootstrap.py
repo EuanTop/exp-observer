@@ -262,9 +262,16 @@ class BootstrapTests(unittest.TestCase):
     def test_child_readiness_checks_do_not_bind_the_port_the_child_needs(self):
         # Model the child becoming ready on the second readiness check.
         state = self.root/'readiness-state'
+        # The release smoke checkout intentionally has no dist/. Use the same
+        # supplied portable archive as real first-use tests, not the source root.
+        extracted = self.root/'readiness-app'
+        with zipfile.ZipFile(self.archive) as archive:
+            archive.extractall(extracted)
+        app = extracted/'exp-observer'
+        self.assertTrue(bootstrap.valid_app(app))
         process = type('Child', (), {'pid':999999, 'poll':lambda self: None})()
         with patch.object(bootstrap, 'probe', side_effect=['missing', 'missing', 'unavailable', 'ready']) as probe, \
-             patch.object(bootstrap, 'application_candidates', return_value=[(ROOT, None)]), \
+             patch.object(bootstrap, 'application_candidates', return_value=[(app, None)]), \
              patch.object(bootstrap, 'detached', return_value=process), \
              patch.object(bootstrap.time, 'sleep'):
             result = bootstrap.ensure_platform(self.url, self.workspace, state)
