@@ -30,6 +30,14 @@
 
 *并排核对配置、嵌套指标和评估。此图使用模拟演示数据；实测案例见[精确检索研究](../examples/real-study/report.md)。*
 
+## 定位当前工作
+
+研究图上方的“当前工作”可一键进入正在聚焦的节点；多个节点时，按对话或已登记的外部任务选择。跳转会进入正确容器并选中原节点。失联的对话关联与当前工作分开显示，开放问题本身不代表正在执行。
+
+Skill 用 `focus --project my-study --node NODE_ID` 声明本对话正在维护的位置，重复 `--node` 可同时聚焦多个节点；普通记录会刷新已有的关联。不再维护该实验时调用 `unfocus --project my-study`，只结束本对话的关联，不关闭其他对话、科学问题或远程任务。旧客户端继续兼容，历史对话不会被自动标成活跃。
+
+远程训练可用 `task start` / `task update` 保留原始任务标识、真实起止时间和状态；前端把外部任务耗时与启动命令耗时分开显示。重试失败会退避，队列会标出前置记录并按依赖补交，不重跑实验。详见 [记录参考](../skills/exp-observer/references/records.md#remote-task-lifecycle)。
+
 ## 把 Skill 交给 Agent
 
 将 [`skills/exp-observer`](../skills/exp-observer) 复制到 Agent 宿主支持的 Skill 目录，或直接把 [`SKILL.md`](../skills/exp-observer/SKILL.md) 的路径交给 Agent。独立客户端随 Skill 分发，研究项目无需把 ExpObserver 导入为依赖。
@@ -42,7 +50,7 @@
 
 > 使用 ExpObserver Skill 接入实验 `my-study`，按我的研究任务推进。
 
-实验属于其持久化记录。**多个对话和 Agent 可以共同维护同一个实验。** 每次操作显式指定项目，相关操作同时指定节点；不绑定对话，也不存在全局“当前实验”指针。
+实验属于其持久化记录。**多个对话和 Agent 可以共同维护同一个实验。** 每次操作显式指定项目，相关操作同时指定节点；允许分别声明本对话的非独占维护关联，不存在全局“当前实验”指针。
 
 ### 读取、执行、记录
 

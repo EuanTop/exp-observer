@@ -14,6 +14,7 @@ from . import __version__
 from .store import Store, StoreError, canonical, now
 
 MAX_BODY = 2 * 1024 * 1024
+MAX_BATCH_BODY = 8 * 1024 * 1024
 STATIC_MIME = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
@@ -88,15 +89,15 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get('Sec-Fetch-Site') == 'cross-site':
                 raise StoreError('Cross-site changes are not allowed.', 'origin_not_allowed', 403)
 
-    def _body(self):
+    def _body(self, limit=MAX_BODY):
         if self.headers.get('Transfer-Encoding'):
             raise StoreError('Chunked requests are not supported.', 'invalid_body')
         try:
             length = int(self.headers.get('Content-Length', '0'))
         except ValueError:
             raise StoreError('Invalid Content-Length.', 'invalid_body')
-        if length < 0 or length > MAX_BODY:
-            raise StoreError('Request is too large (limit 2 MiB).', 'body_too_large', 413)
+        if length < 0 or length > limit:
+            raise StoreError(f'Request is too large (limit {limit // (1024 * 1024)} MiB).', 'body_too_large', 413)
         try:
             return json.loads(self.rfile.read(length).decode('utf-8'), parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
         except (ValueError, UnicodeError):
@@ -174,6 +175,12 @@ class Handler(BaseHTTPRequestHandler):
             tail = parts[3:]
             if not tail and method == 'GET':
                 return self._send(store.get_project(project_id))
+            if tail == ['focus']:
+                from . import work_sessions
+                if method == 'GET':
+                    return self._send(work_sessions.get(store, project_id))
+                if method == 'POST':
+                    return self._send(work_sessions.update(store, project_id, self._body()))
             if tail == ['usage-status'] and method == 'GET':
                 store.get_project(project_id)
                 recovery = self.server.recovery
@@ -205,7 +212,7 @@ class Handler(BaseHTTPRequestHandler):
             if tail == ['context'] and method == 'GET':
                 return self._send(store.context(project_id, query.get('node', [None])[0]))
             if tail == ['batch'] and method == 'POST':
-                return self._send(store.batch(project_id, self._body()))
+                return self._send(store.batch(project_id, self._body(limit=MAX_BATCH_BODY)))
             if tail == ['artifacts'] and method == 'POST':
                 return self._send(store.register_artifact(project_id, self._body()), 201)
             if len(tail) == 3 and tail[0] == 'artifacts' and tail[2] == 'metadata' and method == 'GET':

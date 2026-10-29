@@ -193,6 +193,13 @@ class RecoveryTests(unittest.TestCase):
         other.mkdir()
         _, different_workspace = self.invoke(*arguments, cwd=other, client=self.offline())
         self.assertNotEqual(first['id'], different_workspace['id'])
+        # Repeated offline retries now retain bounded delivery backoff. Advance
+        # only that mutable retry clock, without sleeping or editing frozen work.
+        for path in self.root.rglob('project-*.json'):
+            plan = cli.read_queue_task(path)
+            if plan.get('delivery', {}).get('nextAttemptAt'):
+                plan['delivery']['nextAttemptAt'] = '2000-01-01T00:00:00Z'
+                cli.save_task(path, plan)
         self.start()
         self.wait_for(lambda: len(self.store.list_projects()) == 2)
         self.server.recovery.stop()

@@ -10,6 +10,7 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type DeliverySnapshot } from "../api";
+import { formatUsageTime } from "../usage";
 import { t, useLocale } from "../i18n";
 import "./delivery-status.css";
 
@@ -140,13 +141,42 @@ export function DeliveryDetails({
               <strong>{item.title || item.nodeId || item.taskId}</strong>
               <span>{t(itemLabels[item.state])}</span>
             </div>
+            {!!item.waitingFor?.length && (
+              <div className="delivery-dependencies">
+                <span>{t("等待前置记录")}</span>
+                {item.waitingFor.map((dependency) => (
+                  <div key={dependency.taskId}>
+                    <strong>{dependency.title || t("前置研究记录")}</strong>
+                    <button
+                      className="button subtle"
+                      disabled={retrying !== null}
+                      onClick={() => onRetry(dependency.taskId)}
+                    >
+                      {retrying === dependency.taskId
+                        ? t("重试中")
+                        : t("送达前置记录")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             {item.lastError && (
               <p className="delivery-error">
                 <code>{item.lastError.code}</code> {item.lastError.message}
               </p>
             )}
             <div className="delivery-item-footer">
-              <small>{t("已尝试 {count} 次", { count: item.attempts })}</small>
+              <small>
+                {t("已尝试 {count} 次", { count: item.attempts })}
+                {item.nextAttemptAt &&
+                  Number.isFinite(Date.parse(item.nextAttemptAt)) && (
+                    <span>
+                      {t("下次重试 {time}", {
+                        time: formatUsageTime(item.nextAttemptAt),
+                      })}
+                    </span>
+                  )}
+              </small>
               {item.state !== "interrupted" && (
                 <button
                   className="button subtle"

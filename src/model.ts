@@ -54,6 +54,7 @@ export type Run = {
   startedAt: string | null;
   finishedAt?: string | null;
   capturedAt?: string;
+  durationMs?: number | null;
   events: { id: string; type: string; message: string; at: string }[];
   artifactIds: string[];
   origin: string;

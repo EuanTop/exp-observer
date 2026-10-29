@@ -18,6 +18,10 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener, urlopen
 from uuid import uuid4
 
+CLIENT_VERSION = '0.1.9'
+MAX_WRITE_BODY = 2 * 1024 * 1024
+MAX_BATCH_BODY = 8 * 1024 * 1024
+
 
 class ClientError(Exception):
     def __init__(self, message, *, code=None, status=None):
@@ -53,7 +57,14 @@ class Client:
     def request(self, route, body=None, raw=False):
         if getattr(self, 'startup_unavailable', None):
             raise ClientError(self.startup_unavailable, code='unavailable')
-        data = None if body is None else json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
+        data = None if body is None else json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8')
+        # Reject before opening a connection: otherwise an early server 413 can
+        # surface as a broken pipe while a large frozen receipt is uploading.
+        batch_route = re.fullmatch(r'/api/projects/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}/batch', urlsplit(route).path)
+        limit = MAX_BATCH_BODY if batch_route else MAX_WRITE_BODY
+        if data is not None and len(data) > limit:
+            raise ClientError(f'Request is too large (limit {limit // (1024 * 1024)} MiB; encoded body {len(data)} bytes).',
+                              code='body_too_large', status=413)
         request = Request(self.transport_url + route, data=data, headers={'Content-Type': 'application/json'})
         try:
             with (self.opener.open(request, timeout=self.timeout) if self.opener else urlopen(request, timeout=self.timeout)) as response:
@@ -149,6 +160,33 @@ def parser():
     sync.add_argument('--project', help='Only sync this project')
     status_command = commands.add_parser('status', help='Read local delivery receipts and research-review hints, without HTTP or polling')
     status_command.add_argument('--project', required=True)
+    for command in ('focus', 'unfocus'):
+        focus_cmd = commands.add_parser(command, help='Maintain this conversation’s nonexclusive experiment focus')
+        focus_cmd.add_argument('--project', required=True)
+        focus_cmd.add_argument('--owner', help='Conversation marker; defaults to CODEX_THREAD_ID or a retained local marker')
+        if command == 'focus':
+            focus_cmd.add_argument('--node', action='append', help='Exact node ID/title; repeat for simultaneous focus')
+            focus_cmd.add_argument('--label', help='Readable conversation label')
+            focus_cmd.add_argument('--ttl-seconds', type=int, default=None, help='Liveness window, 60–3600 seconds (default 900)')
+    remote = commands.add_parser('task', help='Retain the lifecycle of an existing remote job; never execute or poll it')
+    remote_actions = remote.add_subparsers(dest='task_action', required=True)
+    for action in ('start', 'update'):
+        remote_cmd = remote_actions.add_parser(action)
+        remote_cmd.add_argument('--project', required=True)
+        remote_cmd.add_argument('--request-id')
+        remote_cmd.add_argument('--status', choices=('queued', 'running', 'paused', 'completed', 'failed', 'cancelled'),
+                                default='running' if action == 'start' else None)
+        remote_cmd.add_argument('--finished-at')
+        remote_cmd.add_argument('--duration-ms', type=float)
+        remote_cmd.add_argument('--metrics-file')
+        if action == 'start':
+            remote_cmd.add_argument('--node', required=True)
+            remote_cmd.add_argument('--title', required=True)
+            remote_cmd.add_argument('--task-ref', required=True)
+            remote_cmd.add_argument('--remote-identity', required=True)
+            remote_cmd.add_argument('--started-at', required=True, help='Actual original job start, including timezone')
+        else:
+            remote_cmd.add_argument('--run', required=True, help='Retained run ID returned by task start')
     observe = commands.add_parser('observe', help='Record a node step duration and explicit runtime token counters')
     observation_actions = observe.add_subparsers(dest='observation_action', required=True)
     for action in ('start', 'finish'):
@@ -322,6 +360,8 @@ def persist_task(path, task):
     # Research clients write only inside their working directory. The application
     # discovers queues in enrolled workspaces, including future experiment folders.
     save_task(path, task)
+    if task.get('kind') not in ('project', 'focus'):
+        heartbeat_association(task['url'], task['projectId'], Path(path).parent)
 
 
 def project_plan_path(outbox, url, project_id):
@@ -386,7 +426,7 @@ def prepare_project(outbox, url, metadata, implicit=False):
                 plan.update(project=metadata, implicit=False, preparedAt=stamp(), state='ready', repairPlaceholder=True)
                 persist_task(path, plan)
             return path, plan
-        plan = {'version': 1, 'kind': 'project', 'url': url, 'projectId': metadata['id'],
+        plan = {'version': 1, 'clientVersion': CLIENT_VERSION, 'kind': 'project', 'url': url, 'projectId': metadata['id'],
                 'project': metadata, 'implicit': implicit, 'preparedAt': stamp(), 'state': 'ready',
                 'recordingWarnings': []}
         persist_task(path, plan)
@@ -512,6 +552,14 @@ def read_queue_task(path):
     task = json.loads(path.read_text(encoding='utf-8'))
     if not isinstance(task, dict) or any(not isinstance(task.get(key), str) for key in ('url', 'projectId', 'state')):
         raise ValueError('Queued records require an object with url, projectId and state text fields.')
+    if task.get('kind') == 'focus':
+        body = task.get('focus')
+        if (not isinstance(body, dict) or body.get('action') not in ('start', 'heartbeat', 'end')
+                or any(not isinstance(body.get(key), str) for key in ('ownerId', 'leaseId', 'observedAt'))
+                or type(body.get('sequence')) is not int or body['sequence'] < 0
+                or ('nodeIds' in body and (not isinstance(body['nodeIds'], list)
+                    or any(not isinstance(key, str) for key in body['nodeIds'])))):
+            raise ValueError('Queued focus requires a frozen action, owner, lease, observation and sequence.')
     return task
 
 
@@ -642,7 +690,7 @@ def task_identity(client, args, intent):
     request_id = getattr(args, 'request_id', None) or 'capture-' + uuid4().hex
     key = hashlib.sha256(json.dumps([client.url, args.project, request_id], ensure_ascii=False).encode('utf-8')).hexdigest()[:32]
     path = Path.cwd() / '.exp-observer-runs' / 'outbox' / (key + '.json')
-    task = {'version': 1, 'taskId': key, 'requestId': request_id, 'url': client.url,
+    task = {'version': 1, 'clientVersion': CLIENT_VERSION, 'taskId': key, 'requestId': request_id, 'url': client.url,
             'projectId': args.project, 'intent': intent, 'state': 'preparing',
             'nodeId': args.node or 'node-' + key, 'runId': 'run-' + key,
             'captureRoot': str(capture_root(args.project)), 'artifacts': [], 'recordingWarnings': []}
@@ -810,16 +858,22 @@ def capture_relationship(client, args, path, task):
     """Record order is observed chronology, never an invented scientific cause."""
     if not args.after and (args.node or args.independent):
         return
-    nodes = local_nodes(client, path.parent, task['projectId'], exclude=path)
+    nodes = semantic_nodes(client, path.parent, task['projectId'], exclude=path)
     source = args.after
+    run_ids = []
     if source:
-        matches = [node for node in nodes if node.get('title') == source]
-        if len(matches) == 1:
-            source = matches[0]['id']
-        elif len(matches) > 1:
-            task['recordingWarnings'].append('Relationship title is ambiguous; the finding is retained without that relationship.')
+        try:
+            referenced = exact_reference(nodes, source)
+            if referenced is None:
+                referenced = execution_reference(client, path.parent, task['projectId'], source, exclude=path)
+        except ClientError as exc:
+            task['recordingWarnings'].append(str(exc) + '; the finding is retained without that relationship.')
             return
-        elif not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', source):
+        if referenced:
+            source = referenced['id']
+            if args.relation == 'supports':
+                run_ids = referenced.get('runIds', [])
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', source):
             task['recordingWarnings'].append('Relationship title was not found locally; the finding is retained without that relationship.')
             return
         relation, label = args.relation, ''
@@ -833,7 +887,8 @@ def capture_relationship(client, args, path, task):
         return
     task['operations'].append({'op': 'edge.add', 'data': {
         'id': 'edge-' + task['taskId'], 'source': source, 'target': task['nodeId'],
-        'relation': relation, 'label': label, 'basis': 'observed'}})
+        'relation': relation, 'label': label, 'basis': 'observed',
+        **({'runIds': run_ids} if run_ids else {})}})
 
 
 def file_digest(path):
@@ -902,13 +957,12 @@ def delivery_failed(path, task, exc, warnings):
     delivery['lastError'] = {'code': getattr(exc, 'code', None) or ('io_error' if isinstance(exc, OSError) else 'delivery_error'),
                              'message': str(exc)}
     delivery['lastFailureAt'] = stamp()
-    if delivery['lastError']['code'] in ('invalid_reference', 'unresolved_reference'):
-        # Missing dependencies need time to arrive. Explicit sync/retry stays
-        # immediate; background recovery respects this durable, bounded delay.
-        delay = min(60, 2 ** min(delivery.get('attempts', 1), 6))
-        delivery['nextAttemptAt'] = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
-    else:
-        delivery['nextAttemptAt'] = None
+    # Permit one immediate transport recovery after recording offline; every
+    # repeated failure backs off, including missing nodes and rejected updates.
+    attempts = delivery.get('attempts', 1)
+    first_transport = attempts == 1 and delivery['lastError']['code'] in ('unavailable', 'delivery_error', 'io_error')
+    delay = 0 if first_transport else min(60, 2 ** min(attempts, 6))
+    delivery['nextAttemptAt'] = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
     try:
         save_task(path, task)
     except OSError as save_error:
@@ -918,6 +972,8 @@ def delivery_failed(path, task, exc, warnings):
 def sync_task(client, path, task):
     # A background worker may have acknowledged the frozen task since this
     # caller read it. The atomic on-disk receipt is authoritative, even offline.
+    if task.get('kind') == 'focus':
+        return sync_focus(client, path, task)
     current = read_queue_task(path)
     identity = ('url', 'projectId', 'taskId', 'requestId', 'nodeId', 'runId', 'intent')
     if current['url'] != client.url or any(current.get(key) != task.get(key) for key in identity):
@@ -974,10 +1030,16 @@ def sync_task(client, path, task):
         task['state'] = 'ready'
         delivery_failed(path, task, exc, warnings)
         warnings.append(str(exc))
+    deliver_focus_updates(client, path.parent, task['projectId'])
     return task_result(task, warnings)
 
 
 def task_result(task, warnings=()):
+    if task.get('kind') == 'focus':
+        return {'projectId': task['projectId'], 'kind': 'focus', 'requestId': task['requestId'],
+                **task['focus'], 'pending': task['state'] != 'synced',
+                'focusState': task.get('focusState'), 'superseded': task.get('superseded', False),
+                'delivery': task.get('delivery', {}), 'recordingWarnings': list(warnings)}
     result = {'projectId': task['projectId'], 'nodeId': task['nodeId'], 'runId': task['runId'],
               'requestId': task['requestId'], 'status': task.get('status', 'pending'),
               'pending': task['state'] != 'synced', 'artifactIds': [a['id'] for a in task['artifacts']] if task['state'] == 'synced' else []}
@@ -1317,7 +1379,7 @@ def event(client, args):
         for value, relation, suffix in links:
             try:
                 referenced = exact_reference(nodes, value)
-                if relation == 'supports' and suffix.startswith('evidence-') and referenced is None:
+                if referenced is None:
                     referenced = execution_reference(client, path.parent, args.project, value, exclude=path)
             except ClientError as exc:
                 task['recordingWarnings'].append(str(exc) + '; the finding is retained without that relationship.')
@@ -1332,7 +1394,7 @@ def event(client, args):
             task['operations'].append({'op': 'edge.add', 'data': {
                 'id': 'edge-' + task['taskId'] + '-' + suffix, 'source': source, 'target': task['nodeId'],
                 'relation': relation, 'basis': 'observed',
-                **({'runIds': referenced['runIds']} if referenced and referenced.get('runIds') else {})}})
+                **({'runIds': referenced['runIds']} if relation == 'supports' and referenced and referenced.get('runIds') else {})}})
         if intent['hasMetrics']:
             task['operations'].append({'op': 'run.add', 'data': {'id': task['runId'], 'nodeId': task['nodeId'],
                 'title': change or question['title'], 'status': 'completed', 'startedAt': None, 'finishedAt': None,
@@ -1357,6 +1419,66 @@ def file_signature(path):
     return stat.st_mtime_ns, stat.st_size, stat.st_ino
 
 
+def queue_dependency_map(items):
+    """Exact same-project queued producers only; chronology is not dependency."""
+    producers, references = {}, {}
+    for path, _root, receipt in items:
+        scope = (receipt['url'], receipt['projectId'])
+        refs, created = set(), set()
+        operations = receipt.get('operations')
+        for op in operations if isinstance(operations, list) else []:
+            if not isinstance(op, dict) or not isinstance(op.get('data'), dict):
+                continue
+            data = op['data']
+            if op.get('op') in ('node.add', 'run.add') or (op.get('op') == 'node.ensure' and not data.get('referenceOnly')):
+                if isinstance(data.get('id'), str):
+                    created.add(data['id'])
+            if op.get('op') in ('node.update', 'run.update') or (op.get('op') == 'node.ensure' and data.get('referenceOnly')):
+                if isinstance(data.get('id'), str):
+                    refs.add(data['id'])
+            for key in ('nodeId', 'parentId', 'source', 'target'):
+                if isinstance(data.get(key), str):
+                    refs.add(data[key])
+        focus_body = receipt.get('focus')
+        if receipt.get('kind') == 'focus' and isinstance(focus_body, dict) and focus_body.get('action') != 'end':
+            node_ids = focus_body.get('nodeIds')
+            if isinstance(node_ids, list):
+                refs.update(key for key in node_ids if isinstance(key, str))
+        references[path] = (scope, refs - created)
+        for identifier in created:
+            producers.setdefault((scope, identifier), []).append(path)
+    result = {}
+    for path, (scope, refs) in references.items():
+        # Ambiguous producers are not guessed. The backend remains authoritative.
+        result[path] = {producers[(scope, identifier)][0] for identifier in refs
+                        if len(producers.get((scope, identifier), [])) == 1 and producers[(scope, identifier)][0] != path}
+    return result
+
+
+def queue_delivery_order(items):
+    dependencies = queue_dependency_map(items)
+    by_path = {item[0]: item for item in items}
+    ordered, visited, visiting = [], set(), set()
+    def visit(path):
+        if path in visited or path in visiting:
+            return
+        visiting.add(path)
+        for dependency in sorted(dependencies.get(path, ())):
+            if dependency in by_path:
+                visit(dependency)
+        visiting.remove(path)
+        visited.add(path)
+        ordered.append(by_path[path])
+    def priority(item):
+        receipt = item[2]
+        ending = isinstance(receipt.get('focus'), dict) and receipt['focus'].get('action') == 'end'
+        return (receipt.get('kind') != 'project', not ending, receipt.get('capturedAt') or receipt.get('startedAt') or receipt.get('preparedAt') or '',
+                receipt['focus'].get('sequence', -1) if isinstance(receipt.get('focus'), dict) else -1, str(item[0]))
+    for item in sorted(items, key=priority):
+        visit(item[0])
+    return ordered
+
+
 def drain_outbox(client, outbox, project_id=None, stop_event=None, acknowledged=None):
     """Submit frozen tasks only. This function never starts a subprocess."""
     results = []
@@ -1375,12 +1497,10 @@ def drain_outbox(client, outbox, project_id=None, stop_event=None, acknowledged=
                 if acknowledged is not None:
                     acknowledged[str(path)] = signature
                 continue
-            priority = 0 if task.get('kind') == 'project' else 1
-            at = task.get('capturedAt') or task.get('startedAt') or task.get('preparedAt') or ''
-            candidates.append(((priority, at, path.name), path))
+            candidates.append((path, None, task))
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             results.append({'task': path.name, 'pending': True, 'recordingWarnings': [str(exc)]})
-    for _, path in sorted(candidates):
+    for path, _root, _previous in queue_delivery_order(candidates):
         if stop_event is not None and stop_event.is_set():
             break
         try:
@@ -1601,6 +1721,278 @@ def execute(client, args):
         return task['exitCode']
 
 
+def focus_owner(outbox, explicit=None, create=True):
+    owner = explicit or os.environ.get('EXP_OBSERVER_OWNER_ID') or os.environ.get('CODEX_THREAD_ID')
+    if owner:
+        if not isinstance(owner, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', owner):
+            raise ClientError('Conversation owner must be an opaque ID using 1–128 letters, numbers, dots, underscores or hyphens.')
+        return owner
+    for directory in ancestor_outboxes(outbox):
+        path = directory.parent / 'focus-owner.json'
+        if path.exists():
+            return json.loads(path.read_text(encoding='utf-8'))['ownerId']
+    if not create:
+        return None
+    path = Path(outbox).parent / 'focus-owner.json'
+    with task_lock(path):
+        if path.exists():
+            return json.loads(path.read_text(encoding='utf-8'))['ownerId']
+        owner = 'conversation-' + uuid4().hex
+        save_task(path, {'ownerId': owner})
+    return owner
+
+
+def focus_location(outbox, url, project_id, owner):
+    key = hashlib.sha256(json.dumps([url, project_id, owner], ensure_ascii=False).encode()).hexdigest()
+    for directory in ancestor_outboxes(outbox):
+        path = directory.parent / 'focus' / (key + '.json')
+        if path.exists():
+            return path
+    return Path(outbox).parent / 'focus' / (key + '.json')
+
+
+def queue_focus(outbox, url, project_id, association, action, *, retain_selection=True):
+    body = {key: association[key] for key in ('ownerId', 'leaseId', 'nodeIds', 'label', 'ttlSeconds', 'sequence', 'observedAt')}
+    body['action'] = action
+    if not retain_selection:
+        body.pop('nodeIds')
+    key = hashlib.sha256(json.dumps([url, project_id, body['leaseId'], body['sequence']], ensure_ascii=False).encode()).hexdigest()[:32]
+    path = Path(outbox) / ('focus-' + key + '.json')
+    task = {'version': 1, 'clientVersion': CLIENT_VERSION, 'kind': 'focus', 'taskId': key, 'requestId': 'focus-' + key,
+            'url': url, 'projectId': project_id, 'state': 'ready', 'focus': body,
+            'capturedAt': body['observedAt'], 'intent': {'command': 'focus', 'title': body['label'] or 'Conversation focus'}}
+    with task_lock(path):
+        if path.exists():
+            existing = read_queue_task(path)
+            if existing.get('focus') != body:
+                raise ClientError('Focus sequence already identifies another update.', code='queue_identity_conflict')
+            return path, existing
+        save_task(path, task)
+    return path, task
+
+
+def heartbeat_association(url, project_id, outbox):
+    """A write refreshes an explicitly joined conversation, without choosing its science."""
+    try:
+        owner = focus_owner(outbox, create=False)
+        if not owner:
+            return
+        location = focus_location(outbox, url, project_id, owner)
+        if not location.exists():
+            return
+        with task_lock(location):
+            association = json.loads(location.read_text(encoding='utf-8'))
+            if association.get('ended'):
+                return
+            last = local_timestamp(association.get('observedAt'))
+            if last is not None and time.time() - last < 45:
+                return
+            association.update(sequence=association['sequence'] + 1, observedAt=stamp())
+            queue_focus(location.parent.parent / 'outbox', url, project_id, association, 'heartbeat', retain_selection=False)
+            save_task(location, association)
+    except (ClientError, OSError, ValueError, KeyError, TypeError):
+        # The scientific receipt remains durable even if optional liveness fails.
+        return
+
+
+def sync_focus(client, path, task):
+    current = read_queue_task(path)
+    if any(current.get(key) != task.get(key) for key in ('kind', 'url', 'projectId', 'taskId', 'requestId', 'focus')):
+        raise ClientError('Focus queue identity changed.', code='queue_identity_conflict')
+    if current['state'] == 'synced':
+        return task_result(current)
+    warnings = []
+    try:
+        delivery_attempt(path, current)
+        response = client.request(client.project_route(current['projectId']) + '/focus', current['focus'])
+        current['focusState'] = response.get('session', {}).get('state')
+        current['state'] = 'synced'
+        delivery_succeeded(path, current)
+    except (ClientError, OSError, ValueError) as exc:
+        # A superseded/ended lease is obsolete, not a reason to revive work forever.
+        if getattr(exc, 'code', None) in ('focus_ended', 'stale_focus'):
+            current['state'] = 'synced'
+            current['superseded'] = True
+            if exc.code == 'focus_ended' or current['focus']['action'] == 'start':
+                current['focusState'] = 'ended'
+                # Background recovery owns only the enrolled receipt, not an
+                # ancestor conversation association (which may be outside its
+                # workspace or symlinked). A foreground owner can reconcile its
+                # own local association on the next explicit focus call.
+                if client.queue_root is None:
+                    location = focus_location(path.parent, client.url, current['projectId'], current['focus']['ownerId'])
+                    try:
+                        with task_lock(location):
+                            association = json.loads(location.read_text(encoding='utf-8'))
+                            if association.get('leaseId') == current['focus']['leaseId']:
+                                association['ended'] = True
+                                save_task(location, association)
+                    except (ClientError, OSError, ValueError):
+                        pass
+            delivery_succeeded(path, current)
+        else:
+            current['state'] = 'ready'
+            delivery_failed(path, current, exc, warnings)
+            warnings.append(str(exc))
+    return task_result(current, warnings)
+
+
+def deliver_focus_updates(client, outbox, project_id):
+    pending = []
+    for directory in ancestor_outboxes(outbox, client.queue_root):
+        for path in directory.glob('focus-*.json'):
+            try:
+                task = read_queue_task(path)
+                if task.get('kind') == 'focus' and task['url'] == client.url and task['projectId'] == project_id and task['state'] == 'ready':
+                    pending.append((task['capturedAt'], task['focus']['sequence'], path, task))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    blocked_leases = set()
+    for _, _, path, task in sorted(pending, key=lambda item: (item[3]['focus']['action'] != 'end', item[:2])):
+        lease_key = (task['focus']['ownerId'], task['focus']['leaseId'])
+        if lease_key in blocked_leases:
+            continue
+        try:
+            with task_lock(path):
+                result = sync_focus(client, path, task)
+                if result['pending']:
+                    blocked_leases.add(lease_key)
+        except (ClientError, OSError, ValueError):
+            blocked_leases.add(lease_key)
+
+
+def next_focus_stamp(previous=None):
+    current = datetime.now(timezone.utc)
+    earlier = local_timestamp(previous)
+    if earlier is not None and current.timestamp() <= earlier:
+        current = datetime.fromtimestamp(earlier, timezone.utc) + timedelta(milliseconds=1)
+    return current.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def maintain_focus(client, args, ending=False):
+    outbox = Path.cwd() / '.exp-observer-runs' / 'outbox'
+    owner = focus_owner(outbox, args.owner)
+    location = focus_location(outbox, client.url, args.project, owner)
+    with task_lock(location):
+        association = json.loads(location.read_text(encoding='utf-8')) if location.exists() else None
+        if ending and association is None:
+            emit({'projectId': args.project, 'ownerId': owner, 'state': 'ended', 'pending': False})
+            return 0
+        if ending and association.get('ended'):
+            path, _receipt = queue_focus(location.parent.parent / 'outbox', client.url, args.project, association, 'end')
+            deliver_focus_updates(client, path.parent, args.project)
+            emit(task_result(read_queue_task(path)))
+            return 0
+        starting = association is None or association.get('ended')
+        nodes = getattr(args, 'node', None)
+        if nodes is not None:
+            retained = semantic_nodes(client, outbox, args.project)
+            resolved = []
+            for value in nodes:
+                node = exact_reference(retained, value)
+                if node is None:
+                    try:
+                        node = exact_reference(client.project(args.project)['nodes'], value)
+                    except ClientError:
+                        pass
+                    if node is None and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value):
+                        raise ClientError('Focus title was not found; use the retained node ID: ' + value)
+                resolved.append(node['id'] if node else value)
+            nodes = list(dict.fromkeys(resolved))
+        ttl = getattr(args, 'ttl_seconds', None)
+        if ttl is not None and not 60 <= ttl <= 3600:
+            raise ClientError('Focus TTL must be 60–3600 seconds.')
+        association = {**(association or {}), 'ownerId': owner,
+                       'leaseId': 'lease-' + uuid4().hex if starting else association['leaseId'],
+                       'nodeIds': nodes if nodes is not None else ([] if starting else association['nodeIds']),
+                       'label': getattr(args, 'label', None) if getattr(args, 'label', None) is not None else (association or {}).get('label', ''),
+                       'ttlSeconds': ttl or (association or {}).get('ttlSeconds', 900),
+                       'sequence': 0 if starting else association['sequence'] + 1,
+                       'observedAt': next_focus_stamp((association or {}).get('observedAt')), 'ended': ending}
+        path, receipt = queue_focus(location.parent.parent / 'outbox', client.url, args.project, association,
+                                    'end' if ending else ('start' if starting else 'heartbeat'))
+        save_task(location, association)
+    deliver_focus_updates(client, path.parent, args.project)
+    emit(task_result(read_queue_task(path)))
+    return 0
+
+
+def focus(client, args):
+    return maintain_focus(client, args)
+
+
+def unfocus(client, args):
+    return maintain_focus(client, args, ending=True)
+
+
+def task(client, args):
+    """Record explicit remote lifecycle facts; no command is run or inferred."""
+    status_value = args.status
+    if args.task_action == 'update' and status_value is None and not args.metrics_file:
+        raise ClientError('task update requires --status or --metrics-file.')
+    if status_value in ('completed', 'failed', 'cancelled') and not args.finished_at:
+        raise ClientError('A terminal remote task requires its actual --finished-at timestamp.')
+    if args.finished_at is not None and local_timestamp(args.finished_at) is None:
+        raise ClientError('finished-at requires an explicit timezone timestamp.')
+    if args.task_action == 'start' and local_timestamp(args.started_at) is None:
+        raise ClientError('started-at requires an explicit original timezone timestamp.')
+    intent = {key: value for key, value in vars(args).items() if key not in ('url', 'no_autostart')}
+    # Store metrics verbatim at first capture; retries use the retained payload.
+    args.node = getattr(args, 'node', None)
+    path, receipt = task_identity(client, args, intent)
+    with task_lock(path):
+        existing = load_existing(path, receipt)
+        if existing:
+            emit(sync_task(client, path, existing))
+            return 0
+        metrics = None
+        if args.metrics_file:
+            metrics = json.loads(Path(args.metrics_file).read_text(encoding='utf-8-sig'))
+            if not isinstance(metrics, dict):
+                raise ClientError('Remote metrics must be a JSON object.')
+        at = stamp()
+        if args.task_action == 'start':
+            nodes = semantic_nodes(client, path.parent, args.project)
+            node = exact_reference(nodes, args.node)
+            if node is None:
+                try:
+                    node = exact_reference(client.project(args.project)['nodes'], args.node)
+                except ClientError:
+                    pass
+            if node:
+                receipt['nodeId'] = node['id']
+            elif not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', args.node):
+                raise ClientError('Remote task node title was not found; use its retained node ID.')
+            run = {'id': receipt['runId'], 'nodeId': receipt['nodeId'], 'title': args.title, 'startedAt': args.started_at,
+                   'configuration': {'externalTask': True, 'captureOrigin': 'external-task',
+                                     'taskRef': args.task_ref, 'remoteIdentity': args.remote_identity}, 'origin': 'observed'}
+        else:
+            receipt['runId'] = args.run
+            retained_run = execution_reference(client, path.parent, args.project, args.run)
+            if retained_run is None:
+                try:
+                    remote = next((run for run in client.project(args.project)['runs'] if run['id'] == args.run), None)
+                    if remote:
+                        retained_run = {'id': remote['nodeId']}
+                except ClientError:
+                    pass
+            receipt['nodeId'] = retained_run['id'] if retained_run else None
+            run = {'id': args.run}
+        if status_value is not None:
+            run['status'] = status_value
+        if args.finished_at is not None:
+            run['finishedAt'] = args.finished_at
+        if args.duration_ms is not None:
+            run['durationMs'] = args.duration_ms
+        if metrics is not None:
+            run['metrics'] = metrics
+        receipt.update(state='ready', capturedAt=at, status=status_value or 'recorded',
+                       operations=[{'op': 'run.add' if args.task_action == 'start' else 'run.update', 'data': run}])
+        persist_task(path, receipt)
+        emit(sync_task(client, path, receipt))
+    return 0
+
+
 def check(client, project_id):
     p = client.project(project_id)
     errors, warnings = [], []
@@ -1629,7 +2021,7 @@ def main(argv=None):
             stream.reconfigure(encoding='utf-8-sig' if stream is sys.stdin else 'utf-8',
                                errors='backslashreplace' if stream is sys.stderr else 'strict')
     args = parser().parse_args(argv)
-    client = Client(args.url, timeout=2 if args.command in ('init', 'context', 'record', 'event', 'execute', 'sync') else 30)
+    client = Client(args.url, timeout=2 if args.command in ('init', 'context', 'record', 'event', 'execute', 'sync', 'focus', 'unfocus', 'task') else 30)
     try:
         if args.command != 'status' and not args.no_autostart:
             try:
@@ -1637,7 +2029,7 @@ def main(argv=None):
                 startup = ensure_platform(args.url, Path.cwd().resolve(), state_directory())
                 if startup.get('state') in ('occupied', 'unavailable'):
                     client.startup_unavailable = 'Local platform startup is unavailable; retain research in the local queue.'
-                elif startup.get('state') == 'ready' and args.command in ('init', 'context', 'record', 'event', 'execute', 'sync'):
+                elif startup.get('state') == 'ready' and args.command in ('init', 'context', 'record', 'event', 'execute', 'sync', 'focus', 'unfocus', 'task'):
                     try:
                         client.request('/api/workspaces', {'path': str(Path.cwd().resolve())})
                     except ClientError:
@@ -1651,6 +2043,8 @@ def main(argv=None):
             return init(client, args)
         elif args.command == 'context':
             return context(client, args)
+        elif args.command in ('focus', 'unfocus', 'task'):
+            return globals()[args.command](client, args)
         elif args.command == 'observe':
             if args.observation_action == 'start':
                 observation_id = 'observation-' + (hashlib.sha256(args.request_id.encode()).hexdigest()[:24] if args.request_id else uuid4().hex[:16])

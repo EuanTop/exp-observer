@@ -35,6 +35,33 @@ ANALYSIS
 
 Notes are frozen metadata in the queued operation; they are not automatically attached as evidence. Omit notes to preserve the previous value, or supply an empty value to clear it. Reusing a request ID with changed notes or type is a conflict; use a new request ID for a deliberate revision. Background recovery and `sync` use the frozen notes without rereading the source analysis file. Repeating `event` or `record` validates the supplied intent: if its notes file is missing or unreadable, the same explicit request ID, file path and other arguments can reuse the frozen analysis; a readable file with changed text remains a conflict. Missing notes cannot create a new record. Keep scripts, original measurements and images as local evidence. Metrics retain their original JSON structure, including nested objects, arrays, empty containers and nulls. Non-object roots use `result` while the original file is preserved.
 
+## Conversation focus
+
+An experiment can have several independent conversation associations, each with one or more focused nodes:
+
+```sh
+python3 <skill>/scripts/exp_observer.py focus --project ID --node NODE_ID --label "Compare candidate mechanisms"
+python3 <skill>/scripts/exp_observer.py focus --project ID --node NODE_A --node NODE_B
+python3 <skill>/scripts/exp_observer.py unfocus --project ID
+```
+
+`focus` with no nodes joins the experiment, retaining a previous selection when resuming. Nodes accept retained IDs or exact titles. `--owner` overrides the marker for that focus command. For ordinary writes too, set `EXP_OBSERVER_OWNER_ID` in that conversation’s process environment; it takes precedence over the native `CODEX_THREAD_ID`. A persisted workspace marker is the final fallback. Different conversations can use the same node; a conversation can maintain several experiments. Without a host marker, independent conversations sharing a directory should set distinct `EXP_OBSERVER_OWNER_ID` values. A one-off `--owner` does not change the owner used by subsequent ordinary writes.
+
+Ordinary writes refresh an existing association while preserving the explicitly chosen node set; they do not create an association for historical clients. Update focus when the research moves. End only this conversation's association when it stops maintaining that experiment, rather than at every turn. Neither joining, expiry nor ending changes a scientific node, finishes a remote task, or closes another conversation's association. The default liveness window is 900 seconds (`--ttl-seconds` accepts 60–3600); prolonged analysis without a checkpoint can appear stale. A deliberate `focus` refresh is available without creating a research event.
+
+Focus commands use a separate durable outbox. Frozen observation time determines expiry even when offline records arrive late. Per-lease sequence numbers reject old updates, and ended leases cannot revive. Restarting creates a new lease; a delayed end for the old one cannot close it. Heartbeats update separate operational storage, without adding research revisions or allocating Token counts. The frontend's **Current work** action jumps to one active node or offers a per-conversation list when several nodes are active. Stale associations remain distinguishable from current work.
+
+## Remote task lifecycle
+
+`execute` captures a local command. Submitting a cloud job is a separate command from the job's lifetime. Retain a known remote task without running or polling anything through Observer:
+
+```sh
+python3 <skill>/scripts/exp_observer.py task start --project ID --node NODE_ID --title "Candidate training" --task-ref JOB_ID --remote-identity "Training host / experiment directory" --started-at 2026-10-29T01:00:00Z --request-id candidate-job-start
+python3 <skill>/scripts/exp_observer.py task update --project ID --run RETURNED_RUN_ID --status completed --finished-at 2026-10-29T02:15:00Z --request-id candidate-job-finish
+```
+
+Use actual original timestamps and a stable task identity from the executor. `--status` accepts queued, running, paused, completed, failed and cancelled. A terminal state requires its actual finish timestamp; an optional `--duration-ms` must match the interval. Original start, owner and remote identity stay immutable. An update may attach measured JSON via `--metrics-file`; unreported GPU time, billing and Token usage stay unknown. A completed lifecycle does not decide the scientific question. Offline registration reuses frozen operations and never resubmits the remote job.
+
 ## Availability and recovery
 
 `init --name NAME [--id ID]` saves a project plan before contacting the service. Keep the returned ID, including when the receipt is pending. An explicit project passed to `event` or `record` can also prepare a missing project. Recovery creates the project only if absent; it never replaces an existing project's metadata.

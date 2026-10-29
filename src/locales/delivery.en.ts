@@ -1,4 +1,8 @@
 export const deliveryEn: Record<string, string> = {
+  等待前置记录: "Waiting for an earlier record",
+  前置研究记录: "Earlier research record",
+  送达前置记录: "Deliver earlier record",
+  "下次重试 {time}": "Next retry {time}",
   记录待处理: "Records need attention",
   记录待同步: "Records pending",
   同步状态未知: "Delivery status unknown",

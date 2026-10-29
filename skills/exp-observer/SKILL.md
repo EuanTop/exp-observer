@@ -25,6 +25,8 @@ python3 <skill>/scripts/exp_observer.py init --name "Research task"
 
 Keep the returned ID across conversations. This works offline; `event --project ID` can also prepare a missing project without `init`. After a confirmed missing project (for example a cleared platform), the client restores its readable name from retained metadata when available. If that metadata is missing, use `init --id ID --name "Readable research name"` once, preserving the ID; this repairs a placeholder without replacing a human-renamed project. An offline connection is not evidence that the project was deleted.
 
+Declare this conversation's maintenance association with `focus --project ID --node NODE_ID` (repeat `--node` for parallel work). Without a node, it joins the experiment first; update focus when the actual work moves. The client uses the host conversation marker when available, otherwise retains a local owner marker. Ordinary recording refreshes this association without extra model calls. Other conversations can independently maintain the same experiment. When you stop maintaining it, call `unfocus --project ID`; keep it open while genuinely continuing between turns. Ending focus changes no research status. If interrupted, the association expires as stale rather than claiming the work finished. See [focus and remote tasks](references/records.md#conversation-focus) for optional controls.
+
 ## Record at natural boundaries
 
 Use `event` to retain actual research changes in the research's own wording. The client manages identities and references; no node numbering or predetermined script-to-finding mapping is needed.
@@ -35,7 +37,7 @@ python3 <skill>/scripts/exp_observer.py event --project ID --question "What affe
 
 `--question` alone opens a meaningful question as active; optional `--reason` explains why it matters. Its exact title or a retained ID reuses that question, including across ancestor queues and retained context. Titles are not matched approximately. Findings need no prior opening call: the same invocation can retain both a new question and its first finding.
 
-Start with the suggested types **question, experiment, finding**. These are suggestions, not phases or a closed vocabulary: use `record --kind TYPE` for any research-specific type that communicates the work better. Use `--finding` for a substantive discovery or `--correction` when revising an earlier judgment. Each change is a separate ordinary node linked to the stated question; earlier findings remain intact. `--after "Earlier finding title"` relates a change to a retained finding, defaulting to `revises` for a correction, `leads_to` for a direction or `related_to` for a finding; `--relation supports` can explicitly state support. No causal relationships are inferred from prose or recording order.
+Start with the suggested types **question, experiment, finding**. These are suggestions, not phases or a closed vocabulary: use `record --kind TYPE` for any research-specific type that communicates the work better. Use `--finding` for a substantive discovery or `--correction` when revising an earlier judgment, naming the earlier judgment with `--after` when known. Routine deploy, copy and backup success already belongs in execution/evidence; create a discovery when it changes the research judgment. Each change is a separate ordinary node linked to the stated question; earlier findings remain intact. `--after "Earlier finding title"` relates a change to a retained finding, defaulting to `revises` for a correction, `leads_to` for a direction or `related_to` for a finding; `--relation supports` can explicitly state support. No causal relationships are inferred from prose or recording order.
 
 New follow-up questions are questions, not “direction” nodes. For parallel questions arising from one result, repeat `event --question "New question" --after "Earlier finding"`: each becomes a branch with its own state. The legacy `--direction` option remains for an explicit change of approach; do not use it as a default step or for every new branch.
 
@@ -47,7 +49,7 @@ As you finish, check only questions you actually worked on: mark resolved work c
 
 ## Organize research by subproblem
 
-The project overview is the outermost research graph with containers closed; it is the main research story. No separate important-node selection is needed. Use a meaningful question as a container when its exploration needs its own space. `event --container` keeps that question's findings inside it. `--parent "Exact parent title/ID"` nests a question and makes both it and its parent containers, preserving their research types. Later calls reuse that ownership from local records or dated context. Keep container titles concise and its summary/conclusion current with `record --node ID --summary TEXT --conclusion TEXT`; do not create a second summary document.
+The project overview is the outermost research graph with containers closed; it is the main research story. No separate important-node selection is needed. Use a meaningful question as a container when its exploration needs its own space. `event --container` keeps that question's findings inside it. `--parent "Exact parent title/ID"` nests a question and makes both it and its parent containers, preserving their research types. Later calls reuse that ownership from local records or dated context. Keep container titles concise and its summary/conclusion current with `record --node ID --summary TEXT --conclusion TEXT`; update `--next-action` when the remaining work changes. Do not create a second summary document.
 
 ```sh
 python3 <skill>/scripts/exp_observer.py event --project ID --question "What affects confirmation time?" --container
@@ -70,6 +72,8 @@ python3 <skill>/scripts/exp_observer.py execute --project ID --title "Actual com
 ```
 
 This captures timing, exit code and stdout/stderr independently of future findings. Add `--artifact PATH` for results. `event --evidence "Actual command"` links an actual finding to that captured evidence; several findings can reuse it. For repeated measurements, `execute --question "Exact question" --title "Actual measurement" -- COMMAND...` retains another run of the same question. Never rerun work just to split its findings.
+
+For remote training or another detached job, local submission is not the job itself. Retain the remote task identity and actual lifecycle using `task start` / `task update` as described in the [record reference](references/records.md#remote-task-lifecycle). Preserve the original start and completion times; a local command finishing or focus ending does not finish remote work.
 
 The older `record` entry remains available for direct edits. Its `--node` option replaces supplied fields on that node; omit `--title` to keep the current title. New records require a nonempty title; use `event` for a new finding or correction.
 

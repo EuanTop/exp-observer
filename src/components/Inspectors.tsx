@@ -193,6 +193,15 @@ export function ProjectInspector({
   );
 }
 
+const editableNodeStatuses = [
+  "proposed",
+  "active",
+  "completed",
+  "paused",
+  "rejected",
+  "failed",
+];
+
 export function NodeInspector({
   node,
   project,
@@ -311,14 +320,14 @@ export function NodeInspector({
               ])
             }
           >
-            {[
-              "proposed",
-              "active",
-              "completed",
-              "paused",
-              "rejected",
-              "failed",
-            ].map((s) => (
+            {!editableNodeStatuses.includes(node.status) && (
+              <option value={node.status}>
+                {Object.hasOwn(statuses, node.status)
+                  ? t(statuses[node.status])
+                  : node.status || t("未记录")}
+              </option>
+            )}
+            {editableNodeStatuses.map((s) => (
               <option key={s} value={s}>
                 {t(statuses[s])}
               </option>

@@ -114,6 +114,46 @@ describe("Agent delivery status", () => {
     expect(html).not.toContain("have been delivered");
   });
 
+  it("names blocked dependencies and offers delivery of the prerequisite without rerunning research", () => {
+    const html = renderToStaticMarkup(
+      createElement(DeliveryDetails, {
+        snapshot: snapshot({
+          state: "blocked",
+          blockedCount: 1,
+          items: [
+            {
+              taskId: "dependent",
+              title: "Dependent finding",
+              state: "blocked",
+              attempts: 4,
+              lastError: { code: "not_found", message: "Prerequisite missing" },
+              waitingFor: [
+                {
+                  taskId: "earlier",
+                  nodeId: "node-earlier",
+                  title: "Original condition diagnosis",
+                },
+              ],
+              nextAttemptAt: "2026-10-29T10:00:00Z",
+            },
+          ],
+        }),
+        fetchError: "",
+        workspaceError: "",
+        busy: false,
+        retrying: null,
+        retryError: "",
+        onRetry() {},
+        onRefresh() {},
+      }),
+    );
+    expect(html).toContain("Waiting for an earlier record");
+    expect(html).toContain("Original condition diagnosis");
+    expect(html).toContain("Deliver earlier record");
+    expect(html).toContain("Next retry");
+    expect(html).not.toContain("node-earlier");
+  });
+
   it("shows current check, save and retry errors instead of a success confirmation", () => {
     const html = renderToStaticMarkup(
       createElement(DeliveryDetails, {

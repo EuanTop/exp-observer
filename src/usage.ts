@@ -13,6 +13,10 @@ export type NodeUsage = {
   isRunning: boolean;
   runMs: number | null;
   runCount: number;
+  commandRunCount: number;
+  externalTaskCount: number;
+  externalTaskMs: number | null;
+  externalTaskRunning: boolean;
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
@@ -163,6 +167,12 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
   const runs = unique(project.runs).filter(
     (run) => scope.has(run.nodeId) && isExecutionRun(run),
   );
+  const externalTasks = runs.filter(
+    (run) => run.configuration?.externalTask === true,
+  );
+  const commandRuns = runs.filter(
+    (run) => run.configuration?.externalTask !== true,
+  );
   const hostUsage = hostUsageRecords(project).filter(
     (record) => record.nodeId !== null && scope.has(record.nodeId),
   );
@@ -228,7 +238,23 @@ export function getNodeUsage(project: Project, nodeId: string): NodeUsage {
     elapsedMs: intervalUnion(observations),
     elapsedPartial: isRunning,
     isRunning,
-    runMs: sumKnown(runs.map((run) => run.metrics?.wallTimeMs)),
+    runMs: sumKnown(commandRuns.map((run) => run.metrics?.wallTimeMs)),
+    commandRunCount: commandRuns.length,
+    externalTaskCount: externalTasks.length,
+    externalTaskMs: sumKnown(
+      externalTasks.map((run) => {
+        if (!["completed", "failed", "cancelled"].includes(run.status))
+          return null;
+        const start = timestamp(run.startedAt),
+          end = timestamp(run.finishedAt);
+        return Number.isFinite(start) && Number.isFinite(end) && end >= start
+          ? end - start
+          : null;
+      }),
+    ),
+    externalTaskRunning: externalTasks.some((run) =>
+      ["queued", "running"].includes(run.status),
+    ),
     runCount: runs.length,
     inputTokens,
     outputTokens,

@@ -38,7 +38,13 @@ A useful instruction is:
 
 > Use the ExpObserver Skill for experiment `my-study`. Follow my research task.
 
-An experiment belongs to its persistent record. **Multiple conversations and agents can contribute to the same experiment.** Operations explicitly select the project and, where relevant, the node; there is no conversation binding or global current-experiment pointer.
+An experiment belongs to its persistent record. **Multiple conversations and agents can contribute to the same experiment.** Operations explicitly select the project and, where relevant, the node; each conversation can declare its own nonexclusive maintenance association, without a global current-experiment pointer.
+
+### Jump to current work
+
+Choose **Current work** above the graph. One active node opens directly; several nodes open a list grouped by conversation or reported external task. A jump enters the correct container and selects the original node. Expired conversation associations are listed separately from active work; an open research question alone is never treated as executing.
+
+The Skill uses `focus --project my-study --node NODE_ID` to declare its current work (repeat `--node` for parallel nodes), and `unfocus --project my-study` when that conversation stops maintaining the experiment. Ordinary records refresh an existing association. Other conversations keep their own focus. Closing focus never closes a scientific question or a remote job. Old clients remain compatible; their historical conversations are not automatically declared active.
 
 ### Read, run, record
 
@@ -88,7 +94,7 @@ python3 skills/exp-observer/scripts/exp_observer.py execute \
 
 The wrapper supplies a record ID and captures the actual command's exit code, wall time, stdout/stderr and requested files with **zero extra model calls**. Use `event --evidence 'Evaluate candidate A'` with each actual finding to reuse this evidence. For repeated measurements, `execute --question 'Exact question' --title 'Actual measurement' -- COMMAND...` adds a run to the same question without creating a finding. `--node NODE_ID` also attaches an existing record. Never rerun work just to split its findings. Recording does not prescribe experimental phases, methods, measurements or deliverables. Agents leave brief updates when the research already changes a judgment or direction; coordinates, IDs and display formatting belong to the platform.
 
-`init`, `event`, `record` and `execute` save pending work inside the working directory. The application discovers queues within connected research directories, including newly created experiment subdirectories and when starting after offline research. Clients need no global-registry write. The application submits only queues for its own loopback address and never follows directory links outside the connected root. A successful experiment remains successful even when recording is unavailable. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths. Optional manual `sync` runs from the original working directory. Recovery never reruns an experiment or rereads changed source evidence.
+`init`, `event`, `record` and `execute` save pending work inside the working directory. The application discovers queues within connected research directories, including newly created experiment subdirectories and when starting after offline research. Clients need no global-registry write. The application submits only queues for its own loopback address and never follows directory links outside the connected root. A successful experiment remains successful even when recording is unavailable. Receipts expose `pending` and `recordingWarnings`; captured stdout/stderr remain available at their returned paths. Optional manual `sync` runs from the original working directory. Recovery never reruns an experiment or rereads changed source evidence. Repeated delivery failures back off; the sync view identifies queued prerequisite records and can deliver them before a dependent record.
 
 The client must run to queue a record: result files alone are not queued. If the host blocks client execution or writes inside its working directory, recording is unavailable. Research continues. Connect directories during application setup, separately from the research task. The application still supports older clients' recovery registries (`EXP_OBSERVER_STATE_DIR` overrides their location); new clients do not depend on that registry. Installing the Skill grants no sandbox permissions or system service.
 
@@ -106,6 +112,10 @@ python3 skills/exp-observer/scripts/exp_observer.py export --project my-study --
 ```
 
 `EXP_OBSERVER_URL` or the global `--url` option selects another local server address. See the [Skill guide](../skills/exp-observer/SKILL.md), [record reference](../skills/exp-observer/references/records.md) and [HTTP/data contract](../docs/contract.md) for operations, versioning and bounded evidence reads. [Testing notes and a research-focused trial prompt](../docs/observation-test.md) separate connection checks from the research task. Automatic command capture uses the explicit `execute` wrapper; installing the Skill does not install global hooks.
+
+### Report an existing remote job
+
+For detached training, `execute` measures the submission command, not the whole job. The Skill's `task start` / `task update` retains the original remote identity, actual start and finish timestamps, lifecycle status and measured results. Remote task time is displayed separately from captured command time; neither is a measure of complete research cost. See the [remote-task reference](../skills/exp-observer/references/records.md#remote-task-lifecycle) for commands.
 
 ### Observe a research step
 

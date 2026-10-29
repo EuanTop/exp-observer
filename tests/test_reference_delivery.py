@@ -109,3 +109,28 @@ class ReferenceDeliveryTests(unittest.TestCase):
         self.assertEqual(status['pendingCount'], 1)
         self.assertEqual(status['blockedCount'], 1)
         self.assertFalse(status['transportChecked'])
+
+    def test_run_reference_works_for_ordinary_links_and_keeps_support_provenance(self):
+        import sys
+        _, question = self.invoke('event', '--project', 'study', '--question', 'A real retained question?')
+        _, run = self.invoke('execute', '--project', 'study', '--question', question['questionId'],
+                             '--title', 'A real diagnostic', '--', sys.executable, '-c', 'print("measured")')
+        _, finding = self.invoke('record', '--project', 'study', '--title', 'Diagnostic follow-up',
+                                 '--after', run['runId'], '--relation', 'related_to')
+        self.assertFalse(finding['pending'])
+        edge = next(edge for edge in self.project()['edges'] if edge['target'] == finding['nodeId'])
+        self.assertEqual(edge['source'], question['questionId'])
+        self.assertFalse(edge.get('runIds'))
+        _, supported = self.invoke('record', '--project', 'study', '--title', 'Supported result',
+                                   '--after', run['runId'], '--relation', 'supports')
+        edge = next(edge for edge in self.project()['edges'] if edge['target'] == supported['nodeId'])
+        self.assertEqual(edge['runIds'], [run['runId']])
+
+    def test_exact_node_id_wins_over_another_nodes_matching_title(self):
+        self.store.batch('study', {'operations': [
+            {'op': 'node.add', 'data': {'id': 'node-original', 'title': 'Original'}},
+            {'op': 'node.add', 'data': {'id': 'node-other', 'title': 'node-original'}}]})
+        self.invoke('context', '--project', 'study')
+        _, result = self.invoke('record', '--project', 'study', '--title', 'A follow-up', '--after', 'node-original')
+        self.assertFalse(result['pending'])
+        self.assertEqual(self.project()['edges'][0]['source'], 'node-original')

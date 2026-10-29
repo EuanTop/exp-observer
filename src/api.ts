@@ -13,6 +13,22 @@ export type RuntimeSnapshot = {
   checkedAt: string;
   active: NonNullable<Project["runtimeActivity"]>;
 };
+export type FocusSession = {
+  leaseId: string;
+  ownerId: string;
+  label: string;
+  nodeIds: string[];
+  startedAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  state: "active" | "stale" | "ended";
+  revision: number;
+};
+export type FocusSnapshot = {
+  projectId: string;
+  checkedAt: string;
+  sessions: FocusSession[];
+};
 export type UsageCollection = {
   projectId: string;
   available?: boolean;
@@ -37,6 +53,8 @@ export type DeliveryItem = {
   state: "pending" | "blocked" | "interrupted";
   attempts: number;
   lastAttemptAt?: string | null;
+  nextAttemptAt?: string | null;
+  waitingFor?: { taskId: string; nodeId: string; title: string }[];
   lastError: { code: string; message: string } | null;
 };
 export type DeliverySnapshot = {
@@ -111,6 +129,10 @@ export const api = {
     request<UsageCollection>(
       `/api/projects/${encodeURIComponent(id)}/usage-status`,
     ),
+  focus: (id: string, signal?: AbortSignal) =>
+    request<FocusSnapshot>(`/api/projects/${encodeURIComponent(id)}/focus`, {
+      signal,
+    }),
   runtime: (id: string) =>
     request<RuntimeSnapshot>(`/api/projects/${encodeURIComponent(id)}/runtime`),
   create: (name: string) =>

@@ -383,7 +383,7 @@ class Recovery:
         return candidates
 
     def _validate_capture(self, path, root, task):
-        if task.get('kind') == 'project':
+        if task.get('kind') in ('project', 'focus'):
             return
         capture = Path(task['captureRoot'])
         if not capture.is_relative_to(path.parent.parent) or not scoped_path(capture, root, allow_missing=True):
@@ -417,7 +417,7 @@ class Recovery:
                         self.cli.delivery_failed(path, task, exc, warnings)
                     return {'task': path.name, 'projectId': task['projectId'], 'pending': True,
                             'recordingWarnings': warnings}
-                client = self.cli.Client(task['url'], timeout=1, transport_url=self.url, local_only=True, queue_root=root)
+                client = self.cli.Client(task['url'], timeout=5, transport_url=self.url, local_only=True, queue_root=root)
                 # The application already resolves authoritative parent plans. The
                 # standalone client's optional ancestor lookup must stay in this scope.
                 result = self.cli.sync_project(client, path, task) if task.get('kind') == 'project' else self.cli.sync_task(client, path, task)
@@ -464,8 +464,7 @@ class Recovery:
                 results.append(result)
                 if result['pending']:
                     continue
-            for item in sorted(items, key=lambda item: (item[2].get('kind') != 'project',
-                    item[2].get('capturedAt') or item[2].get('startedAt') or item[2].get('preparedAt') or '', str(item[0]))):
+            for item in self.cli.queue_delivery_order(items):
                 if self.stopped.is_set():
                     break
                 if authoritative is not None and item[0] == authoritative[0]:
@@ -509,6 +508,8 @@ class Recovery:
             return result
         receipts, available, complete = self._delivery_receipts(project_id)
         result.update(available=available, discoveryComplete=complete)
+        dependencies = self.cli.queue_dependency_map(receipts)
+        by_path = {item[0]: item[2] for item in receipts}
         for path, root, task in receipts:
             if task['state'] == 'synced':
                 result['syncedCount'] += 1
@@ -534,7 +535,12 @@ class Recovery:
                 'title': title[:500],
                 'state': state, 'attempts': attempts if isinstance(attempts, int) and attempts >= 0 else 0,
                 'lastAttemptAt': delivery.get('lastAttemptAt') if isinstance(delivery.get('lastAttemptAt'), str) else None,
-                'lastError': error})
+                'lastError': error,
+                'nextAttemptAt': delivery.get('nextAttemptAt'),
+                'waitingFor': [{'taskId': by_path[dependency].get('taskId', dependency.stem),
+                                'nodeId': by_path[dependency].get('nodeId'),
+                                'title': by_path[dependency].get('intent', {}).get('title') or 'Queued record'}
+                               for dependency in sorted(dependencies.get(path, ())) if by_path[dependency]['state'] != 'synced']})
         if result['blockedCount'] or result['interruptedCount']:
             result['state'] = 'blocked'
         elif result['pendingCount']:
@@ -555,8 +561,17 @@ class Recovery:
             known = [item for item in receipts if task_id is None or (item[2].get('taskId') or item[0].stem) == task_id]
             if task_id is not None and not known:
                 raise StoreError('Queued record was not found in connected workspaces.', 'not_found', 404)
+            dependencies = self.cli.queue_dependency_map(receipts)
+            selected = {item[0] for item in known}
+            pending = list(selected)
+            while pending:
+                for dependency in dependencies.get(pending.pop(), ()):
+                    if dependency not in selected:
+                        selected.add(dependency)
+                        pending.append(dependency)
+            known = [item for item in receipts if item[0] in selected]
             results = []
-            for item in sorted(known, key=lambda item: (item[2].get('kind') != 'project', str(item[0]))):
+            for item in self.cli.queue_delivery_order(known):
                 path, root, task = item
                 lock = path.with_suffix('.lock')
                 if task['state'] != 'ready' or (scoped_path(lock, root) and capture_lock_held(lock)):

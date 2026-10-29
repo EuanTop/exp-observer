@@ -530,6 +530,46 @@ class HTTPAndCLITests(unittest.TestCase):
         self.assertEqual(explicit.returncode, 0, explicit.stderr)
         self.assertEqual(json.loads(current.stdout), json.loads(explicit.stdout))
 
+    def test_large_native_metrics_batch_replays_exactly_with_its_original_identity(self):
+        # Generate representative large native JSON in memory; no large fixture or
+        # source result is committed or rewritten to make observation succeed.
+        metrics = {'rawSummary': {'text': 'measurement-' * (3 * 1024 * 1024 // 12),
+                                  'samples': [1, None, {'original': True}]}}
+        operations = [{'op': 'run.add', 'data': {'id': 'large-summary-run', 'nodeId': 'a',
+                                               'status': 'completed', 'metrics': metrics}}]
+        body = {'requestId': 'frozen-large-native-summary', 'operations': operations}
+        original = copy.deepcopy(body)
+        self.assertGreater(len(json.dumps(body).encode()), 3 * 1024 * 1024)
+        retained = self.request('/api/projects/study/batch', body)
+        self.assertEqual(retained['runs'][0]['metrics'], metrics)
+        self.assertEqual(body, original)
+        self.request('/api/projects/study/batch', {'operations': [
+            {'op': 'node.update', 'data': {'id': 'a', 'summary': 'A later independent observation'}}]})
+        self.assertEqual(self.request('/api/projects/study/batch', body), retained)
+        self.assertEqual(self.store.get_project('study')['nodes'][0]['summary'], 'A later independent observation')
+        with self.store._transaction() as db:
+            row = db.execute('SELECT fingerprint FROM versions WHERE project_id=? AND request_id=?',
+                             ('study', body['requestId'])).fetchone()
+        from backend.store import canonical
+        self.assertEqual(row['fingerprint'], hashlib.sha256(canonical(operations).encode()).hexdigest())
+
+    def test_batch_body_ceiling_is_bounded_without_relaxing_other_endpoints(self):
+        for route, limit in (('/api/projects/study/batch', 8 * 1024 * 1024),
+                             ('/api/projects', 2 * 1024 * 1024),
+                             ('/api/import', 2 * 1024 * 1024),
+                             ('/api/projects/study/focus', 2 * 1024 * 1024),
+                             ('/api/projects/study/artifacts', 2 * 1024 * 1024)):
+            with self.subTest(route=route):
+                request = Request(self.url + route, data=b'', headers={'Content-Length': str(limit + 1)})
+                with self.assertRaises(HTTPError) as raised:
+                    urlopen(request, timeout=10)
+                try:
+                    self.assertEqual(raised.exception.code, 413)
+                    self.assertEqual(json.loads(raised.exception.read())['code'], 'body_too_large')
+                finally:
+                    raised.exception.close()
+        self.assertEqual(self.store.get_project('study')['runs'], [])
+
     def test_security_and_body_limit(self):
         self.assertTrue(self.request('/api/health')['ok'])
         for headers in ({'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):

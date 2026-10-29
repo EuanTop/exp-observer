@@ -134,8 +134,10 @@ class LegacyEvidenceRecoveryTests(unittest.TestCase):
         for source in ('run-missing', 'run-other-project', 'Actual measurement'):
             with self.subTest(source=source):
                 self.assert_rejected_unchanged(self.request(source))
-        self.assert_rejected_unchanged(self.request(relation='related_to'))
         self.assert_rejected_unchanged(self.request(runIds='run-actual'), 'invalid_request')
+        related = self.store.batch('study', self.request(relation='related_to'))
+        self.assertEqual(related['edges'][0]['source'], 'experiment')
+        self.assertNotIn('runIds', related['edges'][0])
 
     def test_reference_only_ensure_stays_atomic_until_real_node_arrives(self):
         body = {'requestId': 'deferred-exact-reference', 'operations': [

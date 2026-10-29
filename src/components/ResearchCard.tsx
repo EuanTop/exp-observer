@@ -22,7 +22,13 @@ function UsageStats({ data }: { data: CanvasData }) {
       ? t("计时 {duration}", { duration: formatDuration(usage.elapsedMs) })
       : usage?.runMs != null
         ? t("执行 {duration}", { duration: formatDuration(usage.runMs) })
-        : t("计时 —");
+        : usage?.externalTaskMs != null
+          ? t("外部任务 {duration}", {
+              duration: formatDuration(usage.externalTaskMs),
+            })
+          : usage?.externalTaskRunning
+            ? t("外部任务运行中")
+            : t("计时 —");
   const tokens = `${usage?.tokenScope === "execution" ? t("执行 Token") : "Token"} ${formatTokens(usage?.totalTokens)}${usage?.totalTokens != null && usage.tokensPartial ? "+" : ""}`;
   return (
     <>
@@ -215,7 +221,11 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
                 e.stopPropagation();
                 data.onInspect?.(n.id, "runs");
               }}
-              title={t("查看平台捕获的命令执行")}
+              title={
+                data.usage?.externalTaskCount
+                  ? t("查看命令执行与外部任务")
+                  : t("查看平台捕获的命令执行")
+              }
             >
               {(data.usage?.runCount ?? data.runs ?? 0) > 0
                 ? t("{count} 次执行", {

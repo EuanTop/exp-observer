@@ -186,6 +186,9 @@ class Store:
                 ):
                     db.execute(statement)
                 db.execute('PRAGMA user_version = 1')
+        from .work_sessions import initialize as initialize_work_sessions
+        with self._transaction(write=True) as db:
+            initialize_work_sessions(db)
         with self._transaction() as db:
             migrated = db.execute("SELECT 1 FROM settings WHERE key = 'json_migrated'").fetchone()
         if not migrated:
@@ -550,15 +553,15 @@ class Store:
             self._expected(previous, body)
             p = copy.deepcopy(previous)
             unplaced = set()
-            added_supports = set()
+            added_edges = set()
             geometry_changed = False
             for operation in operations:
                 object_value(operation, 'Operation')
                 data = copy.deepcopy(object_value(operation.get('data', {}), 'Operation data'))
                 node_count = len(p['nodes'])
                 self._apply(p, operation.get('op'), data)
-                if operation.get('op') == 'edge.add' and data.get('relation') == 'supports':
-                    added_supports.add(data['id'])
+                if operation.get('op') == 'edge.add':
+                    added_edges.add(data['id'])
                 if operation.get('op') in ('node.add', 'node.ensure') and len(p['nodes']) > node_count and 'position' not in data:
                     unplaced.add(p['nodes'][-1]['id'])
                 op = operation.get('op')
@@ -566,22 +569,22 @@ class Store:
                     op in ('edge.add', 'edge.update', 'edge.delete', 'node.delete', 'node.merge') or
                     op in ('node.add', 'node.ensure') and len(p['nodes']) > node_count or
                     op == 'node.update' and any(key in data for key in ('parentId', 'kind', 'isContainer', 'collapsed', 'position', 'positionSource')))
-            # Old frozen captures used exact execution IDs as evidence sources.
-            # Resolve only new supports edges after the complete batch, so real
+            # Old frozen captures used exact execution IDs as relationship sources.
+            # Resolve only new edges after the complete batch, so real
             # nodes (including aliases and nodes created later) take priority.
             # The incoming operations and request fingerprint remain unchanged.
             node_ids = {node['id'] for node in p['nodes']}
             runs = {run['id']: run for run in p['runs']}
             aliases = p.get('nodeAliases', {})
             for edge in p['edges']:
-                if edge['id'] not in added_supports or edge.get('relation') != 'supports':
+                if edge['id'] not in added_edges:
                     continue
                 source = edge.get('source')
                 if isinstance(source, str) and source not in node_ids and source not in aliases and source in runs:
                     run = runs[source]
                     edge['source'] = aliases.get(run.get('nodeId'), run.get('nodeId'))
                     run_ids = edge.get('runIds', [])
-                    if isinstance(run_ids, list):
+                    if edge.get('relation') == 'supports' and isinstance(run_ids, list):
                         edge['runIds'] = run_ids + ([run['id']] if run['id'] not in run_ids else [])
             self._validate(p)
             if geometry_changed:
@@ -738,6 +741,9 @@ class Store:
             return
         if action == 'update':
             existing = self._find(p, collection, d.get('id'))
+            if kind == 'run':
+                from .external_tasks import validate_update
+                validate_update(existing, d)
             if kind == 'node' and 'position' in d:
                 d.setdefault('positionSource', 'manual')
             existing.update(d)
@@ -765,6 +771,8 @@ class Store:
         }
         if kind == 'artifact' and d.get('origin', 'mock') != 'mock':
             raise StoreError('Observed evidence must be registered from a real file.', 'registration_required')
+        if kind == 'run' and isinstance(d.get('configuration'), dict) and d['configuration'].get('externalTask') is True and 'startedAt' not in d:
+            raise StoreError('External tasks require the original reported startedAt.', 'invalid_external_task')
         p[collection].append(defaults[kind] | d)
 
     def _validate(self, p):
@@ -843,7 +851,9 @@ class Store:
                 raise StoreError('A node cannot connect to itself.', 'self_edge')
             if edge.get('basis', 'unknown') not in ('observed', 'hypothesis', 'unknown'):
                 raise StoreError('Unknown edge basis.')
+        from .external_tasks import validate as validate_external_task
         for run in p['runs']:
+            validate_external_task(run)
             ref(run.get('nodeId'), 'nodes')
             if not isinstance(run.get('title', ''), str) or not isinstance(run.get('status'), str):
                 raise StoreError('Run title and status must be text.')

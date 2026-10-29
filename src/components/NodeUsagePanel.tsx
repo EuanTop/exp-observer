@@ -70,10 +70,10 @@ export function NodeUsagePanel({
               ? t("计时中")
               : t("已记录用量")}
         </span>
-        {usage.runCount > 0 && (
+        {usage.commandRunCount > 0 && (
           <span>
             {t("{count} 次运行 · 执行 {duration}", {
-              count: usage.runCount,
+              count: usage.commandRunCount,
               duration:
                 usage.runMs === null
                   ? t("未采集")
@@ -82,6 +82,19 @@ export function NodeUsagePanel({
           </span>
         )}
       </div>
+      {usage.externalTaskCount > 0 && (
+        <div className="usage-scope">
+          <span>
+            {t("{count} 个外部任务", { count: usage.externalTaskCount })}
+          </span>
+          <span>
+            {t("已记录任务耗时 {duration}", {
+              duration: formatDuration(usage.externalTaskMs),
+            })}
+          </span>
+          {usage.externalTaskRunning && <span>{t("外部任务运行中")}</span>}
+        </div>
+      )}
       {usage.tokensPartial && usage.totalTokens !== null && (
         <div className="usage-scope">{t("部分 Token 未采集")}</div>
       )}

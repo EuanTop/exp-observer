@@ -193,3 +193,28 @@
     padding: 8px;
   }
 }
+.delivery-dependencies {
+  margin: 10px 0;
+  padding: 9px;
+  border-radius: 6px;
+  background: var(--raised);
+}
+.delivery-dependencies > span {
+  display: block;
+  margin-bottom: 6px;
+}
+.delivery-dependencies > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+.delivery-dependencies .button {
+  font-size: 10px;
+  flex: 0 0 auto;
+  padding: 5px 7px;
+}
+.delivery-item-footer small > span {
+  display: block;
+  margin-top: 4px;
+}

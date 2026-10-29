@@ -563,6 +563,49 @@ describe("getNodeUsage", () => {
   });
 });
 
+describe("external task time", () => {
+  it("keeps remote lifecycle duration separate from captured commands and ongoing tasks unknown", () => {
+    const p = project(
+      [node("root")],
+      [],
+      [
+        run("command", "root", { wallTimeMs: 2000 }),
+        {
+          ...run("remote", "root", { wallTimeMs: 999999 }),
+          configuration: { externalTask: true, taskRef: "job-1" },
+          status: "completed",
+          startedAt: "2026-10-29T08:00:00Z",
+          finishedAt: "2026-10-29T10:00:00Z",
+        },
+        {
+          ...run("ongoing", "root", {}),
+          configuration: { externalTask: true },
+          status: "running",
+          startedAt: "2026-10-29T10:01:00Z",
+          finishedAt: null,
+        },
+      ],
+    );
+    expect(getNodeUsage(p, "root")).toMatchObject({
+      runCount: 3,
+      commandRunCount: 1,
+      runMs: 2000,
+      externalTaskCount: 2,
+      externalTaskMs: 7200000,
+      externalTaskRunning: true,
+      elapsedMs: null,
+    });
+    p.runs = p.runs.slice(2);
+    expect(getNodeUsage(p, "root")).toMatchObject({
+      runCount: 1,
+      commandRunCount: 0,
+      runMs: null,
+      externalTaskMs: null,
+      externalTaskRunning: true,
+    });
+  });
+});
+
 describe("usage formatting", () => {
   it("keeps absent and invalid host timestamps unknown instead of inventing epoch times", () => {
     expect([null, undefined, "", "invalid"].map(formatUsageTime)).toEqual(

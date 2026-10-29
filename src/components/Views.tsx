@@ -92,6 +92,7 @@ export function RunsView({
                 <span>
                   <strong>{r.title}</strong>
                   <small>
+                    {r.configuration?.externalTask === true && t("外部任务 · ")}
                     {!isExecutionRun(r) && t("结果记录 · ")}
                     {project.nodes.find((n) => n.id === r.nodeId)?.title}
                   </small>

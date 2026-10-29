@@ -83,6 +83,8 @@ import {
 import { OutlineTree } from "./components/OutlineTree";
 import { date, IconButton, time } from "./components/Primitives";
 import { ResearchCard } from "./components/ResearchCard";
+import { CurrentWork } from "./components/CurrentWork";
+import { initialResearchScope, nodeNavigation } from "./current-work";
 import { DeliveryStatus } from "./components/DeliveryStatus";
 import { ResearchEdge } from "./components/ResearchEdge";
 import { layoutCanvas } from "./graph-layout";
@@ -146,6 +148,8 @@ export default function App() {
     loadedId = useRef("");
   const flow = useReactFlow();
   const fittedLayout = useRef("");
+  const pendingNavigation = useRef<ReturnType<typeof nodeNavigation>>(null);
+  const navigationSequence = useRef(0);
   const measuredSizes = useStore((state) =>
     JSON.stringify(
       state.nodes
@@ -244,7 +248,8 @@ export default function App() {
         pRef.current = p;
         setProject(p);
         setSelected([]);
-        setScope(null);
+        pendingNavigation.current = null;
+        setScope(initialResearchScope(p));
         setExpandedIds(new Set());
         setBoundaryIds([]);
         setEdgeId(null);
@@ -362,6 +367,8 @@ export default function App() {
   }, []);
   const enter = useCallback(
     (id: string) => {
+      pendingNavigation.current = null;
+      navigationSequence.current += 1;
       setScope(id);
       setExpandedIds(new Set());
       setBoundaryIds([]);
@@ -423,10 +430,42 @@ export default function App() {
         );
         setEdges(arranged.edges);
         const key = `${project.id}:${scope}`;
-        if (fittedLayout.current !== key) {
+        const jump = pendingNavigation.current;
+        if (
+          jump?.projectId === project.id &&
+          jump.scope === scope &&
+          arranged.nodes.some((node) => node.id === jump.nodeId)
+        ) {
+          fittedLayout.current = key;
+          const sequence = navigationSequence.current;
+          const frame = () => {
+            if (
+              cancelled ||
+              navigationSequence.current !== sequence ||
+              pRef.current?.id !== project.id
+            )
+              return;
+            const target = flow.getNode(jump.nodeId);
+            if (!target) return;
+            pendingNavigation.current = null;
+            void flow.fitView({
+              nodes: [target],
+              padding: 0.65,
+              duration: motionDuration(350),
+              maxZoom: 1,
+            });
+          };
+          // ReactFlow commits the ELK result before calculating node bounds.
+          requestAnimationFrame(() => requestAnimationFrame(frame));
+        } else if (!jump && fittedLayout.current !== key) {
           fittedLayout.current = key;
           setTimeout(() => {
-            if (pRef.current?.id !== project.id) return;
+            if (
+              cancelled ||
+              pendingNavigation.current ||
+              pRef.current?.id !== project.id
+            )
+              return;
             const cards = arranged.nodes
               .filter((n) => !n.parentId)
               .sort((a, b) => a.position.y - b.position.y);
@@ -503,14 +542,17 @@ export default function App() {
     [],
   );
   const selectNode = (id: string) => {
+    if (!project) return;
+    const navigation = nodeNavigation(project, id);
+    if (!navigation) return;
+    pendingNavigation.current = navigation;
+    navigationSequence.current += 1;
+    if (window.innerWidth < 900) setOutline(false);
     setInspectorTab("overview");
-    const n = project?.nodes.find((n) => n.id === id);
-    if (!n) return;
-    // Search and outline navigation open the owning level directly.
-    setScope(n.parentId || null);
+    setScope(navigation.scope);
     setExpandedIds(new Set());
     setBoundaryIds([]);
-    setSelected([n.id]);
+    setSelected([id]);
     setNodes((current) =>
       current.map((item) => ({ ...item, selected: item.id === id })),
     );
@@ -519,16 +561,6 @@ export default function App() {
     setView("graph");
     setPalette(false);
     setQuery("");
-    setTimeout(() => {
-      const target = flow.getNode(id);
-      if (target)
-        void flow.fitView({
-          nodes: [target],
-          padding: 1,
-          duration: motionDuration(350),
-          maxZoom: 1,
-        });
-    }, 120);
   };
   const onConnect = (c: Connection) => {
     if (c.source === c.target) return;
@@ -985,6 +1017,13 @@ export default function App() {
                 <span className="origin-tag">{t("模拟研究")}</span>
               )}
               <div className="view-tab-right">
+                {project && (
+                  <CurrentWork
+                    project={project}
+                    runtime={runtime}
+                    onSelect={selectNode}
+                  />
+                )}
                 {running > 0 && (
                   <span className="live-indicator">
                     <span />
