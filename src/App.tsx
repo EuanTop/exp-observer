@@ -42,6 +42,7 @@ import {
   Settings2,
   Sun,
   Terminal,
+  Table2,
   Upload,
   X,
   ZoomIn,
@@ -87,11 +88,12 @@ import { CurrentWork } from "./components/CurrentWork";
 import { initialResearchScope, nodeNavigation } from "./current-work";
 import { DeliveryStatus } from "./components/DeliveryStatus";
 import { ResearchEdge } from "./components/ResearchEdge";
+import { ResearchTable } from "./components/ResearchTable";
 import { layoutCanvas } from "./graph-layout";
 import { CompareView, EvidenceView, RunsView } from "./components/Views";
 const nodeTypes = { research: ResearchCard };
 const edgeTypes = { research: ResearchEdge };
-type View = "graph" | "runs" | "compare" | "evidence";
+type View = "graph" | "table" | "runs" | "compare" | "evidence";
 type Motion = "system" | "on" | "off";
 const motionDuration = (duration: number) => {
   const preference = document.documentElement.dataset.motion;
@@ -732,6 +734,7 @@ export default function App() {
     project?.runs.filter((r) => r.status === "running").length || 0;
   const mainTabs: { id: View; label: string; icon: typeof Network }[] = [
     { id: "graph", label: t("研究图"), icon: Network },
+    { id: "table", label: t("表格"), icon: Table2 },
     { id: "runs", label: t("运行"), icon: FlaskConical },
     { id: "compare", label: t("对比"), icon: LayoutGrid },
     { id: "evidence", label: t("证据"), icon: Files },
@@ -939,7 +942,7 @@ export default function App() {
           </div>
         </header>
         <div className="work-area">
-          {outline && (
+          {outline && view !== "table" && (
             <aside className="outline">
               <div className="outline-heading">
                 <span>
@@ -999,12 +1002,14 @@ export default function App() {
           )}
           <main className="main-area">
             <div className="work-toolbar">
-              <IconButton
-                label={outline ? t("收起研究目录") : t("展开研究目录")}
-                onClick={() => setOutline(!outline)}
-              >
-                <PanelLeftOpen size={16} />
-              </IconButton>
+              {view !== "table" && (
+                <IconButton
+                  label={outline ? t("收起研究目录") : t("展开研究目录")}
+                  onClick={() => setOutline(!outline)}
+                >
+                  <PanelLeftOpen size={16} />
+                </IconButton>
+              )}
               <h1>
                 {view === "graph" && scope
                   ? project?.nodes.find((n) => n.id === scope)?.title
@@ -1091,6 +1096,29 @@ export default function App() {
                     </IconButton>
                   </>
                 )}
+                {view === "table" && (
+                  <>
+                    {selectedNode && (
+                      <button
+                        className="button"
+                        aria-label={t("复制引用")}
+                        onClick={() => void copyReference()}
+                      >
+                        <Copy size={14} />
+                        <span className="toolbar-action-label">
+                          {t("复制引用")}
+                        </span>
+                      </button>
+                    )}
+                    <IconButton
+                      label={t("切换详情面板")}
+                      active={inspector}
+                      onClick={() => setInspector(!inspector)}
+                    >
+                      <Settings2 size={15} />
+                    </IconButton>
+                  </>
+                )}
                 <button
                   className="button primary compact-add"
                   aria-label={project ? t("添加节点") : t("新建研究")}
@@ -1098,7 +1126,10 @@ export default function App() {
                   onClick={() =>
                     setDialog(
                       project
-                        ? { type: "node", parentId: scope }
+                        ? {
+                            type: "node",
+                            parentId: view === "table" ? null : scope,
+                          }
                         : { type: "project" },
                     )
                   }
@@ -1145,206 +1176,224 @@ export default function App() {
               </div>
             ) : (
               <div className="view-body">
-                {view === "graph" ? (
+                {view === "graph" || view === "table" ? (
                   <>
-                    <div className="graph-canvas">
-                      <ReactFlow
-                        nodes={nodes}
-                        edges={edges}
-                        nodeTypes={nodeTypes}
-                        edgeTypes={edgeTypes}
-                        connectionMode={ConnectionMode.Loose}
-                        onNodesChange={onNodesChange}
-                        onEdgesChange={onEdgesChange}
-                        onConnect={onConnect}
-                        onSelectionChange={handleSelection}
-                        onNodeClick={(_, n) => {
-                          setBoundaryIds([]);
-                          setInspectorTab("overview");
-                          setSelected([n.id]);
-                          setEdgeId(null);
-                          setInspector(true);
-                        }}
-                        onEdgeClick={(_, e) => {
-                          setSelected([]);
-                          if (e.data?.boundary) {
-                            setBoundaryIds(
-                              (e.data.originals as Project["edges"]).map(
-                                (edge) => edge.id,
-                              ),
-                            );
-                            setEdgeId(null);
-                          } else {
-                            setBoundaryIds([]);
-                            setEdgeId(e.id);
-                          }
-                          setInspector(true);
-                        }}
-                        onPaneClick={() => {
-                          setEdgeId(null);
-                        }}
-                        onNodeDoubleClick={(_, n) => {
-                          if (n.data.container) enter(n.id);
-                        }}
-                        onNodeDragStart={() => {
-                          dragging.current = true;
-                        }}
-                        onNodeDragStop={saveDrag}
-                        onMoveEnd={(_, viewport) =>
-                          localStorage.setItem(
-                            `exp-observer-viewport-${project.id}-${scope}`,
-                            JSON.stringify(viewport),
-                          )
+                    {view === "table" ? (
+                      <ResearchTable
+                        key={project.id}
+                        project={project}
+                        selectedId={selected[0]}
+                        activeNodeIds={
+                          runtime?.projectId === project.id
+                            ? runtime.active.map((item) => item.nodeId)
+                            : []
                         }
-                        defaultViewport={JSON.parse(
-                          localStorage.getItem(
-                            `exp-observer-viewport-${project.id}-${scope}`,
-                          ) || '{"x":0,"y":0,"zoom":0.8}',
-                        )}
-                        fitView
-                        fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
-                        minZoom={0.15}
-                        maxZoom={1.8}
-                        selectionMode={SelectionMode.Partial}
-                        selectionOnDrag
-                        panOnDrag={[1, 2]}
-                        panOnScroll
-                        zoomOnScroll={false}
-                        zoomOnDoubleClick={false}
-                        deleteKeyCode={null}
-                        colorMode={theme === "light" ? "light" : "dark"}
-                        proOptions={{ hideAttribution: true }}
-                        aria-label={t("研究图画布")}
-                      >
-                        <Background
-                          variant={BackgroundVariant.Dots}
-                          gap={22}
-                          size={1}
-                          color={theme === "light" ? "#d4d4d8" : "#303036"}
-                        />
-                        <MiniMap
-                          pannable
-                          zoomable
-                          nodeColor={(n) =>
-                            n.selected
-                              ? "#2563eb"
-                              : theme === "light"
-                                ? "#a1a1aa"
-                                : "#52525b"
+                        onInspect={inspectNode}
+                        onGraph={selectNode}
+                        onArtifact={setArtifact}
+                      />
+                    ) : (
+                      <div className="graph-canvas">
+                        <ReactFlow
+                          nodes={nodes}
+                          edges={edges}
+                          nodeTypes={nodeTypes}
+                          edgeTypes={edgeTypes}
+                          connectionMode={ConnectionMode.Loose}
+                          onNodesChange={onNodesChange}
+                          onEdgesChange={onEdgesChange}
+                          onConnect={onConnect}
+                          onSelectionChange={handleSelection}
+                          onNodeClick={(_, n) => {
+                            setBoundaryIds([]);
+                            setInspectorTab("overview");
+                            setSelected([n.id]);
+                            setEdgeId(null);
+                            setInspector(true);
+                          }}
+                          onEdgeClick={(_, e) => {
+                            setSelected([]);
+                            if (e.data?.boundary) {
+                              setBoundaryIds(
+                                (e.data.originals as Project["edges"]).map(
+                                  (edge) => edge.id,
+                                ),
+                              );
+                              setEdgeId(null);
+                            } else {
+                              setBoundaryIds([]);
+                              setEdgeId(e.id);
+                            }
+                            setInspector(true);
+                          }}
+                          onPaneClick={() => {
+                            setEdgeId(null);
+                          }}
+                          onNodeDoubleClick={(_, n) => {
+                            if (n.data.container) enter(n.id);
+                          }}
+                          onNodeDragStart={() => {
+                            dragging.current = true;
+                          }}
+                          onNodeDragStop={saveDrag}
+                          onMoveEnd={(_, viewport) =>
+                            localStorage.setItem(
+                              `exp-observer-viewport-${project.id}-${scope}`,
+                              JSON.stringify(viewport),
+                            )
                           }
-                          maskColor={
-                            theme === "light" ? "#fafafacc" : "#18181bcc"
-                          }
-                          style={{ background: "var(--panel)" }}
-                        />
-                      </ReactFlow>
-                      <div className="canvas-top-left">
-                        {scope ? (
-                          <div className="canvas-crumb">
+                          defaultViewport={JSON.parse(
+                            localStorage.getItem(
+                              `exp-observer-viewport-${project.id}-${scope}`,
+                            ) || '{"x":0,"y":0,"zoom":0.8}',
+                          )}
+                          fitView
+                          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+                          minZoom={0.15}
+                          maxZoom={1.8}
+                          selectionMode={SelectionMode.Partial}
+                          selectionOnDrag
+                          panOnDrag={[1, 2]}
+                          panOnScroll
+                          zoomOnScroll={false}
+                          zoomOnDoubleClick={false}
+                          deleteKeyCode={null}
+                          colorMode={theme === "light" ? "light" : "dark"}
+                          proOptions={{ hideAttribution: true }}
+                          aria-label={t("研究图画布")}
+                        >
+                          <Background
+                            variant={BackgroundVariant.Dots}
+                            gap={22}
+                            size={1}
+                            color={theme === "light" ? "#d4d4d8" : "#303036"}
+                          />
+                          <MiniMap
+                            pannable
+                            zoomable
+                            nodeColor={(n) =>
+                              n.selected
+                                ? "#2563eb"
+                                : theme === "light"
+                                  ? "#a1a1aa"
+                                  : "#52525b"
+                            }
+                            maskColor={
+                              theme === "light" ? "#fafafacc" : "#18181bcc"
+                            }
+                            style={{ background: "var(--panel)" }}
+                          />
+                        </ReactFlow>
+                        <div className="canvas-top-left">
+                          {scope ? (
+                            <div className="canvas-crumb">
+                              <button
+                                onClick={() => {
+                                  setScope(null);
+                                  setExpandedIds(new Set());
+                                  setBoundaryIds([]);
+                                  setInspector(false);
+                                  setSelected([]);
+                                  setTimeout(
+                                    () =>
+                                      flow.fitView({
+                                        padding: 0.2,
+                                        duration: motionDuration(300),
+                                      }),
+                                    80,
+                                  );
+                                }}
+                              >
+                                {t("研究脉络")}
+                              </button>
+                              {ancestry(project.nodes, scope).map((n) => (
+                                <span key={n.id}>
+                                  <ChevronRight size={11} />
+                                  <button onClick={() => enter(n.id)}>
+                                    {n.title}
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="canvas-label">
+                              <span className="tiny-dot accent" />
+                              {t("主脉络")}
+                            </span>
+                          )}
+                        </div>
+                        {!nodes.length && (
+                          <div className="canvas-empty">
+                            <Plus size={24} />
+                            <span>{t("添加第一个研究节点")}</span>
                             <button
-                              onClick={() => {
-                                setScope(null);
-                                setExpandedIds(new Set());
-                                setBoundaryIds([]);
-                                setInspector(false);
-                                setSelected([]);
-                                setTimeout(
-                                  () =>
-                                    flow.fitView({
-                                      padding: 0.2,
-                                      duration: motionDuration(300),
-                                    }),
-                                  80,
-                                );
-                              }}
+                              className="button"
+                              onClick={() =>
+                                setDialog({ type: "node", parentId: scope })
+                              }
                             >
-                              {t("研究脉络")}
+                              {t("添加节点")}
                             </button>
-                            {ancestry(project.nodes, scope).map((n) => (
-                              <span key={n.id}>
-                                <ChevronRight size={11} />
-                                <button onClick={() => enter(n.id)}>
-                                  {n.title}
-                                </button>
-                              </span>
-                            ))}
                           </div>
-                        ) : (
-                          <span className="canvas-label">
-                            <span className="tiny-dot accent" />
-                            {t("主脉络")}
-                          </span>
                         )}
-                      </div>
-                      {!nodes.length && (
-                        <div className="canvas-empty">
-                          <Plus size={24} />
-                          <span>{t("添加第一个研究节点")}</span>
-                          <button
-                            className="button"
+                        <div className="canvas-controls">
+                          <IconButton
+                            label={t("放大")}
                             onClick={() =>
-                              setDialog({ type: "node", parentId: scope })
+                              flow.zoomIn({ duration: motionDuration(180) })
                             }
                           >
-                            {t("添加节点")}
+                            <ZoomIn size={16} />
+                          </IconButton>
+                          <IconButton
+                            label={t("缩小")}
+                            onClick={() =>
+                              flow.zoomOut({ duration: motionDuration(180) })
+                            }
+                          >
+                            <ZoomOut size={16} />
+                          </IconButton>
+                          <span className="control-divider" />
+                          <IconButton
+                            label={t("适应画布 · F")}
+                            onClick={() =>
+                              flow.fitView({
+                                padding: 0.2,
+                                duration: motionDuration(350),
+                              })
+                            }
+                          >
+                            <Maximize2 size={15} />
+                          </IconButton>
+                          <span className="control-divider" />
+                          <button
+                            className="activity-toggle"
+                            onClick={() => setActivity(!activity)}
+                          >
+                            <Activity size={14} />
+                            {t("动态")}
+                            {project.activity?.length > 0 && (
+                              <span>{project.activity.length}</span>
+                            )}
                           </button>
                         </div>
-                      )}
-                      <div className="canvas-controls">
-                        <IconButton
-                          label={t("放大")}
-                          onClick={() =>
-                            flow.zoomIn({ duration: motionDuration(180) })
-                          }
-                        >
-                          <ZoomIn size={16} />
-                        </IconButton>
-                        <IconButton
-                          label={t("缩小")}
-                          onClick={() =>
-                            flow.zoomOut({ duration: motionDuration(180) })
-                          }
-                        >
-                          <ZoomOut size={16} />
-                        </IconButton>
-                        <span className="control-divider" />
-                        <IconButton
-                          label={t("适应画布 · F")}
-                          onClick={() =>
-                            flow.fitView({
-                              padding: 0.2,
-                              duration: motionDuration(350),
-                            })
-                          }
-                        >
-                          <Maximize2 size={15} />
-                        </IconButton>
-                        <span className="control-divider" />
-                        <button
-                          className="activity-toggle"
-                          onClick={() => setActivity(!activity)}
-                        >
-                          <Activity size={14} />
-                          {t("动态")}
-                          {project.activity?.length > 0 && (
-                            <span>{project.activity.length}</span>
-                          )}
-                        </button>
+                        {selected.length > 1 && (
+                          <div className="selection-toolbar">
+                            <span>
+                              {t("已选择 {count} 个节点", {
+                                count: selected.length,
+                              })}
+                            </span>
+                            <button
+                              onClick={() => setDialog({ type: "group" })}
+                            >
+                              <Layers size={14} />
+                              {t("放入容器")}
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      {selected.length > 1 && (
-                        <div className="selection-toolbar">
-                          <span>
-                            {t("已选择 {count} 个节点", {
-                              count: selected.length,
-                            })}
-                          </span>
-                          <button onClick={() => setDialog({ type: "group" })}>
-                            <Layers size={14} />
-                            {t("放入容器")}
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    )}
                     {inspector && (
                       <aside className="inspector">
                         {boundaryIds.length > 0 ? (
@@ -1380,7 +1429,10 @@ export default function App() {
                                 parentId: selectedNode.parentId,
                               })
                             }
-                            onEnter={() => enter(selectedNode.id)}
+                            onEnter={() => {
+                              setView("graph");
+                              enter(selectedNode.id);
+                            }}
                             onChild={() =>
                               setDialog({
                                 type: "node",
@@ -1389,7 +1441,11 @@ export default function App() {
                             }
                             onDelete={() => void deleteSelected()}
                             onArtifact={setArtifact}
-                            onSelect={selectNode}
+                            onSelect={
+                              view === "table"
+                                ? (id) => inspectNode(id, "overview")
+                                : selectNode
+                            }
                             onConnect={() =>
                               setDialog({
                                 type: "connect",

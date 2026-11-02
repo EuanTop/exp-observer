@@ -161,3 +161,9 @@ The [exact-search study](../examples/real-study/report.md) compares three retrie
 The frontend uses React, TypeScript, React Flow and Tailwind CSS. The backend and portable client use Python. See [CONTRIBUTING.md](../CONTRIBUTING.md) for development, tests and pull requests.
 
 Licensed under [MIT](../LICENSE).
+
+### Tree table
+
+Switch to **Table** for one row per research node. Containers start collapsed at the outer research level; expand a branch or all branches to inspect its steps. Search and status/type filters retain matching ancestor paths. Sort by recorded order, title, time or tokens within each sibling group. Missing measurements stay unknown, and container totals reuse the graph’s deduplicated usage records rather than adding visible rows. Evidence totals include container descendants and open the same evidence list.
+
+Select a node title to open its existing details; click an image to preview its retained evidence. The arrow in the last column locates that exact node in the graph. Table expansion, search, filters and ordering are remembered per study in the current browser session and never rewrite the research graph. Keyboard users can use Up/Down, Left/Right and Home/End on node titles.

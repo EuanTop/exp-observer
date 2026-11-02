@@ -31,6 +31,8 @@ Your agent chooses the research approach. ExpObserver preserves how it develops,
 
 The workspace above comes from a real research session. [Open the same example →](examples/har-study/README.md)
 
+Explore the same research as a graph or a foldable tree table, with shared node details, measured usage and image evidence.
+
 ## Quick start
 
 ### Ask your agent

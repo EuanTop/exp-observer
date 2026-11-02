@@ -47,6 +47,25 @@ export function nodeEvidence(project: Project, nodeId: string): Artifact[] {
       linkedIds.has(artifact.id),
   );
 }
+export function subtreeEvidence(project: Project, nodeId: string): Artifact[] {
+  const ids = new Set([nodeId]),
+    pending = [nodeId];
+  while (pending.length) {
+    const id = pending.pop();
+    for (const node of project.nodes)
+      if (node.parentId === id && !ids.has(node.id)) {
+        ids.add(node.id);
+        pending.push(node.id);
+      }
+  }
+  return [
+    ...new Map(
+      [...ids]
+        .flatMap((id) => nodeEvidence(project, id))
+        .map((artifact) => [artifact.id, artifact]),
+    ).values(),
+  ];
+}
 export type ImageEvidence = {
   artifact: Artifact;
   ownerId: string;

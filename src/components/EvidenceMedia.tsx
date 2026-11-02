@@ -83,10 +83,12 @@ export function EvidenceRow({
   projectId,
   artifact,
   onOpen,
+  ownerTitle,
 }: {
   projectId: string;
   artifact: Artifact;
   onOpen: (artifact: Artifact) => void;
+  ownerTitle?: string;
 }) {
   const image = isImageEvidence(artifact);
   return (
@@ -101,6 +103,7 @@ export function EvidenceRow({
       )}
       <span>
         <strong>{artifact.title}</strong>
+        {ownerTitle && <small>{ownerTitle}</small>}
         <small>
           {image ? `${t("图片")} · ` : ""}
           {artifact.bytes.toLocaleString()} bytes · {artifact.mime}

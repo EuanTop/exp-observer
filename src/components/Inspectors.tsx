@@ -37,7 +37,7 @@ import { ResearchNotes } from "./ResearchMarkdown";
 import { MetricDetails } from "./MetricDetails";
 import { QuestionOriginPanel } from "./QuestionOrigin";
 import { nodePresentation } from "../node-presentation";
-import { nodeEvidence, nodeImages } from "../image-evidence";
+import { nodeEvidence, nodeImages, subtreeEvidence } from "../image-evidence";
 import { EvidenceRow, NodeFigure } from "./EvidenceMedia";
 import { ProjectHostUsage } from "./HostUsage";
 import {
@@ -245,7 +245,10 @@ export function NodeInspector({
   }, [node]);
   const runs = project.runs.filter((r) => r.nodeId === node.id);
   const presentation = nodePresentation(project, node);
-  const relatedArtifacts = nodeEvidence(project, node.id);
+  const aggregateEvidence = isResearchContainer(project.nodes, node);
+  const relatedArtifacts = aggregateEvidence
+    ? subtreeEvidence(project, node.id)
+    : nodeEvidence(project, node.id);
   const imageEvidence = nodeImages(
     project,
     node.id,
@@ -683,6 +686,9 @@ export function NodeInspector({
           </>
         ) : (
           <>
+            {aggregateEvidence && relatedArtifacts.length > 0 && (
+              <div className="section-label">{t("容器证据（含子节点）")}</div>
+            )}
             {relatedArtifacts.length ? (
               relatedArtifacts.map((a) => (
                 <EvidenceRow
@@ -690,6 +696,13 @@ export function NodeInspector({
                   projectId={project.id}
                   artifact={a}
                   onOpen={onArtifact}
+                  ownerTitle={
+                    aggregateEvidence && a.nodeId !== node.id
+                      ? project.nodes.find(
+                          (candidate) => candidate.id === a.nodeId,
+                        )?.title
+                      : undefined
+                  }
                 />
               ))
             ) : (

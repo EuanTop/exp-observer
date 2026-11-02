@@ -9,11 +9,13 @@ import { deliveryEn } from "./locales/delivery.en";
 import { progressionEn } from "./locales/progression.en";
 
 import { originsEn } from "./locales/origins.en";
+import { tableEn } from "./locales/table.en";
 import { focusEn } from "./locales/focus.en";
 
 export type Locale = "en" | "zh-CN";
 export const LANGUAGE_KEY = "exp-observer-language";
 export const englishMessages: Readonly<Record<string, string>> = {
+  ...tableEn,
   ...originsEn,
   ...focusEn,
   ...dialogsEn,
