@@ -73,6 +73,7 @@ describe("research table view", () => {
   it("shows the top-level hierarchy with complete columns and a real image preview without pretending missing usage is zero", () => {
     const html = render(project());
     expect(html).toContain('role="treegrid"');
+    expect(html).toContain('aria-busy="true"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('data-row-title="root"');
     expect(html).not.toContain('data-row-title="child"');
@@ -82,7 +83,6 @@ describe("research table view", () => {
       "Token",
       "Evidence",
       "Origin",
-      "Not collected",
       "Expand all",
       "All statuses",
     ])

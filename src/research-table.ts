@@ -167,7 +167,11 @@ export function buildResearchRows(
       childCount: members.length,
       expanded,
       contextOnly: filtering && !matches.has(id),
-      usage: usageFor(id),
+      // Structural filtering/expansion must not calculate every subtree's
+      // counters. Read them only when a displayed cell or metric sort needs it.
+      get usage() {
+        return usageFor(id);
+      },
     });
     if (expanded)
       for (const child of visibleMembers.reverse())

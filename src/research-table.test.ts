@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as usageModule from "./usage";
 import { buildResearchRows, tableTime } from "./research-table";
 import { getNodeUsage } from "./usage";
 import type { Project, ResearchNode, Run } from "./model";
@@ -316,6 +317,21 @@ describe("research tree table", () => {
     ]);
   });
 
+  it("reads usage lazily and reuses the same measurement for repeated cells", () => {
+    const p = project();
+    p.nodes = [node("root"), node("child", "root")];
+    const spy = vi.spyOn(usageModule, "getNodeUsage");
+    try {
+      const rows = buildResearchRows(p, { expandedIds: new Set(["root"]) });
+      expect(spy).not.toHaveBeenCalled();
+      const counters = rows[0].usage;
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(rows[0].usage).toBe(counters);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
   it("traverses deeply nested research iteratively and leaves all project values untouched", () => {
     const p = project();
     p.nodes = Array.from({ length: 1000 }, (_, index) =>
@@ -328,6 +344,7 @@ describe("research tree table", () => {
     });
     expect(rows).toHaveLength(1000);
     expect(rows.at(-1)?.depth).toBe(999);
+    expect(rows.at(-1)?.usage.totalTokens).toBeNull();
     expect(JSON.stringify(p)).toBe(before);
   });
 });

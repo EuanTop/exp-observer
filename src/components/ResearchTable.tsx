@@ -29,10 +29,10 @@ import {
   type NodeTab,
   type Project,
 } from "../model";
-import { buildResearchRows } from "../research-table";
+import { buildResearchRows, type ResearchTableRow } from "../research-table";
 import { nodePresentation } from "../node-presentation";
 import { nodeEvidence, nodeImages, subtreeEvidence } from "../image-evidence";
-import { formatDuration, formatTokens } from "../usage";
+import { formatDuration, formatTokens, type NodeUsage } from "../usage";
 import { originLabel, questionOrigin } from "../question-origin";
 import { Badge, kindIcon } from "./Primitives";
 import { EvidenceThumbnail } from "./EvidenceMedia";
@@ -356,20 +356,12 @@ export function ResearchTable({
           </thead>
           <tbody>
             {rows.map((row, index) => {
-              const { node, usage } = row;
+              const { node } = row;
               const presentation = nodePresentation(project, node);
               const group = isResearchContainer(project.nodes, node);
               const Icon = group ? Layers : kindIcon[node.kind] || Box;
               const attached = evidence.get(node.id)!;
               const image = attached.images[0];
-              const time =
-                usage.elapsedMs !== null
-                  ? { value: usage.elapsedMs, label: "步骤计时" }
-                  : usage.runMs !== null
-                    ? { value: usage.runMs, label: "命令执行" }
-                    : usage.externalReportedMs !== null
-                      ? { value: usage.externalReportedMs, label: "执行器报告" }
-                      : { value: usage.externalTaskMs, label: "任务跨度" };
               const processing = activeNodeIds.some(
                 (id) =>
                   id === node.id ||
@@ -461,49 +453,7 @@ export function ResearchTable({
                       ).replace(/^#{1,6}\s+/gm, "")}
                     </button>
                   </td>
-                  <td>
-                    <button
-                      className="table-metric"
-                      title={t("查看计量详情")}
-                      onClick={() => onInspect(node.id, "usage")}
-                    >
-                      <strong>
-                        {time.value === null ? "—" : formatDuration(time.value)}
-                        {usage.elapsedPartial && usage.elapsedMs !== null
-                          ? "+"
-                          : ""}
-                      </strong>
-                      <small>
-                        {time.value !== null ? t(time.label) : t("未采集")}
-                        {row.hasChildren && time.value !== null
-                          ? ` · ${t("容器汇总")}`
-                          : ""}
-                      </small>
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      className="table-metric"
-                      title={t("查看计量详情")}
-                      onClick={() => onInspect(node.id, "usage")}
-                    >
-                      <strong>
-                        {formatTokens(usage.totalTokens)}
-                        {usage.totalTokens !== null && usage.tokensPartial
-                          ? "+"
-                          : ""}
-                      </strong>
-                      <small>
-                        {usage.totalTokens === null
-                          ? t("未采集")
-                          : t(
-                              usage.tokenScope === "execution"
-                                ? "被测任务用量"
-                                : "研究 Agent 用量",
-                            )}
-                      </small>
-                    </button>
-                  </td>
+                  <TableUsageCells row={row} onInspect={onInspect} />
                   <td>
                     <div className="table-evidence">
                       {image && (
@@ -585,5 +535,99 @@ export function ResearchTable({
         })}
       </div>
     </section>
+  );
+}
+
+function TableUsageCells({
+  row,
+  onInspect,
+}: {
+  row: ResearchTableRow;
+  onInspect: (id: string, tab: NodeTab) => void;
+}) {
+  const [usage, setUsage] = useState<NodeUsage | null>(null);
+  const cell = useRef<HTMLTableCellElement>(null);
+  useEffect(() => {
+    const read = () => setUsage(row.usage);
+    if (!cell.current || typeof IntersectionObserver === "undefined") {
+      read();
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          read();
+          observer.disconnect();
+        }
+      },
+      {
+        root: cell.current.closest(".research-table-scroll"),
+        rootMargin: "200px",
+      },
+    );
+    observer.observe(cell.current);
+    return () => observer.disconnect();
+  }, [row]);
+  if (!usage)
+    return (
+      <>
+        <td ref={cell} aria-busy="true" aria-label={t("正在读取…")}>
+          …
+        </td>
+        <td aria-busy="true">…</td>
+      </>
+    );
+  const { node } = row;
+  const time =
+    usage.elapsedMs !== null
+      ? { value: usage.elapsedMs, label: "步骤计时" }
+      : usage.runMs !== null
+        ? { value: usage.runMs, label: "命令执行" }
+        : usage.externalReportedMs !== null
+          ? { value: usage.externalReportedMs, label: "执行器报告" }
+          : { value: usage.externalTaskMs, label: "任务跨度" };
+  return (
+    <>
+      {" "}
+      <td ref={cell}>
+        <button
+          className="table-metric"
+          title={t("查看计量详情")}
+          onClick={() => onInspect(node.id, "usage")}
+        >
+          <strong>
+            {time.value === null ? "—" : formatDuration(time.value)}
+            {usage.elapsedPartial && usage.elapsedMs !== null ? "+" : ""}
+          </strong>
+          <small>
+            {time.value !== null ? t(time.label) : t("未采集")}
+            {row.hasChildren && time.value !== null
+              ? ` · ${t("容器汇总")}`
+              : ""}
+          </small>
+        </button>
+      </td>
+      <td>
+        <button
+          className="table-metric"
+          title={t("查看计量详情")}
+          onClick={() => onInspect(node.id, "usage")}
+        >
+          <strong>
+            {formatTokens(usage.totalTokens)}
+            {usage.totalTokens !== null && usage.tokensPartial ? "+" : ""}
+          </strong>
+          <small>
+            {usage.totalTokens === null
+              ? t("未采集")
+              : t(
+                  usage.tokenScope === "execution"
+                    ? "被测任务用量"
+                    : "研究 Agent 用量",
+                )}
+          </small>
+        </button>
+      </td>
+    </>
   );
 }
