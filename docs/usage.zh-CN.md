@@ -157,3 +157,5 @@ python3 skills/exp-observer/scripts/exp_observer.py observe finish --project my-
 前端使用 React、TypeScript、React Flow 和 Tailwind CSS，后端与可移植客户端使用 Python。开发、测试和贡献流程见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 采用 [MIT](../LICENSE) 许可。
+
+图片证据（包括 SVG）会直接显示在节点卡片和节点详情中，点击缩略图可打开完整预览。“证据”页支持“仅图片”筛选；SVG 原文仍可单独查看。容器预览内部图片时会显示所属节点，原始证据及其归属不变。

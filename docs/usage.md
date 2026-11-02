@@ -11,7 +11,7 @@ Select one or more nodes and choose **Copy reference** in the toolbar, or use th
 - **Compose research.** Any node kind can have child nodes. Ordinary parents remain cards; explicit containers frame nested work (`isContainer: true`, default for `group`). Collapse, expand, focus, group, move and connect them. Containment and research relationships are separate.
 - **Keep execution and interpretation together.** Runs retain configuration, events, metrics and outputs. Assessments and decisions link back to evidence; revised interpretations preserve earlier records.
 - **Compare alternatives.** Inspect configuration differences and effective or historical assessments under a selected rubric.
-- **Read the evidence.** Register local files, retain verified copies, and inspect images, JSON, CSV or text alongside the graph.
+- **Read the evidence.** Charts and image evidence appear directly on node cards and in node details. Click a thumbnail to open the verified full image, including SVG; use **Images only** in Evidence to find charts quickly. JSON, CSV and text keep their original reading views.
 - **Pick up the work.** Search the graph, switch projects, review history and restore a prior snapshot as a new revision.
 
 Node state distinguishes **not started** (`proposed`), **open** (`active`), **paused**, **completed**, **excluded** (`rejected`) and **failed**. A filled green check marks completion; dashed rings mark unfinished work; pause bars, a minus and an × mark paused, excluded and failed work. Completion means the research step finished, including a negative result. Paused work records why it stopped and what would allow it to resume.

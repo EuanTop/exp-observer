@@ -1103,6 +1103,32 @@ class Store:
                 raise StoreError('Evidence file is missing.', 'evidence_missing', 404) from exc
             return raw, copy.deepcopy(artifact)
 
+    def artifact_image(self, project_id, artifact_id):
+        from .artifact_images import MAX_IMAGE_BYTES, image_mime
+        with self._transaction() as db:
+            p = self._load(db, project_id)
+            artifact = self._find(p, 'artifacts', artifact_id)
+            mime = image_mime(artifact.get('mime'))
+            if mime is None:
+                raise StoreError('This evidence does not have a supported image format.', 'unsupported_image', 415)
+            path = self._artifact_location(project_id, p, artifact)
+            try:
+                with path.open('rb') as stream:
+                    # Bound the allocation using the current file, not only the
+                    # registered metadata. Read one extra byte to catch growth.
+                    if os.fstat(stream.fileno()).st_size > MAX_IMAGE_BYTES:
+                        raise StoreError('Image preview exceeds the 20 MiB limit.', 'image_too_large', 413)
+                    raw = stream.read(MAX_IMAGE_BYTES + 1)
+            except OSError as exc:
+                raise StoreError('Evidence file is missing.', 'evidence_missing', 404) from exc
+            if len(raw) > MAX_IMAGE_BYTES:
+                raise StoreError('Image preview exceeds the 20 MiB limit.', 'image_too_large', 413)
+            # Verify the exact bytes returned to the image decoder, including
+            # any change between the initial file stat and the bounded read.
+            if len(raw) != artifact.get('bytes') or hashlib.sha256(raw).hexdigest() != artifact.get('sha256'):
+                raise StoreError('Evidence content changed after registration.', 'evidence_changed', 409)
+            return raw, mime
+
     def history(self, project_id):
         with self._transaction() as db:
             if not db.execute('SELECT 1 FROM projects WHERE id = ?', (valid_id(project_id),)).fetchone():

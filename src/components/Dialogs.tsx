@@ -23,6 +23,12 @@ import {
 
 import { IconButton } from "./Primitives";
 import { WorkspaceEnrollment } from "./WorkspaceEnrollment";
+import {
+  artifactEndpoint,
+  evidenceImageUrl,
+  IMAGE_PREVIEW_LIMIT,
+  isImageEvidence,
+} from "../image-evidence";
 export type DialogState = {
   type: "node" | "project" | "artifact" | "branch" | "group" | "connect";
   parentId?: string | null;
@@ -42,26 +48,28 @@ export function ArtifactDialog({
     [error, setError] = useState(""),
     [raw, setRaw] = useState(false),
     [verified, setVerified] = useState(false),
-    [imageSource, setImageSource] = useState(""),
     [offset, setOffset] = useState(0);
   const pageSize = 262144;
-  const endpoint = `/api/projects/${encodeURIComponent(project.id)}/artifacts/${encodeURIComponent(a.id)}`;
+  const endpoint = artifactEndpoint(project.id, a.id);
   const textLike =
     a.mime.startsWith("text/") || /json|javascript|xml/.test(a.mime);
-  const imageLike =
-    /^image\/(png|jpeg|gif|webp)$/.test(a.mime) && a.bytes <= 5 * 1024 * 1024;
+  const imageLike = isImageEvidence(a);
+  const visualMode = imageLike && !raw;
+  const oversized = imageLike && a.bytes > IMAGE_PREVIEW_LIMIT;
+  useEffect(() => {
+    setRaw(false);
+    setOffset(0);
+  }, [endpoint]);
   useEffect(() => {
     const controller = new AbortController();
     setVerified(false);
     setError("");
     setContent("");
-    setImageSource("");
+    if (visualMode && !oversized) return () => controller.abort();
     fetch(
-      textLike
+      textLike && !visualMode
         ? `${endpoint}/content?offset=${offset}&limit=${pageSize}`
-        : imageLike
-          ? `${endpoint}/content`
-          : `${endpoint}/metadata`,
+        : `${endpoint}/metadata`,
       { signal: controller.signal },
     )
       .then(async (r) => {
@@ -69,18 +77,7 @@ export function ArtifactDialog({
           const d = await r.json();
           throw new Error(d.error);
         }
-        if (imageLike) {
-          const bytes = await r.arrayBuffer();
-          const source = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result));
-            reader.onerror = () => reject(new Error(t("图片读取失败")));
-            reader.readAsDataURL(new Blob([bytes], { type: a.mime }));
-          });
-          if (!controller.signal.aborted) setImageSource(source);
-          return "";
-        }
-        return textLike ? r.text() : "";
+        return textLike && !visualMode ? r.text() : "";
       })
       .then((t) => {
         if (controller.signal.aborted) return;
@@ -91,7 +88,7 @@ export function ArtifactDialog({
         if (e.name !== "AbortError") setError(e.message);
       });
     return () => controller.abort();
-  }, [endpoint, offset, textLike, imageLike, a.mime]);
+  }, [endpoint, offset, textLike, visualMode, oversized]);
   let json: unknown;
   try {
     json = JSON.parse(content);
@@ -110,6 +107,9 @@ export function ArtifactDialog({
   return (
     <div
       className="modal-backdrop evidence-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={a.title}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -146,7 +146,7 @@ export function ArtifactDialog({
                 className={!raw ? "selected" : ""}
                 onClick={() => setRaw(false)}
               >
-                {t("阅读视图")}
+                {imageLike ? t("图片预览") : t("阅读视图")}
               </button>
               <button
                 className={raw ? "selected" : ""}
@@ -164,27 +164,43 @@ export function ArtifactDialog({
             className="download-evidence"
             href={`${endpoint}/content`}
             download={a.path.split(/[\\/]/).at(-1) || "evidence"}
-            aria-disabled={!verified}
+            aria-disabled={!imageLike && !verified}
             onClick={(e) => {
-              if (!verified) e.preventDefault();
+              if (!imageLike && !verified) e.preventDefault();
             }}
           >
             <Download size={13} />
             {t("下载")}
           </a>
         </div>
-        <div className={`evidence-content ${imageLike ? "image-preview" : ""}`}>
+        <div
+          className={`evidence-content ${visualMode ? "image-preview" : ""}`}
+        >
           {error ? (
             <div className="inline-error">{error}</div>
+          ) : visualMode && !oversized ? (
+            <>
+              {!verified && (
+                <div className="image-loading">{t("正在读取…")}</div>
+              )}
+              <img
+                key={endpoint}
+                className="evidence-image"
+                src={evidenceImageUrl(project.id, a)}
+                alt={a.title}
+                onLoad={() => setVerified(true)}
+                onError={() => {
+                  setVerified(false);
+                  setError(t("无法显示这张图片，可下载原文件查看"));
+                }}
+              />
+            </>
           ) : !verified ? (
             <div className="small-empty">{t("正在读取…")}</div>
-          ) : imageLike ? (
-            <img
-              className="evidence-image"
-              src={imageSource}
-              alt={a.title}
-              onError={() => setError(t("无法显示这张图片，可下载原文件查看"))}
-            />
+          ) : visualMode && oversized ? (
+            <div className="small-empty">
+              {t("图片超过 20 MiB，可下载原文件查看")}
+            </div>
           ) : !textLike ? (
             <div className="small-empty">
               {a.mime} · {a.bytes.toLocaleString(intlLocale())} bytes
@@ -212,7 +228,7 @@ export function ArtifactDialog({
             <pre>{json && !raw ? JSON.stringify(json, null, 2) : content}</pre>
           )}
         </div>
-        {textLike && a.bytes > pageSize && (
+        {textLike && !visualMode && a.bytes > pageSize && (
           <div className="evidence-pagination">
             <button
               className="button subtle"

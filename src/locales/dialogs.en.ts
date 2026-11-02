@@ -1,4 +1,10 @@
 export const dialogsEn: Record<string, string> = {
+  预览不可用: "Preview unavailable",
+  "查看图片：{title}": "View image: {title}",
+  图片: "Image",
+  仅图片: "Images only",
+  "图片超过 20 MiB，可下载原文件查看":
+    "This image exceeds 20 MiB. Download the original to view it.",
   来源证据: "SOURCE EVIDENCE",
   图片读取失败: "Could not read the image",
   关闭证据: "Close evidence",

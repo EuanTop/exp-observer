@@ -103,7 +103,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeError):
             raise StoreError('Request body must be valid JSON.', 'invalid_json')
 
-    def _send(self, data, status=200, mime='application/json; charset=utf-8', attachment=None):
+    def _send(self, data, status=200, mime='application/json; charset=utf-8', attachment=None, csp=None):
         if not isinstance(data, bytes):
             data = (canonical(data) + '\n').encode('utf-8')
         self.send_response(status)
@@ -112,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'")
+        self.send_header('Content-Security-Policy', csp or "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'")
         if attachment:
             self.send_header('Content-Disposition', f'attachment; filename="{attachment}"')
         self.end_headers()
@@ -217,6 +217,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(store.register_artifact(project_id, self._body()), 201)
             if len(tail) == 3 and tail[0] == 'artifacts' and tail[2] == 'metadata' and method == 'GET':
                 return self._send(store.artifact_metadata(project_id, tail[1]))
+            if len(tail) == 3 and tail[0] == 'artifacts' and tail[2] == 'image' and method == 'GET':
+                from .artifact_images import IMAGE_CSP
+                if query:
+                    raise StoreError('Image previews return the complete verified image, without ranges.', 'invalid_preview_range')
+                raw, mime = store.artifact_image(project_id, tail[1])
+                return self._send(raw, mime=mime, csp=IMAGE_CSP)
             if len(tail) == 3 and tail[0] == 'artifacts' and tail[2] == 'content' and method == 'GET':
                 try:
                     offset = int(query['offset'][0]) if 'offset' in query else None

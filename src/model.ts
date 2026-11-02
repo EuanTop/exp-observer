@@ -4,6 +4,11 @@ import { getNodeUsage } from "./usage";
 import { facingSides } from "./edge-routing";
 import { estimateCardHeight } from "./card-sizing";
 import {
+  nodeImages,
+  NODE_FIGURE_HEIGHT,
+  type ImageEvidence,
+} from "./image-evidence";
+import {
   isNodeProcessing,
   nodePresentation,
   type NodePresentation,
@@ -247,6 +252,9 @@ export type CanvasData = {
   latest?: Run;
   expanded: boolean;
   usage?: import("./usage").NodeUsage;
+  projectId?: string;
+  imageEvidence?: ImageEvidence[];
+  onArtifact?: (artifact: Artifact) => void;
   onInspect?: (id: string, tab: NodeTab) => void;
   onToggle: (id: string) => void;
   onEnter: (id: string) => void;
@@ -305,6 +313,7 @@ export function toCanvas(
     onToggle: (id: string) => void;
     onEnter: (id: string) => void;
     onInspect?: (id: string, tab: NodeTab) => void;
+    onArtifact?: (artifact: Artifact) => void;
   },
   view: { expandedIds?: ReadonlySet<string> } = {},
 ): { nodes: Node<CanvasData>[]; edges: Edge[] } {
@@ -331,6 +340,12 @@ export function toCanvas(
   );
   const visibleIds = new Set(visible.map((n) => n.id));
   const dimensions = new Map<string, { w: number; h: number }>();
+  const imageSets = new Map<string, ImageEvidence[]>();
+  const images = (n: ResearchNode) => {
+    if (!imageSets.has(n.id))
+      imageSets.set(n.id, nodeImages(project, n.id, isVisualContainer(n)));
+    return imageSets.get(n.id)!;
+  };
   function size(n: ResearchNode): { w: number; h: number } {
     if (dimensions.has(n.id)) return dimensions.get(n.id)!;
     const children = visible.filter(
@@ -339,7 +354,8 @@ export function toCanvas(
     let w = NODE_SIZE.w;
     let h =
       estimateCardHeight(nodePresentation(project, n), w) +
-      (n.kind === "question" ? 22 : 0);
+      (n.kind === "question" ? 22 : 0) +
+      (images(n).length ? NODE_FIGURE_HEIGHT : 0);
     if (isVisualContainer(n) && children.length && !n.collapsed) {
       w = Math.max(
         330,
@@ -386,6 +402,8 @@ export function toCanvas(
         data: {
           node: original.nodes.find((node) => node.id === n.id)!,
           presentation: nodePresentation(project, n),
+          projectId: project.id,
+          imageEvidence: images(n),
           processing: project.nodes.some(
             (member) =>
               memberIds.has(member.id) && isNodeProcessing(project, member),

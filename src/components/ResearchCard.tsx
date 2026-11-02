@@ -14,6 +14,7 @@ import type { NodePresentation } from "../node-presentation";
 import { formatDuration, formatTokens } from "../usage";
 import { originLabel } from "../question-origin";
 import { Badge, kindIcon } from "./Primitives";
+import { NodeFigure } from "./EvidenceMedia";
 
 function UsageStats({ data }: { data: CanvasData }) {
   const usage = data.usage;
@@ -189,6 +190,13 @@ export function ResearchCard({ data, selected }: NodeProps<Node<CanvasData>>) {
             {t("：")}
             {presentation.conclusion}
           </p>
+        )}
+        {!expanded && data.projectId && !!data.imageEvidence?.length && (
+          <NodeFigure
+            projectId={data.projectId}
+            images={data.imageEvidence}
+            onOpen={(artifact) => data.onArtifact?.(artifact)}
+          />
         )}
       </div>
       {expanded ? (

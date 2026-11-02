@@ -1,0 +1,117 @@
+.evidence-thumbnail {
+  display: flex;
+  position: relative;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 0;
+}
+.evidence-thumbnail img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.image-unavailable {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #71717a;
+  font-size: 10px;
+  padding: 10px;
+}
+.node-figure {
+  display: block;
+  width: 100%;
+  margin: 12px 0 0;
+  padding: 0;
+  text-align: left;
+  border-radius: 6px;
+}
+.node-figure > .evidence-thumbnail {
+  width: 100%;
+  height: 158px;
+}
+.node-figure-caption {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.node-figure-caption > span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-figure-caption b {
+  font-weight: 500;
+}
+.node-figure-caption svg {
+  flex-shrink: 0;
+}
+.node-figure:hover .evidence-thumbnail {
+  border-color: var(--accent);
+}
+.artifact-row.has-image > .evidence-thumbnail {
+  width: 88px;
+  height: 58px;
+  flex: 0 0 88px;
+}
+.artifact-row > span:not(.evidence-thumbnail) {
+  min-width: 0;
+}
+.artifact-row strong {
+  overflow-wrap: anywhere;
+}
+.node-image-gallery {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.node-image-gallery .node-figure {
+  margin: 0;
+}
+.evidence-card.image-evidence-card {
+  flex-wrap: wrap;
+}
+.evidence-card.image-evidence-card > .evidence-thumbnail {
+  width: 100%;
+  height: 142px;
+  flex-basis: 100%;
+}
+.image-filter {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.evidence-image {
+  min-height: 0;
+}
+.evidence-content.image-preview {
+  position: relative;
+}
+.image-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .artifact-row.has-image > .evidence-thumbnail {
+    width: 70px;
+    height: 48px;
+    flex-basis: 70px;
+  }
+}

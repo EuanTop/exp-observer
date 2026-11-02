@@ -27,6 +27,8 @@ import {
 } from "../model";
 
 import { Badge, date, time } from "./Primitives";
+import { isImageEvidence } from "../image-evidence";
+import { EvidenceRow, EvidenceThumbnail } from "./EvidenceMedia";
 export function RunsView({
   project,
   onArtifact,
@@ -167,15 +169,12 @@ export function RunsView({
                           a.runId === r.id || r.artifactIds?.includes(a.id),
                       )
                       .map((a) => (
-                        <button
+                        <EvidenceRow
                           key={a.id}
-                          className="related-row"
-                          onClick={() => onArtifact(a)}
-                        >
-                          <FileText size={13} />
-                          <span>{a.title}</span>
-                          <ArrowUpRight size={12} />
-                        </button>
+                          projectId={project.id}
+                          artifact={a}
+                          onOpen={onArtifact}
+                        />
                       ))}
                   </div>
                 </div>
@@ -451,8 +450,11 @@ export function EvidenceView({
 }) {
   useLocale();
   const [q, setQ] = useState("");
-  const list = project.artifacts.filter((a) =>
-    `${a.title} ${a.path}`.toLowerCase().includes(q.toLowerCase()),
+  const [onlyImages, setOnlyImages] = useState(false);
+  const list = project.artifacts.filter(
+    (a) =>
+      (!onlyImages || isImageEvidence(a)) &&
+      `${a.title} ${a.path}`.toLowerCase().includes(q.toLowerCase()),
   );
   return (
     <div className="data-view">
@@ -475,18 +477,32 @@ export function EvidenceView({
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
+        <label className="image-filter">
+          <input
+            type="checkbox"
+            checked={onlyImages}
+            onChange={(event) => setOnlyImages(event.target.checked)}
+          />
+          {t("仅图片")}
+        </label>
       </div>
       <div className="evidence-grid">
         {list.map((a) => (
           <button
-            className="evidence-card"
+            className={`evidence-card ${isImageEvidence(a) ? "image-evidence-card" : ""}`}
             key={a.id}
             onClick={() => onOpen(a)}
           >
-            <div className="evidence-file-icon">
-              <FileText size={24} />
-              <span>{a.path.split(".").at(-1)?.toUpperCase().slice(0, 6)}</span>
-            </div>
+            {isImageEvidence(a) ? (
+              <EvidenceThumbnail projectId={project.id} artifact={a} />
+            ) : (
+              <div className="evidence-file-icon">
+                <FileText size={24} />
+                <span>
+                  {a.path.split(".").at(-1)?.toUpperCase().slice(0, 6)}
+                </span>
+              </div>
+            )}
             <div className="evidence-card-body">
               <h3>{a.title}</h3>
               <p>{a.path.split(/[\/]/).at(-1)}</p>

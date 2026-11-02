@@ -406,6 +406,7 @@ export default function App() {
         onToggle: toggle,
         onEnter: enter,
         onInspect: inspectNode,
+        onArtifact: setArtifact,
       },
       { expandedIds },
     );
@@ -643,6 +644,7 @@ export default function App() {
             onToggle: toggle,
             onEnter: enter,
             onInspect: inspectNode,
+            onArtifact: setArtifact,
           },
           { expandedIds },
         ),

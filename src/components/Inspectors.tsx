@@ -37,6 +37,8 @@ import { ResearchNotes } from "./ResearchMarkdown";
 import { MetricDetails } from "./MetricDetails";
 import { QuestionOriginPanel } from "./QuestionOrigin";
 import { nodePresentation } from "../node-presentation";
+import { nodeEvidence, nodeImages } from "../image-evidence";
+import { EvidenceRow, NodeFigure } from "./EvidenceMedia";
 import { ProjectHostUsage } from "./HostUsage";
 import {
   openResearchNodes,
@@ -243,10 +245,11 @@ export function NodeInspector({
   }, [node]);
   const runs = project.runs.filter((r) => r.nodeId === node.id);
   const presentation = nodePresentation(project, node);
-  const relatedArtifacts = project.artifacts.filter(
-    (a) =>
-      a.nodeId === node.id ||
-      runs.some((r) => r.id === a.runId || r.artifactIds.includes(a.id)),
+  const relatedArtifacts = nodeEvidence(project, node.id);
+  const imageEvidence = nodeImages(
+    project,
+    node.id,
+    isResearchContainer(project.nodes, node),
   );
   const children = project.nodes.filter((n) => n.parentId === node.id);
   const Icon = kindIcon[node.kind] || Box;
@@ -500,6 +503,18 @@ export function NodeInspector({
               </div>
             ) : (
               <>
+                {!!imageEvidence.length && (
+                  <div className="node-image-gallery">
+                    {imageEvidence.map((image) => (
+                      <NodeFigure
+                        key={image.artifact.id}
+                        projectId={project.id}
+                        images={[image]}
+                        onOpen={onArtifact}
+                      />
+                    ))}
+                  </div>
+                )}
                 {presentation.source && (
                   <div className="node-context-note">
                     <strong>{presentation.source}</strong>
@@ -670,20 +685,12 @@ export function NodeInspector({
           <>
             {relatedArtifacts.length ? (
               relatedArtifacts.map((a) => (
-                <button
-                  className="artifact-row"
+                <EvidenceRow
                   key={a.id}
-                  onClick={() => onArtifact(a)}
-                >
-                  <FileText size={17} />
-                  <span>
-                    <strong>{a.title}</strong>
-                    <small>
-                      {a.bytes} bytes · {a.mime}
-                    </small>
-                  </span>
-                  <ArrowUpRight size={13} />
-                </button>
+                  projectId={project.id}
+                  artifact={a}
+                  onOpen={onArtifact}
+                />
               ))
             ) : (
               <div className="small-empty">{t("暂无关联证据")}</div>
