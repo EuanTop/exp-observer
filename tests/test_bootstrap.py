@@ -248,7 +248,19 @@ class BootstrapTests(unittest.TestCase):
         created = self.invoke('init', '--id', 'study', '--name', '移植后实验')
         self.assertFalse(created['pending'], (created,bootstrap.read_json(self.state/('launch-'+str(self.port)+'.json'))))
         receipt = self.invoke('event', '--project', 'study', '--question', '已有结果需要验证吗？', '--finding', '保留真实已有结果')
-        self.assertFalse(receipt['pending'])
+        # Delivery is deliberately nonblocking. A busy Windows runner may queue
+        # the event after startup; prove background delivery without invoking
+        # sync or repeating the research record merely to get a synchronous ACK.
+        deadline = time.monotonic() + 10
+        delivered = None
+        while time.monotonic() < deadline:
+            with urlopen(self.url + '/api/projects/study', timeout=2) as response:
+                delivered = json.load(response)
+            if len(delivered['nodes']) == 2:
+                break
+            time.sleep(.05)
+        self.assertEqual(len(delivered['nodes']), 2, (receipt, delivered))
+        self.assertEqual({node['title'] for node in delivered['nodes']}, {'已有结果需要验证吗？', '保留真实已有结果'})
         launch = self.state/('launch-'+str(self.port)+'.json')
         first = bootstrap.read_json(launch)
         self.assertEqual(first['state'], 'ready')
