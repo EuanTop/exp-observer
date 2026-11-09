@@ -6,6 +6,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from contextlib import closing
 
 from backend.store import CHECKPOINT_INTERVAL, Store, StoreError, canonical
@@ -24,6 +25,27 @@ class SQLiteStorageTests(unittest.TestCase):
 
     def edit(self, operations, **extra):
         return self.store.batch('study', {'operations': operations, **extra})
+
+    def test_evidence_reads_do_not_load_unrelated_experiment_records(self):
+        source = self.root / 'chart.svg'
+        raw = b'<svg xmlns="http://www.w3.org/2000/svg"/>'
+        source.write_bytes(raw)
+        artifact = self.store.register_artifact('study', {'id': 'chart', 'nodeId': 'a', 'path': str(source)})
+        with patch.object(self.store, '_load', side_effect=AssertionError('Evidence must use indexed lookup')):
+            self.assertTrue(self.store.artifact_metadata('study', 'chart')['verified'])
+            self.assertEqual(self.store.artifact_content('study', 'chart')[0], raw)
+            self.assertEqual(self.store.artifact_content('study', 'chart', offset=1, limit=3)[0], raw[1:4])
+            self.assertEqual(self.store.artifact_image('study', 'chart'), (raw, 'image/svg+xml'))
+            for project, key in [('missing', 'chart'), ('study', 'missing')]:
+                with self.assertRaises(StoreError) as raised:
+                    self.store.artifact_content(project, key)
+                self.assertEqual(raised.exception.status, 404)
+            retained = self.store._dir('study') / 'evidence' / Path(artifact['path']).name
+            retained.write_bytes(b'changed')
+            for read in (self.store.artifact_metadata, self.store.artifact_content, self.store.artifact_image):
+                with self.assertRaises(StoreError) as raised:
+                    read('study', 'chart')
+                self.assertEqual(raised.exception.code, 'evidence_changed')
 
     def test_small_edits_store_deltas_and_periodic_checkpoints(self):
         payload = 'UNCHANGED-PAYLOAD-' * 16000

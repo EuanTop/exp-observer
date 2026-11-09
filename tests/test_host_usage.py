@@ -6,13 +6,86 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from backend.host_usage import HappySQLiteAdapter, HostUsageImporter, active_intervals, attribute, cli_projects, iso_time
+from backend.host_usage import CaptureCache, HappySQLiteAdapter, HostUsageImporter, active_intervals, attribute, cli_projects, iso_time
 from backend.recovery import Recovery
 from backend.store import Store, StoreError
 
 
 class HostUsageTests(unittest.TestCase):
+    def test_idle_usage_backs_off_and_new_research_wakes_it_immediately(self):
+        importer = HostUsageImporter(self.store, [], interval=5)
+        clock = [100.0]
+        with patch('backend.host_usage.time.monotonic', side_effect=lambda: clock[0]), \
+                patch.object(self.store, 'get_project', wraps=self.store.get_project) as load:
+            importer.drain_once()
+            self.assertEqual(importer.next_poll, 110)
+            clock[0] = 110
+            importer.drain_once()
+            self.assertEqual(importer.next_poll, 130)
+            clock[0] = 130
+            importer.drain_once()
+            self.assertEqual(importer.next_poll, 160)
+            clock[0] = 132
+            importer.drain_once()
+            self.assertEqual(load.call_count, 1)
+            self.store.batch('study', {'operations': [{'op': 'node.add', 'data': {'id': 'fresh'}}]})
+            importer.drain_once()
+            self.assertEqual(load.call_count, 2)
+            self.assertEqual(importer.next_poll, 142)
+
+    def test_project_snapshot_reused_only_until_revision_changes(self):
+        importer = HostUsageImporter(self.store, [], interval=0)
+        with patch.object(self.store, 'get_project', wraps=self.store.get_project) as load:
+            importer.drain_once()
+            importer.drain_once()
+            self.assertEqual(load.call_count, 1)
+            self.store.batch('study', {'operations': [{'op': 'node.add', 'data': {'id': 'new-node'}}]})
+            importer.drain_once()
+            self.assertEqual(load.call_count, 2)
+            self.assertIn('new-node', {node['id'] for node in importer.projects['study']['nodes']})
+
+    def test_receipt_cache_reuses_json_but_sees_replacement_deletion_and_size_limits(self):
+        path = self.root / 'receipt.json'
+        path.write_text('{"state":"ready"}')
+        cache = CaptureCache(limit=100)
+        read_bytes = Path.read_bytes
+        with patch.object(Path, 'read_bytes', autospec=True, side_effect=read_bytes) as reads:
+            self.assertEqual(cache.read(path)['state'], 'ready')
+            self.assertEqual(cache.read(path)['state'], 'ready')
+            self.assertEqual(reads.call_count, 1)
+            replacement = path.with_suffix('.next')
+            replacement.write_text('{"state":"synced"}')
+            replacement.replace(path)
+            self.assertEqual(cache.read(path)['state'], 'synced')
+            self.assertEqual(reads.call_count, 2)
+        path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            cache.read(path)
+        path.write_text(json.dumps({'projectId': 'x' * 101}))
+        cache.read(path)
+        self.assertEqual(cache.size, 0)
+        path.write_bytes(b'x' * (2 * 1024 * 1024 + 1))
+        with self.assertRaises(ValueError):
+            cache.read(path)
+
+    def test_slow_poll_keeps_full_idle_interval_after_completion(self):
+        importer = HostUsageImporter(None, [], interval=5)
+        clock = [100.0]
+        def scan(outboxes):
+            clock[0] += 30
+            return ['measured']
+        with patch('backend.host_usage.time.monotonic', side_effect=lambda: clock[0]), \
+                patch.object(importer, '_drain_once', side_effect=scan) as poll:
+            self.assertEqual(importer.drain_once(), ['measured'])
+            self.assertEqual(importer.next_poll, 135)
+            clock[0] = 132
+            self.assertEqual(importer.drain_once(), [])
+            self.assertEqual(poll.call_count, 1)
+            clock[0] = 135
+            self.assertEqual(importer.drain_once(), ['measured'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='host usage 研究 ')
         self.addCleanup(self.temp.cleanup)
@@ -343,6 +416,10 @@ class HostUsageTests(unittest.TestCase):
         with self.assertRaises(StoreError):
             self.store.import_usage_records('study', [changed])
         self.assertEqual(self.store.get_project('study'), before)
+
+        with patch.object(self.store, '_load', side_effect=AssertionError('Unchanged usage must not reload the experiment')):
+            self.assertEqual(self.store.import_usage_records('study', before['usageRecords']), {'imported': 0, 'updated': 0})
+            self.assertEqual(self.store.import_usage_records('study', []), {'imported': 0, 'updated': 0})
         self.store.batch('study', {'operations': [{'op': 'project.update', 'data': {'usageRecords': []}}]})
         self.assertEqual(self.store.get_project('study')['usageRecords'], before['usageRecords'])
         with self.assertRaises(StoreError):

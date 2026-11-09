@@ -456,7 +456,11 @@ class Recovery:
             and item[2].get('intent', {}).get('command') == 'execute'))
         groups = defaultdict(list)
         for item in candidates:
-            groups[item[2]['projectId']].append(item)
+            # Running/interrupted captures have no frozen outcome to deliver.
+            # Keep them above for executor liveness and in delivery diagnostics,
+            # but do not refresh a project plan over HTTP on every idle tick.
+            if item[2].get('state') == 'ready':
+                groups[item[2]['projectId']].append(item)
         for project_id, items in groups.items():
             if self.stopped.is_set():
                 break

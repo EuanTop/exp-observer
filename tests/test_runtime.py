@@ -35,6 +35,18 @@ class RuntimeTests(unittest.TestCase):
         with patch.object(self.recovery, '_submit', return_value={'pending': True}):
             self.recovery.drain_once()
 
+    def test_unfinished_capture_does_not_submit_or_refresh_project_until_ready(self):
+        with patch.object(self.recovery, '_submit', return_value={'pending': True}) as submit:
+            self.recovery.drain_once()
+            self.recovery.drain_once()
+            submit.assert_not_called()
+            self.assertEqual(len(self.recovery.runtime_candidates[1]), 1)
+            self.task['state'] = 'ready'
+            self.path.write_text(json.dumps(self.task), encoding='utf-8')
+            self.recovery.drain_once()
+            self.assertEqual(submit.call_count, 1)
+            self.assertEqual(self.recovery.runtime_candidates[1], ())
+
     def test_only_an_existing_held_executor_lock_is_live(self):
         before = set(self.root.rglob('*'))
         self.assertFalse(capture_lock_held(self.path.with_suffix('.lock')))

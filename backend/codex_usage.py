@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 import time
 
-from .host_usage import observer_origin, timestamp, cli_calls
+from .host_usage import observer_origin, timestamp, cli_calls, read_capture
 
 UUID = re.compile(r'^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$')
 FIELDS = {'input_tokens': 'inputTokens', 'output_tokens': 'outputTokens',
@@ -120,9 +120,11 @@ class CodexSessionAdapter:
         self.stream_states = {}
         self.warnings = []
         self.diagnostics = {}
+        self.read_task = read_capture
 
     def captures(self, projects):
         by_id = {p['id']: p for p in projects}
+        node_ids = {p['id']: {n['id'] for n in p['nodes']} for p in projects}
         tasks = {}
         for directory in self.outboxes:
             owner = Path(directory).parent.parent
@@ -130,7 +132,7 @@ class CodexSessionAdapter:
                 try:
                     if path.is_symlink() or path.stat().st_size > 2 * 1024 * 1024:
                         continue
-                    task = json.loads(path.read_text(encoding='utf-8'))
+                    task = self.read_task(path)
                     project = by_id.get(task.get('projectId'))
                     if not project or task.get('state') != 'synced' or task.get('version') != 1:
                         continue
@@ -140,7 +142,7 @@ class CodexSessionAdapter:
                         continue
                     if task.get('intent', {}).get('command') not in ('event', 'record', 'execute'):
                         continue
-                    if task.get('nodeId') not in {n['id'] for n in project['nodes']}:
+                    if task.get('nodeId') not in node_ids[project['id']]:
                         continue
                     timestamp(task.get('capturedAt') or task['startedAt'])
                     tasks[(task['projectId'], task['requestId'], task['nodeId'])] = task
@@ -253,6 +255,11 @@ class CodexSessionAdapter:
                         actual = set(calls.get(call_id, set()))
                         for session_id in polls.get(call_id, []):
                             actual.update(sessions.get(session_id, set()))
+                        # Only outputs of a proven Observer CLI invocation (or
+                        # its known subprocess poll) can supply a receipt. Most
+                        # transcript outputs are unrelated research data.
+                        if not actual:
+                            continue
                         for receipt in json_objects(payload.get('output')):
                             if type(receipt.get('session_id')) is int and actual:
                                 sessions[receipt['session_id']] = actual

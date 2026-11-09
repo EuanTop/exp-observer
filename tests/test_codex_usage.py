@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from backend.codex_usage import CodexSessionAdapter, recorded_cli_projects
+from backend.codex_usage import CodexSessionAdapter, json_objects, recorded_cli_projects
 from backend.host_usage import observer_origin
 
 SID = '11111111-2222-3333-4444-555555555555'
@@ -53,6 +53,17 @@ class CodexUsageTests(unittest.TestCase):
     def read(self):
         self.path.write_text(''.join(json.dumps(e)+'\n' for e in self.events))
         return self.adapter.read(self.projects)
+
+    def test_unrelated_tool_output_is_not_decoded_as_recording_receipts(self):
+        receipt = self.capture()
+        self.tokens()
+        self.emit('response_item', {'type': 'function_call_output', 'call_id': 'unrelated',
+                                   'output': json.dumps(receipt)}, 5)
+        with patch('backend.codex_usage.json_objects', wraps=json_objects) as decode:
+            self.assertEqual(self.read(), {})
+            decode.assert_not_called()
+        self.call(receipt, seconds=6)
+        self.assertEqual(self.read()['study'][0]['inputTokens'], 100)
 
     def test_long_lived_thread_is_found_by_hint_outside_capture_dates(self):
         receipt = self.capture()
