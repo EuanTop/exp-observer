@@ -182,25 +182,25 @@ class Handler(BaseHTTPRequestHandler):
                 if method == 'POST':
                     return self._send(work_sessions.update(store, project_id, self._body()))
             if tail == ['usage-status'] and method == 'GET':
-                store.get_project(project_id)
+                store.require_project(project_id)
                 recovery = self.server.recovery
                 importer = recovery.host_usage if recovery is not None else None
                 return self._send(importer.status(project_id) if importer is not None else {
                     'projectId': project_id, 'adapters': [], 'available': False})
             if tail == ['runtime'] and method == 'GET':
-                store.get_project(project_id)
+                store.require_project(project_id)
                 recovery = self.server.recovery
                 return self._send(recovery.runtime(project_id) if recovery is not None else {
                     'projectId': project_id, 'checkedAt': now(), 'source': 'unavailable', 'active': []})
             if tail == ['delivery-status'] and method == 'GET':
-                store.get_project(project_id)
+                store.require_project(project_id)
                 recovery = self.server.recovery
                 return self._send(recovery.delivery_status(project_id) if recovery is not None else {
                     'projectId': project_id, 'available': False, 'checkedAt': now(), 'state': 'unknown',
                     'scope': 'connected-workspaces', 'discoveryComplete': False, 'pendingCount': 0,
                     'blockedCount': 0, 'interruptedCount': 0, 'syncedCount': 0, 'items': []})
             if tail == ['delivery', 'retry'] and method == 'POST':
-                store.get_project(project_id)
+                store.require_project(project_id)
                 body = self._body() if self.headers.get('Content-Length', '0') != '0' else {}
                 if not isinstance(body, dict) or set(body) - {'taskId'} or ('taskId' in body and
                         (not isinstance(body['taskId'], str) or not body['taskId'])):

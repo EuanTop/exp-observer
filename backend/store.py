@@ -416,6 +416,12 @@ class Store:
             return [dict(row) for row in db.execute('SELECT id, name, description, revision, updated_at AS updatedAt, '
                                                     'node_count AS nodeCount FROM projects ORDER BY updated_at DESC, id')]
 
+    def require_project(self, project_id):
+        """Validate polling targets without loading research collections."""
+        with self._transaction() as db:
+            if not db.execute('SELECT 1 FROM projects WHERE id = ?', (valid_id(project_id),)).fetchone():
+                raise StoreError('Experiment not found.', 'not_found', 404)
+
     def get_project(self, project_id):
         with self._transaction() as db:
             project = self._load(db, project_id)
@@ -484,6 +490,16 @@ class Store:
         if not isinstance(records, list):
             raise StoreError('Usage records must be an array.')
         with self._transaction(write=True) as db:
+            if not db.execute('SELECT 1 FROM projects WHERE id = ?', (valid_id(project_id),)).fetchone():
+                raise StoreError('Experiment not found.', 'not_found', 404)
+            existing = [json.loads(row['document']) for row in db.execute(
+                "SELECT document FROM records WHERE project_id = ? AND collection = 'usageRecords'", (project_id,))]
+            by_source = {(row['source'], row['sourceRef']): row for row in existing}
+            if all(isinstance(row, dict) and isinstance(row.get('source'), str) and isinstance(row.get('sourceRef'), str)
+                   and by_source.get((row['source'], row['sourceRef'])) == row for row in records):
+                # Most polls replay unchanged measured responses. Check them in
+                # the same transaction, without deserializing/copying all runs.
+                return {'imported': 0, 'updated': 0}
             previous = self._load(db, project_id)
             p = copy.deepcopy(previous)
             current = p.setdefault('usageRecords', [])
@@ -1071,10 +1087,22 @@ class Store:
         if sha256 != artifact.get('sha256') or size != artifact.get('bytes'):
             raise StoreError('Evidence content changed after registration.', 'evidence_changed', 409)
 
+    def _artifact_record(self, db, project_id, artifact_id):
+        # Evidence reads need project path policy and one artifact, not every
+        # run, usage record and research note in the experiment. The primary
+        # key makes this independent of the size of the remaining collections.
+        row = db.execute('SELECT document FROM projects WHERE id = ?', (valid_id(project_id),)).fetchone()
+        if row is None:
+            raise StoreError('Project not found.', 'not_found', 404)
+        entry = db.execute("SELECT document FROM records WHERE project_id = ? AND collection = 'artifacts' AND record_id = ?",
+                           (project_id, artifact_id)).fetchone()
+        if entry is None:
+            raise StoreError('Record not found.', 'not_found', 404)
+        return json.loads(row['document']), json.loads(entry['document'])
+
     def artifact_metadata(self, project_id, artifact_id):
         with self._transaction() as db:
-            p = self._load(db, project_id)
-            artifact = self._find(p, 'artifacts', artifact_id)
+            p, artifact = self._artifact_record(db, project_id, artifact_id)
             path = self._artifact_location(project_id, p, artifact)
             try:
                 with path.open('rb') as stream:
@@ -1091,8 +1119,7 @@ class Store:
             if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 1024 * 1024:
                 raise StoreError('Preview offset must be nonnegative and limit must be 1–1048576 bytes.', 'invalid_preview_range')
         with self._transaction() as db:
-            p = self._load(db, project_id)
-            artifact = self._find(p, 'artifacts', artifact_id)
+            p, artifact = self._artifact_record(db, project_id, artifact_id)
             path = self._artifact_location(project_id, p, artifact)
             try:
                 with path.open('rb') as stream:
@@ -1106,8 +1133,7 @@ class Store:
     def artifact_image(self, project_id, artifact_id):
         from .artifact_images import MAX_IMAGE_BYTES, image_mime
         with self._transaction() as db:
-            p = self._load(db, project_id)
-            artifact = self._find(p, 'artifacts', artifact_id)
+            p, artifact = self._artifact_record(db, project_id, artifact_id)
             mime = image_mime(artifact.get('mime'))
             if mime is None:
                 raise StoreError('This evidence does not have a supported image format.', 'unsupported_image', 415)

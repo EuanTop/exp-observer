@@ -494,7 +494,10 @@ class HTTPAndCLITests(unittest.TestCase):
 
     def test_collection_status_is_read_only_and_reports_disabled_recovery(self):
         before = self.store.get_project('study')
-        status = self.request('/api/projects/study/usage-status')
+        with patch.object(self.store, '_load', side_effect=AssertionError('Polling must not load the full experiment')):
+            status = self.request('/api/projects/study/usage-status')
+            for route in ('runtime', 'focus', 'delivery-status'):
+                self.assertEqual(self.request('/api/projects/study/' + route)['projectId'], 'study')
         self.assertEqual(status, {'projectId':'study','adapters':[],'available':False})
         self.assertEqual(self.store.get_project('study'), before)
         with self.assertRaises(HTTPError) as error:

@@ -6,7 +6,7 @@ provider context, or environment values are read here.
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
@@ -20,6 +20,48 @@ import time
 from urllib.parse import urlsplit
 
 from .store import StoreError
+
+
+def read_capture(path):
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
+class CaptureCache:
+    """Cache usage-relevant receipt fields, not stdout, metrics or note bodies."""
+    def __init__(self, limit=32 * 1024 * 1024):
+        self.limit = limit
+        self.size = 0
+        self.entries = OrderedDict()
+
+    def read(self, path):
+        info = path.stat()
+        signature = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if info.st_size > 2 * 1024 * 1024:
+            raise ValueError('Capture receipt exceeds the size limit.')
+        cached = self.entries.get(path)
+        if cached is not None and cached[0] == signature:
+            self.entries.move_to_end(path)
+            return cached[1]
+        raw = path.read_bytes()
+        if len(raw) > 2 * 1024 * 1024:
+            raise ValueError('Capture receipt exceeds the size limit.')
+        task = json.loads(raw)
+        if not isinstance(task, dict):
+            raise ValueError('Capture receipt must be an object.')
+        task = {key: task[key] for key in ('version', 'state', 'projectId', 'nodeId', 'requestId', 'url',
+                'capturedAt', 'startedAt', 'finishedAt', 'kind', 'captureRoot', 'hostUsage', 'intent', 'operations') if key in task}
+        if isinstance(task.get('operations'), list):
+            task['operations'] = [
+                {'op': op.get('op'), 'data': {key: op['data'][key] for key in ('id', 'status') if key in op['data']}}
+                for op in task['operations'] if isinstance(op, dict) and isinstance(op.get('data'), dict)]
+        size = len(json.dumps(task, ensure_ascii=False).encode('utf-8'))
+        if cached is not None:
+            self.size -= self.entries.pop(path)[2]
+        self.entries[path] = signature, task, size
+        self.size += size
+        while self.size > self.limit or len(self.entries) > 16384:
+            self.size -= self.entries.popitem(last=False)[1][2]
+        return task
 
 
 def iso_time(milliseconds):
@@ -208,7 +250,7 @@ def observer_origin(url):
         return None
 
 
-def native_outbox_roots(projects, outboxes, connected, url):
+def native_outbox_roots(projects, outboxes, connected, url, *, read_task=read_capture):
     """A synced native capture can prove a text-only project's source owner.
 
     This evidence is local to the current observer and its enrolled workspace;
@@ -219,6 +261,7 @@ def native_outbox_roots(projects, outboxes, connected, url):
     if origin is None:
         return result
     by_id = {project['id']: project for project in projects}
+    node_ids = {project['id']: {node['id'] for node in project['nodes']} for project in projects}
     for supplied in outboxes:
         outbox = Path(supplied)
         owner = outbox.parent.parent
@@ -231,10 +274,12 @@ def native_outbox_roots(projects, outboxes, connected, url):
                 try:
                     if path.is_symlink() or path.stat().st_size > 2 * 1024 * 1024:
                         continue
-                    task = json.loads(path.read_text(encoding='utf-8'))
+                    task = read_task(path)
                     project = by_id.get(task.get('projectId'))
                     if project is None or type(task.get('version')) is not int or task['version'] != 1 or task.get('state') != 'synced':
                         continue
+                    if str(owner) in result[project['id']]:
+                        continue  # One valid receipt already proves this owner.
                     if observer_origin(task.get('url')) != origin or task.get('intent', {}).get('command') not in ('record', 'execute', 'event'):
                         continue
                     expected = owner / '.exp-observer-runs' / project['id']
@@ -243,7 +288,7 @@ def native_outbox_roots(projects, outboxes, connected, url):
                         continue
                     aliases = project.get('nodeAliases', {})
                     node_id = aliases.get(task.get('nodeId'), task.get('nodeId'))
-                    if node_id not in {node['id'] for node in project['nodes']}:
+                    if node_id not in node_ids[project['id']]:
                         continue
                     if not any(op.get('op') in ('node.add', 'node.update', 'node.ensure') and
                                aliases.get(op.get('data', {}).get('id'), op.get('data', {}).get('id')) == node_id
@@ -257,7 +302,7 @@ def native_outbox_roots(projects, outboxes, connected, url):
     return result
 
 
-def active_intervals(project, outboxes, url=None):
+def active_intervals(project, outboxes, url=None, *, read_task=read_capture):
     """Use frozen capture times, never delayed server-application timestamps."""
     expected_origin = observer_origin(url)
     if expected_origin is None:
@@ -276,7 +321,7 @@ def active_intervals(project, outboxes, url=None):
         for path in outbox.glob('*.json'):
             if path.is_symlink() or path.stat().st_size > 2 * 1024 * 1024:
                 continue
-            task = json.loads(path.read_text(encoding='utf-8'))
+            task = read_task(path)
             if task.get('version') != 1 or task.get('projectId') != project['id'] or task.get('kind') == 'project' or task.get('state') not in ('ready', 'synced'):
                 continue
             if observer_origin(task.get('url')) != expected_origin:
@@ -350,6 +395,13 @@ class HostUsageImporter:
         self.interval = interval
         self.url = url
         self.next_poll = 0
+        self.receipts = CaptureCache()
+        self.projects = {}
+        self.observed_revisions = None
+        self.idle_polls = 0
+        for adapter in self.adapters:
+            if hasattr(adapter, 'read_task'):
+                adapter.read_task = self.receipts.read
 
     def status(self, project_id):
         return {'projectId': project_id, 'adapters': [dict(adapter.diagnostics[project_id])
@@ -357,13 +409,42 @@ class HostUsageImporter:
 
     def drain_once(self, outboxes=()):
         if time.monotonic() < self.next_poll:
-            return []
+            if self.store is None or self._revisions() == self.observed_revisions:
+                return []
+            # New research is delivered by recovery on its ordinary two-second
+            # loop; it wakes usage collection without waiting out idle backoff.
+            self.idle_polls = 0
+        try:
+            result = self._drain_once(outboxes)
+            changed = any(not isinstance(item, dict) or item.get('imported') or item.get('updated') for item in result)
+            self.idle_polls = 0 if changed else min(self.idle_polls + 1, 3)
+            if self.store is not None:
+                self.observed_revisions = self._revisions()
+            return result
+        finally:
+            # A slow initial scan must not consume the idle interval and
+            # immediately start another full scan on the next recovery tick.
+            delay = min(self.interval * 2 ** self.idle_polls, max(self.interval, 30))
+            self.next_poll = time.monotonic() + delay
+
+    def _revisions(self):
+        return tuple(sorted((p['id'], p['revision'], p['updatedAt']) for p in self.store.list_projects()))
+
+    def _drain_once(self, outboxes):
         self.next_poll = time.monotonic() + self.interval
-        projects = [self.store.get_project(p['id']) for p in self.store.list_projects()]
+        descriptors = self.store.list_projects()
+        current = {}
+        for descriptor in descriptors:
+            cached = self.projects.get(descriptor['id'])
+            if cached is None or (cached['revision'], cached['updatedAt']) != (descriptor['revision'], descriptor['updatedAt']):
+                cached = self.store.get_project(descriptor['id'])
+            current[descriptor['id']] = cached
+        self.projects = current
+        projects = list(current.values())
         if not projects:
             return []
         connected = [Path(w['path']) for w in self.store.list_workspaces()]
-        native_roots = native_outbox_roots(projects, outboxes, connected, self.url)
+        native_roots = native_outbox_roots(projects, outboxes, connected, self.url, read_task=self.receipts.read)
         for project in projects:
             roots = sorted(native_roots[project['id']])
             for supplied in project.get('sourceRoots', []):
@@ -398,7 +479,7 @@ class HostUsageImporter:
                         measured = records[project['id']]
                     else:
                         try:
-                            intervals = active_intervals(project, outboxes, self.url)
+                            intervals = active_intervals(project, outboxes, self.url, read_task=self.receipts.read)
                         except (OSError, ValueError, KeyError, TypeError, AttributeError):
                             intervals = []
                             results.append({'projectId': project['id'], 'source': adapter.source, 'pending': True,
